@@ -1,0 +1,731 @@
+@import "tailwindcss";
+@import "tailwindcss-safe-area";
+
+@theme {
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 28px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
+  --text-4xl: 36px;
+  --text-4xl--line-height: 40px;
+  --text-5xl: 48px;
+  --text-5xl--line-height: 52px;
+}
+
+/* Anthony prefers dark themes: the binder is a dark album in both modes.
+   Palette (Nov 2, 2026, restyled later the same day): at Anthony's request
+   the binder now follows the Shiny PRO app's look from his screenshot —
+   a deep blue-black background with a subtle starfield/nebula texture, a
+   bright periwinkle/cornflower blue accent for numbers, links, and
+   highlights, clean dark navy cards, and green/red gain-loss figures.
+   The --gold variable names are kept for compatibility; their values are
+   now periwinkle blue, not gold. Foil shimmer and ghosted missing-card
+   treatments are unchanged. */
+:root {
+  color-scheme: dark;
+  --bg: #060913;
+  --surface: #0e1526;
+  --text: #eef2ff;
+  --dim: #8b9bb8;
+  --border: #1e2b4a;
+  --accent: #6c7cff;
+  --on-accent: #ffffff;
+  --radius: 12px;
+  --pocket: #0a1120;
+  --pocket-edge: #24365e;
+  --gold: #6c7cff;
+  --gold-soft: #a9c3ff;
+  --ghost: #8fa3c8;
+  --space-surface: var(--surface);
+  --space-surface-alt: var(--surface);
+  --space-muted: var(--dim);
+  --space-border: var(--border);
+  --space-accent: var(--accent);
+}
+
+/* User-picked themes (Settings > Theme, Nov 2, 2026): each block
+   re-points the same variables at a different palette; the picker
+   sets data-theme on <html> and the choice persists on the user's
+   profile. Vault Dark (above, the :root default) stays the default
+   and Anthony's theme. The accent drives links, highlights, and the
+   bottom menu's selected-tab pill in every theme. */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #edf0f8;
+  --surface: #ffffff;
+  --text: #131a30;
+  --dim: #5a688a;
+  --border: #c9d3ec;
+  --accent: #6c7cff;
+  --on-accent: #ffffff;
+  --pocket: #e4eaf8;
+  --pocket-edge: #bcc9ea;
+  --gold: #6c7cff;
+  --gold-soft: #3f4ec2;
+  --ghost: #8494b8;
+}
+
+:root[data-theme="light"] .app-shell {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(108, 124, 255, 0.1), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(150, 110, 255, 0.07), transparent 65%);
+}
+
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg: #0b0516;
+  --surface: #180c2c;
+  --text: #f2ecff;
+  --dim: #a68fd0;
+  --border: #38215f;
+  --accent: #a78bfa;
+  --on-accent: #ffffff;
+  --pocket: #110722;
+  --pocket-edge: #472a78;
+  --gold: #a78bfa;
+  --gold-soft: #cdbcf7;
+  --ghost: #9d8ac4;
+}
+
+:root[data-theme="midnight"] .app-shell {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(150, 110, 255, 0.18), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(108, 80, 255, 0.12), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 255, 255, 0.35) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(220, 205, 255, 0.5) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 255, 255, 0.28) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 255, 255, 0.4) 50%, transparent 52%);
+}
+
+:root[data-theme="crimson"] {
+  color-scheme: dark;
+  --bg: #090505;
+  --surface: #1c0f0b;
+  --text: #fdf0e9;
+  --dim: #bd9787;
+  --border: #4a2a1f;
+  --accent: #ff6b4a;
+  --on-accent: #ffffff;
+  --pocket: #140a07;
+  --pocket-edge: #5e3524;
+  --gold: #ff6b4a;
+  --gold-soft: #ffb59d;
+  --ghost: #b08d80;
+}
+
+:root[data-theme="crimson"] .app-shell {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(255, 107, 74, 0.12), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(255, 60, 40, 0.07), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 235, 225, 0.45) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 235, 225, 0.3) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(255, 205, 185, 0.42) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 235, 225, 0.24) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 235, 225, 0.34) 50%, transparent 52%);
+}
+
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #000000;
+  --text: #ffffff;
+  --dim: #e6e6e6;
+  --border: #9a9a9a;
+  --accent: #ffd60a;
+  --on-accent: #000000;
+  --pocket: #000000;
+  --pocket-edge: #ffffff;
+  --gold: #ffd60a;
+  --gold-soft: #ffe45e;
+  --ghost: #cfcfcf;
+}
+
+:root[data-theme="contrast"] .app-shell {
+  background-image: none;
+}
+
+body {
+  background-color: var(--bg);
+}
+
+/* Settings quick-jump targets land with a little breathing room
+   above the section instead of flush against the top edge. */
+section[id^="settings-"] {
+  scroll-margin-top: 14px;
+}
+
+/* Deep blue-black shell with a subtle starfield and soft nebula washes,
+   echoing the Shiny PRO screenshot Anthony sent. Purely decorative
+   background layers over --bg; content surfaces stay solid. */
+.app-shell {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(96, 130, 255, 0.16), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(150, 110, 255, 0.08), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 255, 255, 0.35) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(190, 205, 255, 0.5) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 255, 255, 0.28) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 255, 255, 0.4) 50%, transparent 52%);
+  background-size:
+    auto,
+    auto,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px;
+  background-attachment: fixed;
+}
+
+/* Headings and display numbers use a clean bold sans, matching the
+   reference app's look (class name kept from the earlier serif theme). */
+.font-album {
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Missing cards: the card's ACTUAL artwork, ghosted — washed out, brightened,
+   mostly desaturated, and translucent, so the real art still reads through. */
+.ghost-img {
+  filter: saturate(0.18) brightness(1.3) contrast(0.88) opacity(0.45);
+}
+
+/* Ghosted sealed items inside the acrylic case (Anthony, Nov 3,
+   2026): the case's own img rule sets a drop-shadow filter, which
+   silently overrode the ghost filter above — not-owned products
+   on the Sealed shelf rendered almost full-bright instead of
+   ghostly like the binder cards. This rule wins over both and
+   applies the exact binder ghost treatment, drop shadow kept. */
+.acrylic-case img.ghost-img {
+  filter:
+    saturate(0.18) brightness(1.3) contrast(0.88) opacity(0.45)
+    drop-shadow(0 12px 14px rgba(0, 0, 0, 0.55));
+}
+
+.pocket-sheen {
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 42%),
+    var(--pocket);
+}
+
+/* Foil treatment for owned foil pockets: an iridescent rainbow sheen over
+   the real artwork so foil copies visibly read as foil next to regular
+   copies. Missing cards never get this — the ghost treatment wins. */
+.foil-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* De-clouded (Anthony, Nov 2, 2026): the old overlay stacked a
+     constant white wash over the whole card plus rainbow stops at
+     ~0.3 alpha in screen blend, which fogged the art milky. The
+     white wash layer is gone and the rainbow sits at roughly half
+     strength, so the holographic color reads while the artwork
+     underneath stays crisp and clear. */
+  background: linear-gradient(125deg, rgba(255, 70, 130, 0.17) 0%, rgba(255, 120, 40, 0.15) 14%, rgba(255, 205, 40, 0.16) 28%, rgba(70, 235, 140, 0.16) 44%, rgba(60, 200, 255, 0.16) 60%, rgba(120, 110, 255, 0.16) 76%, rgba(255, 90, 230, 0.16) 92%, rgba(255, 70, 130, 0.15) 100%);
+  mix-blend-mode: screen;
+}
+
+.foil-img {
+  filter: saturate(1.32);
+}
+
+/* Animated shine sweep: runs on the large card view AND on owned foil
+   pockets in the main grid (Anthony asked for the shimmer on the main
+   four-across binder view, and faster). The sweep is transform-only, so it
+   stays on the compositor; grid pockets only mount their band once they
+   near the viewport, and each pocket's phase is staggered inline so the
+   page doesn't pulse in unison. */
+.foil-shine-band {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 90, 150, 0) 0%,
+    rgba(255, 90, 150, 0.15) 18%,
+    rgba(255, 210, 70, 0.19) 36%,
+    rgba(120, 255, 200, 0.21) 50%,
+    rgba(110, 180, 255, 0.19) 64%,
+    rgba(200, 130, 255, 0.15) 82%,
+    rgba(200, 130, 255, 0) 100%
+  );
+  transform: translateX(-140%) skewX(-16deg);
+  animation: foil-shine 2.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Grid-pocket variant: a touch narrower and softer than the hero band. */
+.foil-shine-band-grid {
+  width: 38%;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 90, 150, 0) 0%,
+    rgba(255, 90, 150, 0.13) 18%,
+    rgba(255, 210, 70, 0.16) 36%,
+    rgba(120, 255, 200, 0.18) 50%,
+    rgba(110, 180, 255, 0.16) 64%,
+    rgba(200, 130, 255, 0.13) 82%,
+    rgba(200, 130, 255, 0) 100%
+  );
+}
+
+@keyframes foil-shine {
+  0%, 38% {
+    transform: translateX(-140%) skewX(-16deg);
+  }
+  72%, 100% {
+    transform: translateX(320%) skewX(-16deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foil-shine-band {
+    animation: none;
+  }
+}
+
+/* Card detail turntable (Anthony's Courtyard-style reference photo,
+   Nov 2, 2026): when he hones in on a card, it hovers cleanly above
+   a soft oval pedestal and slowly turns side to side, with a light
+   glare travelling across it as it turns — the way a graded slab
+   floats and rotates over its white base in the photo, adapted to
+   the app's dark theme. Pure CSS 3D transforms on the one hero card:
+   no video, no extra images, nothing added to the art cache, and the
+   turn is a gentle sway (never a full spin) so the real artwork
+   always stays readable and never mirrors. Dragging sideways takes
+   over the turn until release. */
+.card-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  perspective: 1100px;
+  padding-top: 10px;
+  touch-action: pan-y;
+  cursor: grab;
+  outline: none;
+}
+
+.card-stage:active {
+  cursor: grabbing;
+}
+
+.card-stage:focus-visible {
+  border-radius: 16px;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.card-float {
+  animation: card-bob 6.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.card-turn {
+  animation: card-sway 9s ease-in-out infinite;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.card-turn.is-drag {
+  animation: none;
+}
+
+/* The oval base the card hovers over: a lit disc with the card's
+   shadow pooled on it, breathing in time with the bob — the shadow
+   tightens and deepens as the card sinks, softens as it lifts. */
+.card-pedestal {
+  width: 250px;
+  max-width: 72%;
+  height: 34px;
+  margin-top: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      ellipse 58% 62% at 50% 46%,
+      rgba(0, 0, 0, 0.6) 0%,
+      rgba(0, 0, 0, 0.28) 52%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse at 50% 30%,
+      rgba(216, 230, 255, 0.3) 0%,
+      rgba(148, 172, 224, 0.13) 46%,
+      rgba(148, 172, 224, 0) 72%
+    );
+  box-shadow: 0 20px 30px rgba(0, 0, 0, 0.45);
+  animation: pedestal-breathe 6.5s ease-in-out infinite;
+}
+
+/* Light catching the card's face as it turns: a soft diagonal glare
+   that drifts across in step with the sway. */
+.card-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 32%,
+    rgba(255, 255, 255, 0.17) 48%,
+    rgba(255, 255, 255, 0.04) 56%,
+    transparent 70%
+  );
+  background-size: 260% 100%;
+  background-position: 92% 0;
+  animation: card-glare-move 9s ease-in-out infinite;
+}
+
+@keyframes card-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+@keyframes card-sway {
+  0%,
+  100% {
+    transform: rotateX(5deg) rotateY(-17deg);
+  }
+  50% {
+    transform: rotateX(5deg) rotateY(17deg);
+  }
+}
+
+@keyframes pedestal-breathe {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scaleX(0.93);
+    opacity: 0.65;
+  }
+}
+
+@keyframes card-glare-move {
+  0%,
+  100% {
+    background-position: 92% 0;
+  }
+  50% {
+    background-position: 8% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-float,
+  .card-turn,
+  .card-pedestal,
+  .card-glare {
+    animation: none;
+  }
+}
+
+/* Acrylic display case for the Sealed shelf: the product photos are
+   transparent cut-outs that float over the app's dark background —
+   no backdrop box behind them. The case itself is just a clear
+   glossy frame: a faint blue glow where the shelf light catches, a
+   thin glass edge, and the diagonal sheen; the product carries a
+   soft drop shadow so it hovers inside the case. */
+.acrylic-case {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background:
+    /* Light streaks running down the case's thick left and right
+       walls — the bright vertical lines a real acrylic case catches
+       along its polished edges. */
+    linear-gradient(
+      90deg,
+      rgba(210, 228, 255, 0.13) 0%,
+      rgba(210, 228, 255, 0.03) 3.5%,
+      transparent 7%,
+      transparent 93%,
+      rgba(210, 228, 255, 0.03) 96.5%,
+      rgba(210, 228, 255, 0.13) 100%
+    ),
+    radial-gradient(
+      ellipse 82% 62% at 50% 42%,
+      rgba(110, 155, 255, 0.16),
+      transparent 70%
+    );
+  /* Thick polished case walls (refined Nov 2, 2026): a bright outer
+     rim, a recessed bevel line a few px in, a second inner rim where
+     the front face meets the case depth, soft blue light inside, and
+     a deeper shadow pooling at the base — so the frame reads as a
+     heavy crystal-clear acrylic case, not a thin outline. */
+  box-shadow:
+    inset 0 0 0 2px rgba(235, 244, 255, 0.42),
+    inset 0 0 0 4px rgba(10, 16, 30, 0.35),
+    inset 0 0 0 6px rgba(200, 222, 255, 0.14),
+    inset 0 0 0 9px rgba(160, 190, 240, 0.05),
+    inset 0 0 0 10.5px rgba(255, 255, 255, 0.1),
+    inset 0 0 34px rgba(140, 175, 255, 0.09),
+    inset 0 -26px 34px rgba(0, 0, 0, 0.42),
+    inset 0 14px 22px rgba(190, 215, 255, 0.05);
+}
+
+/* Top glass reflection: a soft bright band where the shelf light
+   catches the case's top face, plus a brighter catch along the very
+   top edge. */
+.acrylic-case::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.32) 0%,
+    rgba(255, 255, 255, 0.16) 3%,
+    rgba(255, 255, 255, 0.05) 13%,
+    rgba(255, 255, 255, 0) 28%
+  );
+}
+
+.acrylic-case img {
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.55));
+}
+
+.acrylic-case::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.62) 0%,
+    rgba(255, 255, 255, 0.2) 20%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(190, 215, 255, 0.1) 82%,
+    rgba(255, 255, 255, 0.3) 97%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+}
+
+/* The small black stand the case sits in, from Anthony's reference
+   photo (a single pack upright in a clear acrylic case on a black
+   stand): a low trapezoid base centered under the product, its top
+   edge catching a line of light where it grips the case. The product
+   image leaves room for it (extra bottom padding on the tile img). */
+.acrylic-stand {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  width: 46%;
+  height: 11px;
+  background: linear-gradient(
+    180deg,
+    #4a5468 0%,
+    #1a1f2a 34%,
+    #05060a 100%
+  );
+  clip-path: polygon(3% 0, 97% 0, 100% 100%, 0 100%);
+  box-shadow:
+    0 1px 0 rgba(220, 235, 255, 0.22),
+    0 5px 9px rgba(0, 0, 0, 0.7);
+}
+
+/* "Coming soon" stamp (Anthony, Nov 2, 2026, late): bright yellow
+   bubbly lettering for the held Marketplace and Forums areas —
+   a rounded, chunky face with a soft dark outline and a warm
+   glow, rotated diagonally down toward the right by the elements
+   that use it. The areas stay visible underneath (the overlays
+   are translucent); this is only the lettering. */
+.bubbly-soon {
+  font-family:
+    ui-rounded, "Arial Rounded MT Bold", "Helvetica Rounded",
+    ui-sans-serif, system-ui, sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  color: #ffd21f;
+  -webkit-text-stroke: 1.5px rgba(122, 82, 0, 0.55);
+  text-shadow:
+    0 3px 0 rgba(122, 82, 0, 0.45),
+    0 6px 18px rgba(0, 0, 0, 0.55),
+    0 0 26px rgba(255, 210, 31, 0.35);
+}
+
+/* Floating search overlay entrance: the panel illuminates out over
+   the current view — a soft fade with a small rise and settle.
+   Slowed and smoothed (Anthony, Nov 3, 2026, ~10:03 AM: the old
+   180ms pop felt sharp, like a cut). */
+.search-pop {
+  animation: search-pop 0.62s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes search-pop {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-pop {
+    animation: none;
+  }
+}
+
+/* Page-to-page tab transitions (Anthony, Nov 3, 2026, ~3:13 AM,
+   reworked ~10:03 AM): when moving between bottom-menu tabs —
+   by swipe OR by tapping the bar — the incoming tab slides in
+   from the direction of travel (from the right when moving to
+   the next tab, from the left when moving back) and crossfades
+   in as it settles. Anthony's on-device verdict on the first
+   version: 240ms ease-out over 44px still felt too sharp and
+   too fast, like a cut. This version is deliberately slower
+   and softer: 480ms on a gentle ease-out curve (fast at the
+   very start, long soft landing), a longer 72px travel, and a
+   full fade from transparent so the two pages blend instead
+   of snapping. Returning from Search (no direction of travel)
+   uses the plain fade. Reduced-motion still disables it.
+   Third pass (~10:15 AM, same day): Anthony confirmed the
+   Home→Search bleed-through is FIXED and the smoothness is
+   "definitely improving" — and directed it be improved EVEN
+   MORE. The slides now run 680ms on a softer symmetric-feel
+   ease (slow in, long glide, feathered landing) with an 84px
+   travel and a deeper fade, and the plain fade runs 560ms
+   from 25% opacity, so page changes read as one continuous
+   drift rather than a quick slide. */
+.tab-slide-next {
+  animation: tab-slide-next 0.68s cubic-bezier(0.25, 0.9, 0.3, 1);
+}
+
+.tab-slide-prev {
+  animation: tab-slide-prev 0.68s cubic-bezier(0.25, 0.9, 0.3, 1);
+}
+
+.tab-fade {
+  animation: tab-fade 0.56s cubic-bezier(0.25, 0.9, 0.3, 1);
+}
+
+@keyframes tab-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(84px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tab-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-84px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tab-fade {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The Library's floating peek window (Anthony, Nov 3, 2026,
+   ~10:18 AM): tapping a spine pops a small window in beside
+   the tap — seemingly from out of nowhere — instead of the
+   old info panel pinned to the bottom of the screen. A quick
+   scale-up fade, like something materializing. */
+.library-pop {
+  animation: library-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes library-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-pop {
+    animation: none;
+  }
+}
+
+/* The floating up/down scroll arrows (Anthony, Nov 3, 2026,
+   ~10:16 AM): they showed in the right places but still read
+   as SOLID buttons — he directed them TRANSLUCENT. The fill
+   is now a true see-through mix of the surface color at 18%
+   over a strong backdrop blur, so page content visibly
+   ghosts through them as they float. */
+.scroll-arrow-btn {
+  background: color-mix(in srgb, var(--surface) 18%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-slide-next,
+  .tab-slide-prev,
+  .tab-fade {
+    animation: none;
+  }
+}
+
+/* Welcome page intro (Anthony, Nov 3, 2026): the "Welcome to
+   Vault X" branding starts blurry and pulls into focus as the
+   page opens — a dramatic blur-to-sharp reveal before the
+   registration step. */
+.welcome-reveal {
+  animation: welcome-reveal 1.5s ease-out both;
+}
+
+@keyframes welcome-reveal {
+  from {
+    filter: blur(18px);
+    opacity: 0.35;
+    transform: scale(1.05);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-reveal {
+    animation: none;
+  }
+}

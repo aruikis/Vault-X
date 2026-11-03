@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Runtime data — NEVER commit (contains the owner's private collection data)
+app.db
+app.db-shm
+app.db-wal
+app.db*
+blobs/
+audits/
+space_data/
+
+# Secrets / environment
+.env
+.env.*
+
+# Build outputs
+dist/
+dist-cvm/
+
+# Artifact build/runtime internals
+.space-build/
+.space-build-cvm/
+.harness/
+.bun-cache/
+.xmds-icon
+
+# Misc
+*.log
+.DS_Store
