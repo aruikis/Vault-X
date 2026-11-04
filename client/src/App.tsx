@@ -1,11 +1,9 @@
 import {
-useEffect,
-useLayoutEffect,
-useMemo,
+useEffect, useMemo,
 useRef,
 useState,
 type ReactNode,
-type TouchEvent as ReactTouchEvent,
+type TouchEvent as ReactTouchEvent
 } from "react";
 import {
 useMutation,
@@ -46,10 +44,14 @@ type ExportRow,
 } from "./exportCollection";
 import {
 getArtBlobForIndex,
+getArtworkPending,
+getSessionArtDownload,
 pruneOldArtCaches,
+readArtDownloadChoice,
 startArtworkWarmup,
 useArtCacheProgress,
 useCachedArt,
+writeArtDownloadChoice,
 } from "./artCache";
 import {
 countIndexedIds,
@@ -63,13 +65,26 @@ import { APP_NAME, APP_VERSION, CHANGELOG } from "./version";
 import { Turntable } from "./turntable";
 import { OwnedLocationBar } from "./whereItLives";
 import { PriceAlertBox } from "./priceAlerts";
+import { PortfolioTools, WatchToggleButton } from "./portfolioTools";
+import { ForumsPanel } from "./forums";
+import { VerifiedBadge, VerifiedExplainerSheet } from "./verified";
 import { SidewaysCountDial } from "./countDial";
 import {
-  adoptServerGridCols,
-  GridColsToggle,
-  useGridCols,
+adoptServerGridCols,
+GridColsToggle,
+useGridCols,
 } from "./gridCols";
 import { VxSelect } from "./vxSelect";
+import {
+  LANGUAGES,
+  applyLanguage,
+  fmtMoneyUSD,
+  initLanguageFromStorage,
+  isLangId,
+  translate,
+  useT,
+  type LangId,
+} from "./i18n";
 import { SearchScanRow } from "./searchScanRow";
 import {
 manualSaveCount,
@@ -82,6 +97,14 @@ hapticTick,
 hapticsEnabled,
 setHapticsEnabled,
 } from "./haptics";
+import {
+  pushWindowState,
+  readNavState,
+  replaceNavState,
+  scrubWindowKeys,
+  useWindowHistory,
+} from "./historyNav";
+import { LetterAvatar } from "./letterAvatar";
 import {
 evaluateBadges,
 type BadgeState,
@@ -117,12 +140,16 @@ import questArtQ3 from "./assets/set-logos/quest-q3.png";
 import questTileQ1 from "./assets/set-logos/quest-q1-keyart.webp";
 import questTileQ2 from "./assets/set-logos/quest-q2-keyart.webp";
 import questTileQ3 from "./assets/set-logos/quest-q3-keyart.webp";
-import collectionLorcana from "./assets/collection-lorcana.webp";
+import collectionLorcana from "./assets/media-generation-collection-lorcana-storybook-0-ce9f8aac-6d85-4014-8b24-b93a46fdc1ed.webp";
 import collectionPokemon from "./assets/collection-pokemon.webp";
 import collectionMagic from "./assets/collection-magic.webp";
-import collectionLego from "./assets/collection-lego.webp";
+import collectionLego from "./assets/media-generation-collection-lego-vault-0-0b76b99c-9f54-455c-bdae-f96c740684be.webp";
 import collectionComics from "./assets/collection-comics.webp";
 import collectionStarwars from "./assets/collection-starwars.webp";
+// Funko tile artwork: Option 2 "The Crown" — Anthony's pick (Nov 4, 2026,
+// superseding the Option 1 shelf art). Minimal glowing crown over a
+// figure, dark Vault theme.
+import collectionFunko from "./assets/collection-funko-crown.webp";
 import sealedBoosterFront from "./assets/sealed/sealed-booster-front.webp";
 import sealedHyperiaBox from "./assets/sealed/item-hyperia-box.webp";
 import sealedHyperiaPrerelease from "./assets/sealed/item-hyperia-prerelease.webp";
@@ -436,20 +463,24 @@ const SET_LOGOS: Record<number, string> = {
   14: setLogo14,
 };
 
-/** Marketplace release hold (Anthony, Nov 2, 2026, late): the
-    Marketplace needs more time to think through, so it is NOT
-    open to users yet. Its entry point is the Marketplace tab in
-    Social — the Home doorway was removed entirely Nov 3, 2026
-    (Anthony: it lives in Social anyway and he does not want to
-    advertise it on Home yet) — and the buy/sell area stays
-    visible in Social, but the whole area is gated off under a
-    diagonal yellow "Coming soon" overlay and none of its
-    controls work. The seeded Elsa / Stitch listing artwork no
-    longer shows in the area at all. Everything underneath
-    (listings, deals, feedback, the server actions) is kept
-    untouched, so flipping this one flag reopens it exactly as
-    it was when Anthony says go. */
-const MARKETPLACE_AVAILABLE = false;
+/** Marketplace release hold — LIFTED by Anthony (Nov 4, 2026,
+    ~2:43 PM: "take it off coming soon — make it live"). History:
+    the Marketplace was held from release Nov 2, 2026 (late) —
+    its entry point is the Marketplace tab in Social (the Home
+    doorway was removed entirely Nov 3, 2026 — it lives in
+    Social anyway) — and while the flag was false the buy/sell
+    area stayed visible in Social gated off under a diagonal
+    yellow "Coming soon" overlay with no working controls.
+    Everything underneath (listings, deals, feedback, the
+    server actions) was kept untouched, so flipping this one
+    flag reopened it exactly as it was. NOTE (Anthony, same
+    call): his "bring everything Coming Soon to life" remark
+    was thinking out loud and he countermanded the app-wide
+    sweep immediately — ONLY the Marketplace goes live here;
+    every other Coming Soon item comes online one by one as
+    he names each. Setting this back to false re-holds the
+    Marketplace under its overlay. */
+const MARKETPLACE_AVAILABLE = true;
 
 type Binder = ApiResponse<typeof api, "getBinder">;
 type Group = Binder["groups"][number];
@@ -460,10 +491,9 @@ type SearchResult = ApiResponse<typeof api, "searchCards">["results"][number];
 type Finance = ApiResponse<typeof api, "getFinance">;
 
 function fmtUSD(n: number, digits = 2): string {
-  return `$${n.toLocaleString("en-US", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })}`;
+  // Locale-aware (Nov 4, 2026): currency formatting follows
+  // the picked UI language's locale; the currency stays USD.
+  return fmtMoneyUSD(n, digits);
 }
 
 /** Yen display for Japanese-edition items: whole yen, no decimals.
@@ -763,9 +793,13 @@ function Pocket({
             disabled={qty <= 0}
             onClick={() => stepPocket(-1)}
             glyph="−"
-            circleClass="h-10 w-10 text-lg"
+            circleClass="h-8 w-8 text-base"
           />
-          <span className="text-sm font-semibold tabular-nums text-[var(--text)]">
+          <span
+            className={`text-sm font-semibold tabular-nums text-[var(--text)] ${
+              qty === 0 ? "zero-owned" : ""
+            }`}
+          >
             {qty} owned
           </span>
           <StepperButton
@@ -773,7 +807,7 @@ function Pocket({
             onClick={() => stepPocket(1)}
             onLongPress={() => setDialOpen((v) => !v)}
             glyph="+"
-            circleClass="h-10 w-10 text-lg"
+            circleClass="h-8 w-8 text-base"
           />
         </div>
       </div>
@@ -949,12 +983,34 @@ function CardSheet({
   // Puzzle/lore inserts have no foil printing — their detail
   // offers just the one count stepper (Anthony, Nov 3, 2026).
   const isPuzzleCard = card?.groupLabel === "Puzzle";
-  const shownFinishes = FINISH_OPTIONS.filter(
-    (f) =>
-      (current[f] ?? 0) > 0 ||
-      f === "Regular" ||
-      (!isPuzzleCard && f === "Cold Foil"),
-  );
+  // Foil-only printings (Anthony, Nov 4, 2026, direct order):
+  // an Epic has NO regular or cold-foil version — exactly ONE
+  // finish exists, so the detail offers exactly one stepper
+  // line for it, labeled "Epic" (the storage key stays "Epic
+  // Foil", the finish his collection records already use).
+  // The same one-line rule covers the other foil-only
+  // rarities, Enchanted and Iconic, which the old filter
+  // wrongly dressed up with Regular + Cold Foil lines too.
+  const foilOnlyFinish =
+    card?.rarity === "Epic"
+      ? "Epic Foil"
+      : card?.rarity === "Enchanted"
+        ? "Enchanted"
+        : card?.rarity === "Iconic"
+          ? "Iconic"
+          : null;
+  const shownFinishes = foilOnlyFinish
+    ? [foilOnlyFinish]
+    : FINISH_OPTIONS.filter(
+        (f) =>
+          (current[f] ?? 0) > 0 ||
+          f === "Regular" ||
+          (!isPuzzleCard && f === "Cold Foil"),
+      );
+  // The Epic line reads "Epic" (Anthony's exact label), never
+  // "Epic Foil"; every other finish keeps its own name.
+  const finishDisplay = (f: string) =>
+    card?.rarity === "Epic" && f === "Epic Foil" ? "Epic" : f;
 
   // Title-block price: the card's current market value per copy and its
   // move since the previous tracked point, from its real price history.
@@ -1074,7 +1130,11 @@ function CardSheet({
                   ) : null}
                 </p>
               </div>
-              {titlePrice != null ? (
+              {/* The title price is FINANCIAL (Anthony's
+                  Card-tab dedup, Nov 4, 2026): it renders only
+                  on the Card Performance tab — the Card tab
+                  carries nothing financial at all. */}
+              {titlePrice != null && sheetTab === "finances" ? (
                 <div className="shrink-0 text-right">
                   <p className="text-[22px] font-bold leading-tight text-white">
                     {fmtUSD(titlePrice)}
@@ -1115,10 +1175,7 @@ function CardSheet({
                     Best Offer — TCGplayer
                   </span>
                   <span className="block text-xs text-[var(--dim)]">
-                    {titlePrice != null
-                      ? `Tracked market ${fmtUSD(titlePrice)} — `
-                      : ""}
-                    see live offers and buy this exact printing
+                    See live offers and buy this exact printing
                   </span>
                 </span>
                 <span className="shrink-0 text-sm font-bold text-[var(--gold-soft)]">
@@ -1215,12 +1272,11 @@ function CardSheet({
                     : "Don’t own"}
                 </span>
               </div>
-              {card.marketValue != null ? (
-                <p className="mt-1 text-xs text-[var(--dim)]">
-                  Average market value {fmtUSD(card.marketValue)} per copy —
-                  per-finish value and what you paid are under Card Performance.
-                </p>
-              ) : null}
+              {/* The average-market-value line that sat here
+                  moved off the Card tab entirely (Anthony's
+                  dedup, Nov 4, 2026): per-finish values,
+                  averages, and what you paid live only under
+                  Card Performance now. */}
               {/* Merged bar (Anthony's placement change, Nov 2,
                   2026): Where it lives is no longer a standalone
                   section at the bottom — it is the LEFT half of
@@ -1245,11 +1301,11 @@ function CardSheet({
               {countPickerFinish ? (
                 <div className="mb-3 rounded-lg bg-[var(--bg)] p-2.5">
                   <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--dim)]">
-                    {countPickerFinish} — how many copies?
+                    {finishDisplay(countPickerFinish)} — how many copies?
                   </p>
                   <SidewaysCountDial
                     overlay
-                    label={`Pick how many ${countPickerFinish} copies of ${card.fullName} you own`}
+                    label={`Pick how many ${finishDisplay(countPickerFinish)} copies of ${card.fullName} you own`}
                     current={current[countPickerFinish] ?? 0}
                     onPick={(n) => {
                       setFinishQty(current, countPickerFinish, n);
@@ -1268,21 +1324,25 @@ function CardSheet({
                       className="flex items-center justify-between rounded-lg bg-[var(--bg)] px-3 py-1.5"
                     >
                       <span className="flex h-8 items-center text-sm leading-none text-[var(--text)]">
-                        {finish}
+                        {finishDisplay(finish)}
                       </span>
                       <span className="flex items-center gap-2">
                         <StepperButton
-                          label={`Remove one ${finish} copy of ${card.fullName}`}
+                          label={`Remove one ${finishDisplay(finish)} copy of ${card.fullName}`}
                           disabled={qty <= 0}
                           onClick={() => changeFinish(current, finish, -1)}
                           glyph="−"
-                          circleClass="h-8 w-8 text-base"
+                          circleClass="h-7 w-7 text-sm"
                         />
-                        <span className="w-6 text-center text-sm font-semibold leading-none tabular-nums text-[var(--text)]">
+                        <span
+                          className={`w-6 text-center text-sm font-semibold leading-none tabular-nums text-[var(--text)] ${
+                            qty === 0 ? "zero-owned" : ""
+                          }`}
+                        >
                           {qty}
                         </span>
                         <StepperButton
-                          label={`Add one ${finish} copy of ${card.fullName} — hold to pick a count`}
+                          label={`Add one ${finishDisplay(finish)} copy of ${card.fullName} — hold to pick a count`}
                           onClick={() => changeFinish(current, finish, 1)}
                           onLongPress={() =>
                             setCountPickerFinish(
@@ -1290,7 +1350,7 @@ function CardSheet({
                             )
                           }
                           glyph="+"
-                          circleClass="h-8 w-8 text-base"
+                          circleClass="h-7 w-7 text-sm"
                         />
                       </span>
                     </div>
@@ -1335,12 +1395,11 @@ function CardSheet({
                 </OwnedLocationBar>
               </div>
             </div>
-            {/* The value-over-time chart also lives right here on
-                the main Card tab (Anthony's every-item charting
-                rule, re-reported Nov 2, 2026 on Fru Fru - VIP Guest
-                #1, Hyperia City): opening a card shows its graph
-                without needing the Card Performance tab. */}
-            <CardValueChart history={card.priceHistory} />
+            {/* The value-over-time chart used to ALSO render
+                here on the Card tab — removed (Anthony's
+                dedup, Nov 4, 2026): the Card tab is for the
+                card itself, nothing financial; the graph
+                lives only under Card Performance. */}
               </>
             ) : (
               <CardFinanceTab card={card} />
@@ -1478,13 +1537,12 @@ function BestOfferMarketLink({
   );
 }
 
-/** One card's value-over-time chart section. Rendered on BOTH card
-    sheet tabs — the main Card tab (so the chart is visible the
-    moment a card opens, no tab switch needed; Anthony re-reported
-    Nov 2, 2026 that Fru Fru - VIP Guest #1 in Hyperia City showed
-    no graph) and the Card Performance tab under Best Offer. With
-    no tracked points it shows an honest empty state rather than
-    vanishing (Anthony's every-item charting rule). */
+/** One card's value-over-time chart section. Rendered ONLY on
+    the Card Performance tab under Best Offer (Anthony's dedup,
+    Nov 4, 2026 — the Card tab carries nothing financial; this
+    supersedes the Nov 2 both-tabs placement). With no tracked
+    points it shows an honest empty state rather than vanishing
+    (Anthony's every-item charting rule). */
 function CardValueChart({
   history,
 }: {
@@ -1519,8 +1577,8 @@ function CardValueChart({
           >
             <defs>
               <linearGradient id="cardValueFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#7aa5ff" stopOpacity={0.38} />
-                <stop offset="100%" stopColor="#7aa5ff" stopOpacity={0.02} />
+                <stop offset="0%" style={{ stopColor: "var(--accent)" }} stopOpacity={0.38} />
+                <stop offset="100%" style={{ stopColor: "var(--accent)" }} stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
@@ -1566,8 +1624,8 @@ function CardValueChart({
               stroke="var(--accent)"
               strokeWidth={2.5}
               fill="url(#cardValueFill)"
-              dot={{ r: 3, fill: "#7aa5ff", strokeWidth: 0 }}
-              activeDot={{ r: 4.5, fill: "#7aa5ff", strokeWidth: 0 }}
+              dot={{ r: 3, fill: "var(--accent)", strokeWidth: 0 }}
+              activeDot={{ r: 4.5, fill: "var(--accent)", strokeWidth: 0 }}
               style={{
                 filter: "drop-shadow(0 0 6px rgba(122,165,255,0.45))",
               }}
@@ -1696,6 +1754,11 @@ function CardFinanceTab({ card }: { card: CardDetail }) {
         sealedPhotoFor={(name) => SEALED_PHOTOS[name] ?? sealedBoosterFront}
         comicCoverFor={(id) => COMICS.find((c) => c.id === id)?.cover}
       />
+      <WatchToggleButton
+        targetKind="card"
+        cardId={card.id}
+        sealedName={null}
+      />
       {/* No standalone "Where it lives" section here anymore
           (Anthony's placement change, Nov 2, 2026): it is merged
           into the Copies owned bar on the Card tab — see
@@ -1808,7 +1871,11 @@ function MoverThumb({
   small?: boolean;
 }) {
   const { url } = useCachedArt(cardId, "grid", true);
-  const size = small ? "h-8 w-[23px]" : "h-14 w-10";
+  // One more small shrink step for Home's Top Movers
+  // (Anthony, Nov 4, 2026): the small thumb steps down once
+  // more; names and change figures keep their full readable
+  // size — the standing rule from the earlier shrinks.
+  const size = small ? "h-7 w-5" : "h-14 w-10";
   return url ? (
     <img
       src={url}
@@ -2527,17 +2594,27 @@ function FinancePanel({
         </p>
       </section>
 
-      {/* Value over time — the range pills above the chart are
-          THE one selector: they drive the header's period-change
-          line, this chart's window, and the Movers below, all in
-          sync (approved layout, Nov 3, 2026). */}
-      <section aria-label="Collection value over time">
-        {/* The range pills sit directly above the chart, as in
-            the approved mockup — no section heading or chart
-            title between the header and the chart. */}
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Value over time (Anthony's refinements, Nov 4,
+          2026): the graph now lives in its OWN titled box —
+          the same deep charcoal hero family as the Total
+          Value box above, with a TITLE BAR in the same style
+          as the page's other sections (Movers, breakdowns)
+          and the range selector reworked as a segmented pill
+          group sitting INSIDE the box under the title. The
+          range remains THE one selector: it drives the
+          header's period-change line, this chart's window,
+          and the Movers below, all in sync. Track & Research
+          moved BELOW this box (his placement call). */}
+      <section
+        aria-label="Collection value over time"
+        className="portfolio-hero mt-4 rounded-3xl p-3.5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-album text-xl text-[var(--text)]">
+            Portfolio Value
+          </h2>
           <div
-            className="flex gap-1"
+            className="flex gap-1 rounded-full border border-[var(--border)] bg-[var(--bg)] p-1"
             role="group"
             aria-label="Time range — drives the change line, chart, and movers"
           >
@@ -2548,10 +2625,10 @@ function FinancePanel({
                 aria-pressed={range === p.key}
                 aria-label={`Show the ${p.label} range`}
                 onClick={() => setRange(p.key)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
                   range === p.key
-                    ? "bg-[var(--accent)] text-black"
-                    : "border border-[var(--accent)]/50 text-[var(--gold-soft)]"
+                    ? "bg-[var(--gold)] text-white shadow-[0_2px_10px_rgba(80,110,255,0.35)]"
+                    : "text-[var(--dim)]"
                 }`}
               >
                 {p.label}
@@ -2559,12 +2636,7 @@ function FinancePanel({
             ))}
           </div>
         </div>
-        {/* Chart card in the Total Value hero's theme
-            (Anthony, Nov 3, 2026, ~11:30 PM): the same deep
-            charcoal-navy block with the soft top-edge glow,
-            so the value chart reads as part of the hero
-            instead of a plain bordered card under it. */}
-        <div className="portfolio-hero mt-2 rounded-3xl p-3.5">
+        <div className="mt-2">
           <div
             role="img"
             aria-label={`Line chart of Lorcana collection market value for the ${range} range. Latest value ${fmtM(finance.value)}.`}
@@ -2576,20 +2648,31 @@ function FinancePanel({
               >
                 <defs>
                   <linearGradient id="valueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#7aa5ff" stopOpacity={0.38} />
-                    <stop offset="100%" stopColor="#7aa5ff" stopOpacity={0.02} />
+                    <stop
+                      offset="0%"
+                      style={{ stopColor: "var(--accent)" }}
+                      stopOpacity={0.38}
+                    />
+                    <stop
+                      offset="100%"
+                      style={{ stopColor: "var(--accent)" }}
+                      stopOpacity={0.02}
+                    />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                <CartesianGrid
+                  stroke="var(--border)"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
                 <XAxis
                   dataKey="label"
                   tick={{ fill: "#8b9bb8", fontSize: 10 }}
                   axisLine={{ stroke: "#24365e" }}
                   tickLine={false}
-                  interval={0}
-                  angle={-18}
-                  textAnchor="end"
-                  height={44}
+                  interval="preserveStartEnd"
+                  minTickGap={24}
+                  height={28}
                 />
                 <YAxis
                   domain={[chartLo, chartHi]}
@@ -2624,9 +2707,10 @@ function FinancePanel({
                   name="Market value"
                   stroke="var(--accent)"
                   strokeWidth={2.5}
+                  strokeLinecap="round"
                   fill="url(#valueFill)"
-                  dot={{ r: 3, fill: "#7aa5ff", strokeWidth: 0 }}
-                  activeDot={{ r: 4.5, fill: "#7aa5ff", strokeWidth: 0 }}
+                  dot={false}
+                  activeDot={{ r: 4.5, fill: "var(--accent)", strokeWidth: 0 }}
                   style={{
                     filter: "drop-shadow(0 0 6px rgba(122,165,255,0.45))",
                   }}
@@ -2668,6 +2752,21 @@ function FinancePanel({
           </div>
         </div>
       </section>
+
+      {/* Track & Research (Anthony, Nov 4, 2026, approved
+          mockup; placement refined later that day): ONE pill
+          dropdown — Watchlist, Alerts, Research — swapping
+          the area below it, all inside Portfolio. It now sits
+          directly BELOW the Portfolio Value graph box (his
+          call after seeing v1.76 live). The Re-price pills
+          stay icon-free; the icons live only inside this
+          dropdown's menu. */}
+      <PortfolioTools
+        onOpenCard={onOpenCard}
+        onOpenSealed={onOpenSealed}
+        sealedPhotoFor={(name) => SEALED_PHOTOS[name] ?? sealedBoosterFront}
+        comicCoverFor={(id) => COMICS.find((c) => c.id === id)?.cover}
+      />
 
       {/* Collection Distribution — moved here from Home
           (Anthony, Nov 3, 2026, late; final order walked
@@ -3004,6 +3103,73 @@ function readBinderCache(): { data: Binder; savedAt: number } | undefined {
   }
 }
 
+/** ---- Home first-paint snapshot (Anthony's launch-jank
+    re-report, Nov 4, 2026) ----
+    ROOT CAUSE of the remaining launch jank: the v1.74
+    coordination read the react-query cache, but that cache
+    lives in memory only — every cold launch starts with it
+    EMPTY, so "cache-first" almost never hit on a real
+    launch and the themed cover waited on the network every
+    time. Worse, the cover only gated on Home's three core
+    queries, while the Collector ID pill at the very top of
+    Home runs two more queries of its own (collectorId +
+    registryMembers) and popped in AFTER the reveal anyway.
+    The fix is the binder cache's proven pattern, extended
+    to every query Home paints from: the last-seen payloads
+    persist on-device in localStorage, seed their queries
+    via initialData + initialDataUpdatedAt (so the first
+    frame IS the last-seen Home, whole), and the live
+    queries revalidate quietly behind the identical layout —
+    stale-while-revalidate, no pop-in, no layout shift. */
+const HOME_SNAPSHOT_KEY = "vaultx-home-snapshot-v1";
+
+type HomeSnapshotSection<T> = { savedAt: number; data: T };
+type HomeSnapshot = {
+  visibility?: HomeSnapshotSection<
+    ApiResponse<typeof api, "getCollectionVisibility">
+  >;
+  finance?: HomeSnapshotSection<Finance>;
+  priceAlerts?: HomeSnapshotSection<
+    ApiResponse<typeof api, "getPriceAlerts">
+  >;
+  funko?: HomeSnapshotSection<
+    ApiResponse<typeof api, "getGameCatalog">
+  >;
+  collectorId?: HomeSnapshotSection<
+    ApiResponse<typeof api, "getCollectorId">
+  >;
+  registry?: HomeSnapshotSection<
+    ApiResponse<typeof api, "getRegistryMembers">
+  >;
+};
+
+function readHomeSnapshot(): HomeSnapshot {
+  try {
+    const raw = window.localStorage.getItem(HOME_SNAPSHOT_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as HomeSnapshot;
+    return typeof parsed === "object" && parsed != null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeHomeSnapshotSection<K extends keyof HomeSnapshot>(
+  key: K,
+  data: NonNullable<HomeSnapshot[K]>["data"],
+): void {
+  try {
+    const current = readHomeSnapshot();
+    current[key] = { savedAt: Date.now(), data } as HomeSnapshot[K];
+    window.localStorage.setItem(
+      HOME_SNAPSHOT_KEY,
+      JSON.stringify(current),
+    );
+  } catch {
+    // Storage unavailable or full: launches just fetch as before.
+  }
+}
+
 /** Release year per main set number, matching the year groupings on
     Shiny's set-selection screen (Anthony's reference photo): sets 11-14
     are 2026 releases, 7-10 are 2025, 3-6 are 2024, 1-2 are 2023. */
@@ -3093,7 +3259,14 @@ function SetTile({
         className={`relative flex aspect-[21/11] w-full items-center justify-center overflow-hidden rounded-xl border bg-[var(--surface)] shadow-[inset_0_1px_0_rgba(255,255,255,0.07),inset_0_-10px_18px_rgba(0,0,0,0.35),0_4px_14px_rgba(0,0,0,0.35)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
           selected
             ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
-            : "border-[#26314d]"
+            : group.kind === "set"
+              ? // Chapter tiles ALL carry the purple accent
+                // border (Anthony, Nov 4, 2026): only the
+                // selected chapter had it and he likes the
+                // look — every chapter tile matches now; the
+                // selected one still stands out by its ring.
+                "border-[var(--accent)]"
+              : "border-[#26314d]"
         }`}
         style={{
           // The premium finish (Anthony, Nov 3, 2026,
@@ -3475,7 +3648,8 @@ function StepperButton({
     >
       <span
         aria-hidden="true"
-        className={`flex items-center justify-center rounded-full border border-[var(--border)] leading-none text-[var(--text)] ${circleClass}`}
+        data-dir={glyph === "+" ? "plus" : "minus"}
+        className={`stepper-ring flex items-center justify-center rounded-full leading-none ${circleClass}`}
       >
         {glyph}
       </span>
@@ -3564,10 +3738,17 @@ function CollectionRowChevron() {
     carries the overall completion with the unique-owned
     count beside it; the closest-to-finished chapter's own
     row (bar, percent, and the real cost to finish beneath)
-    branching under it; a View all chapters link into the
-    Library; then Comics and Sealed rows. Every figure is
-    the owner's real per-set owned/total data. Own profile
-    only — friends keep their collection grid as-is. */
+    branching under it; a View all chapters link; then
+    Comics and Sealed rows. Every figure is the owner's
+    real per-set owned/total data. Own profile only —
+    friends keep their collection grid as-is.
+    ROW ROUTING (Anthony, Nov 4, 2026, ~9:50 AM): every
+    row opens its OWN collection page, never the Library
+    (the Library keeps its single door, the shelf
+    picture): the Lorcana row and View all chapters open
+    the chapters/sets grid (Home's Lorcana tile
+    destination), the chapter row opens that chapter, and
+    Comics and Sealed open their own pages. */
 function ProfileMyCollectionSection({
   lorcanaPct,
   uniqueOwned,
@@ -3576,7 +3757,7 @@ function ProfileMyCollectionSection({
   comicsCount,
   comicsValue,
   sealedCount,
-  onOpenLibrary,
+  onOpenLorcana,
   onOpenChapter,
   onOpenComics,
   onOpenSealedSection,
@@ -3594,7 +3775,7 @@ function ProfileMyCollectionSection({
   comicsCount: number;
   comicsValue: number;
   sealedCount: number;
-  onOpenLibrary: () => void;
+  onOpenLorcana: () => void;
   onOpenChapter: (key: string) => void;
   onOpenComics: () => void;
   onOpenSealedSection?: () => void;
@@ -3611,7 +3792,7 @@ function ProfileMyCollectionSection({
           type="button"
           onClick={() => {
             hapticTick();
-            onOpenLibrary();
+            onOpenLorcana();
           }}
           aria-label={`Open your Lorcana collection — ${uniqueOwned.toLocaleString()} unique owned, ${lorcanaPct.toFixed(1)}% complete overall`}
           className={`${rowClass} p-[18px]`}
@@ -3743,7 +3924,7 @@ function ProfileMyCollectionSection({
           type="button"
           onClick={() => {
             hapticTick();
-            onOpenLibrary();
+            onOpenLorcana();
           }}
           className="flex items-center justify-center gap-1.5 py-1 text-sm font-bold text-[var(--gold-soft)] transition active:scale-95"
         >
@@ -3886,7 +4067,9 @@ function OwnProfilePage({
   onOpenCard,
   onOpenSealed,
   onOpenBinderGroup,
-  onOpenSealedSection,
+  onOpenBinderGroupFromProfile,
+  onOpenBinderHomeFromProfile,
+  onOpenSealedSectionFromProfile,
 }: {
   username: string;
   collectorCode: string;
@@ -3904,6 +4087,14 @@ function OwnProfilePage({
   onOpenBinderGroup?: (key: string) => void;
   /** Opens the Sealed section (the My Collection row). */
   onOpenSealedSection?: () => void;
+  /** Profile-originated section opens (Nov 4, 2026): the
+      My Collection rows' real destinations — chapter and
+      Comics via the group opener, the Lorcana row via the
+      binder-home opener, Sealed via its own — each with
+      the one-Back return to this profile armed. */
+  onOpenBinderGroupFromProfile?: (key: string) => void;
+  onOpenBinderHomeFromProfile?: () => void;
+  onOpenSealedSectionFromProfile?: () => void;
 }) {
   const [badgesOpen, setBadgesOpen] = useState(false);
   // My Decks above the profile: seeded from a surviving
@@ -3959,8 +4150,15 @@ function OwnProfilePage({
   // history entry carries the group key merged over the
   // Library's entry, so a refresh on the open binder
   // restores Library + binder in place (the refresh-in-
-  // place rule), and Back unwinds binder, then Library,
-  // then profile. Comics keeps its normal open path.
+  // place rule). BACK FIX (Anthony, Nov 4, 2026, live bug):
+  // the binder used to REPLACE the Library entry's state,
+  // so phone Back tore the Library down underneath it and
+  // the next Back threw him out of the app. The binder now
+  // takes its OWN pushed entry over the Library's window
+  // entry: app entry + Library entry + binder entry is
+  // exactly the three-back budget — Back 1 closes the
+  // binder back onto the Library, Back 2 closes the
+  // Library, Back 3 exits. Comics keeps the same fix.
   const [flipGroupKey, setFlipGroupKey] = useState<string | null>(
     () => {
       const s = readHistoryState();
@@ -3969,20 +4167,24 @@ function OwnProfilePage({
         : null;
     },
   );
-  const flipPushedRef = useRef(flipGroupKey != null);
+  const flipPushedRef = useRef(
+    typeof readHistoryState()?.flipBinder === "string",
+  );
   const openFlipBinder = (key: string) => {
     setFlipGroupKey(key);
+    const cur = readNavState() ?? {};
+    if (flipPushedRef.current) {
+      replaceNavState({ ...cur, flipBinder: key });
+      return;
+    }
     try {
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
       window.history.pushState(
-        { ...(cur ?? {}), flipBinder: key },
+        { ...cur, flipBinder: key, vxDepth: 2 },
         "",
       );
       flipPushedRef.current = true;
     } catch {
+      replaceNavState({ ...cur, flipBinder: key });
       flipPushedRef.current = false;
     }
   };
@@ -4012,27 +4214,32 @@ function OwnProfilePage({
   }, []);
   // The comics flip-binder (Anthony, Nov 3, 2026, ~12:08
   // PM): the Comics book in the Library opens the same
-  // table scene, one graded slab per page. Same history
-  // treatment as the card flip-binder — its entry merges
-  // over the Library's, so refresh restores it in place
-  // and Back unwinds one layer at a time.
+  // table scene, one graded slab per page. Same back fix
+  // as the Lorcana flip-binder (Anthony, Nov 4, 2026): its
+  // own pushed entry over the Library's, so one Back lands
+  // back on the Library; refresh still restores it in
+  // place.
   const [comicsFlipOpen, setComicsFlipOpen] = useState(
     () => readHistoryState()?.comicsFlip === true,
   );
-  const comicsFlipPushedRef = useRef(comicsFlipOpen);
+  const comicsFlipPushedRef = useRef(
+    readHistoryState()?.comicsFlip === true,
+  );
   const openComicsFlip = () => {
     setComicsFlipOpen(true);
+    const cur = readNavState() ?? {};
+    if (comicsFlipPushedRef.current) {
+      replaceNavState({ ...cur, comicsFlip: true });
+      return;
+    }
     try {
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
       window.history.pushState(
-        { ...(cur ?? {}), comicsFlip: true },
+        { ...cur, comicsFlip: true, vxDepth: 2 },
         "",
       );
       comicsFlipPushedRef.current = true;
     } catch {
+      replaceNavState({ ...cur, comicsFlip: true });
       comicsFlipPushedRef.current = false;
     }
   };
@@ -4061,6 +4268,43 @@ function OwnProfilePage({
     queryKey: ["binder"],
     queryFn: () => api.getBinder({}),
   });
+  // Library shelves for Funko and Legos (Anthony, Nov 4, 2026,
+  // ~12:12 PM — PROVISIONAL, revisit after his first items):
+  // a spine per line/theme he owns at least one item in, from
+  // the same catalog queries the sections use.
+  const funkoCatalogQ = useQuery({
+    queryKey: ["gameCatalog", "funko"],
+    queryFn: () => api.getGameCatalog({ game: "funko" }),
+  });
+  const legoCatalogQ = useQuery({
+    queryKey: ["gameCatalog", "lego"],
+    queryFn: () => api.getGameCatalog({ game: "lego" }),
+  });
+  const gameLibraryEntries: LibraryEntry[] = (
+    [
+      { game: "funko" as const, data: funkoCatalogQ.data },
+      { game: "lego" as const, data: legoCatalogQ.data },
+    ]
+  ).flatMap(({ game, data }) =>
+    (data?.sections ?? [])
+      .filter((s) => s.owned > 0)
+      .map((s) => ({
+        id: `game:${game}:${s.key}`,
+        spineLabel:
+          s.name
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((w) => w.charAt(0))
+            .join("")
+            .toUpperCase() || "•",
+        title: s.name,
+        detail: game === "funko" ? "Funko line" : "Lego theme",
+        owned: s.owned,
+        total: s.total,
+        canOpen: true,
+        section: game,
+      })),
+  );
   const shelfBinderGroups = (binderQ.data?.groups ?? []).filter(
     (g) => g.kind !== "puzzle",
   );
@@ -4068,7 +4312,24 @@ function OwnProfilePage({
     .filter((g) => g.owned > 0)
     .map((g) => ({ key: g.key }));
   const libraryEntries: LibraryEntry[] = [
-    ...shelfBinderGroups.map((g) => ({
+    // Library shelf rule (Anthony, Nov 4, 2026): a chapter
+    // binder appears on the shelf ONLY when the owner holds at
+    // least one card from that set — a set with zero owned
+    // cards does not get a binder at all. The same gate
+    // applies to promo families AND to Quests (Anthony, Nov 4,
+    // 2026, closing the gap himself: Q3 was still showing with
+    // zero owned — chapters, Quests, and promo families all
+    // use the owned-only rule with NO exceptions; the comics
+    // binder is a separate entry and keeps its behavior).
+    ...shelfBinderGroups
+      .filter(
+        (g) =>
+          (g.kind !== "set" &&
+            g.kind !== "promo" &&
+            g.kind !== "quest") ||
+          g.owned > 0,
+      )
+      .map((g) => ({
       id: g.key,
       spineLabel:
         g.kind === "set"
@@ -4096,6 +4357,7 @@ function OwnProfilePage({
       canOpen: Boolean(onOpenBinderGroup),
       section: "comics" as const,
     },
+    ...gameLibraryEntries,
   ];
   // Optional profile banner (opt-in, default none): the ⋮ menu on
   // the header offers add/change/remove; the picker and mutations
@@ -4332,12 +4594,10 @@ function OwnProfilePage({
                 className="h-24 w-24 rounded-full object-cover ring-4 ring-[var(--bg)]"
               />
             ) : (
-              <span
-                aria-hidden="true"
-                className="flex h-24 w-24 items-center justify-center rounded-full bg-[var(--accent)] font-album text-4xl font-bold text-[var(--on-accent)] ring-4 ring-[var(--bg)]"
-              >
-                {username.charAt(0).toUpperCase() || "?"}
-              </span>
+              <LetterAvatar
+                initial={username.charAt(0).toUpperCase() || "?"}
+                className="h-24 w-24 text-4xl ring-4 ring-[var(--bg)]"
+              />
             )
           }
           displayName={username}
@@ -4356,7 +4616,6 @@ function OwnProfilePage({
           onOpenBadges={badgesSheet.openSheet}
           onOpenDecks={decksSheet.openSheet}
           shelfGroups={shelfGroups}
-          topCards={s?.topValuable ?? []}
           profileDecks={profileDecks}
           onOpenDeckBox={(deck) => {
             try {
@@ -4369,7 +4628,6 @@ function OwnProfilePage({
             }
             decksSheet.openSheet();
           }}
-          onOpenShowcaseCard={onOpenCard}
           onOpenLibrary={librarySheet.openSheet}
           valueHidden={valuePrivacy.data?.hideValue ?? false}
           onToggleValuePrivacy={() =>
@@ -4416,10 +4674,14 @@ function OwnProfilePage({
             comicsCount={COMICS.length}
             comicsValue={COMICS_TOTAL_VALUE}
             sealedCount={s?.sealedCount ?? 0}
-            onOpenLibrary={librarySheet.openSheet}
-            onOpenChapter={(key) => onOpenBinderGroup?.(key)}
-            onOpenComics={() => onOpenBinderGroup?.("comics")}
-            onOpenSealedSection={onOpenSealedSection}
+            onOpenLorcana={() => onOpenBinderHomeFromProfile?.()}
+            onOpenChapter={(key) =>
+              onOpenBinderGroupFromProfile?.(key)
+            }
+            onOpenComics={() =>
+              onOpenBinderGroupFromProfile?.("comics")
+            }
+            onOpenSealedSection={onOpenSealedSectionFromProfile}
           />
         ) : null}
         <ProfileCollectionSection
@@ -4483,12 +4745,10 @@ function OwnProfilePage({
                       className="h-14 w-14 shrink-0 rounded-full object-cover"
                     />
                   ) : (
-                    <span
-                      aria-hidden="true"
-                      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] font-album text-xl font-bold text-[var(--on-accent)]"
-                    >
-                      {username.charAt(0).toUpperCase() || "?"}
-                    </span>
+                    <LetterAvatar
+                      initial={username.charAt(0).toUpperCase() || "?"}
+                      className="h-14 w-14 text-xl"
+                    />
                   )}
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -4605,12 +4865,30 @@ function OwnProfilePage({
           <LibraryPage
             ownerName={username}
             entries={libraryEntries}
+            comicsWall={<LibraryComicWall />}
             onClose={librarySheet.closeSheet}
             onOpenEntry={(entry) => {
+              // Funko / Legos spines open that game's section
+              // at the tapped line/theme (Nov 4, 2026): the
+              // root hears the event and navigates with the
+              // profile return armed, like every other
+              // profile-originated section open.
+              if (entry.id.startsWith("game:")) {
+                const parts = entry.id.split(":");
+                window.dispatchEvent(
+                  new CustomEvent("vaultx:open-game-section", {
+                    detail: { game: parts[1], sectionKey: parts[2] },
+                  }),
+                );
+                return;
+              }
               // Binders open into the flip-through table
               // scene (Anthony, Nov 3, 2026, ~11:52 AM) —
               // the graded-comics binder too (Nov 3, 2026,
-              // ~12:08 PM), one slab per page there.
+              // ~12:08 PM), one slab per page there. (On his
+              // own Library the Comics spine is replaced by
+              // the slab display wall, so this branch serves
+              // the remaining binder entries.)
               if (entry.id === "comics") {
                 openComicsFlip();
               } else {
@@ -4666,6 +4944,9 @@ function CollectorIdCard({
   onOpenSealed,
   onOpenBinderGroup,
   onOpenSealedSection,
+  onOpenBinderGroupFromProfile,
+  onOpenBinderHomeFromProfile,
+  onOpenSealedSectionFromProfile,
   updateAvailable,
   onOpenUpdate,
   onOpenUpdateTest,
@@ -4680,6 +4961,12 @@ function CollectorIdCard({
   onOpenBinderGroup?: (key: string) => void;
   /** Opens the Sealed section (profile My Collection row). */
   onOpenSealedSection?: () => void;
+  /** Profile-originated section opens (Nov 4, 2026):
+      forwarded to the own profile's My Collection rows,
+      with the one-Back return to the profile armed. */
+  onOpenBinderGroupFromProfile?: (key: string) => void;
+  onOpenBinderHomeFromProfile?: () => void;
+  onOpenSealedSectionFromProfile?: () => void;
   /** The order-mail indicator (Anthony, Nov 3, 2026): sits
       in the same row as the envelope, left of the ID pill —
       shown to ANY collector when a reply inside one of their
@@ -4710,14 +4997,25 @@ function CollectorIdCard({
   onOpenUpdateTest?: () => void;
 }) {
   const queryClient = useQueryClient();
+  // Seeded from the on-device Home snapshot like the rest of
+  // Home (Nov 4, 2026): this pill is the FIRST thing on Home,
+  // so it must paint in the same first frame — not pop in
+  // after the reveal the way it did before the snapshot.
+  const [homeSeed] = useState(readHomeSnapshot);
   const profile = useQuery({
     queryKey: ["collectorId"],
     queryFn: () => api.getCollectorId({}),
+    initialData: homeSeed.collectorId?.data,
+    initialDataUpdatedAt: homeSeed.collectorId?.savedAt,
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
   });
+  useEffect(() => {
+    if (profile.data)
+      writeHomeSnapshotSection("collectorId", profile.data);
+  }, [profile.data]);
   // Central registry (Vault X server on Supabase): usernames
   // live server-side in the registry's profiles table. This query
   // reads the live member list back; when Anthony's own Collector
@@ -4728,11 +5026,17 @@ function CollectorIdCard({
   const registry = useQuery({
     queryKey: ["registryMembers"],
     queryFn: () => api.getRegistryMembers({}),
+    initialData: homeSeed.registry?.data,
+    initialDataUpdatedAt: homeSeed.registry?.savedAt,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
   });
+  useEffect(() => {
+    if (registry.data)
+      writeHomeSnapshotSection("registry", registry.data);
+  }, [registry.data]);
   const syncRegistry = useMutation({
     mutationFn: () => api.syncCollectorRegistry({}),
     onSuccess: () => {
@@ -4784,49 +5088,31 @@ function CollectorIdCard({
     const stored = readStoredProfileNav();
     return st?.lorcanaCollectorId === true || stored.expanded;
   });
-  const expandedPushedRef = useRef(
-    mayRestoreStack &&
-      readHistoryState()?.lorcanaCollectorId === true,
+  // The expanded Collector ID is a window over the profile
+  // (three-back rule, Anthony, Nov 4, 2026): one history entry;
+  // it layers into the open window's entry when one already
+  // holds the slot instead of stacking.
+  const expandedWin = useWindowHistory(
+    "lorcanaCollectorId",
+    setExpanded,
+    mayRestoreStack && readHistoryState()?.lorcanaCollectorId === true,
   );
   const openExpanded = () => {
-    setExpanded(true);
-    try {
-      window.history.pushState({ lorcanaCollectorId: true }, "");
-      expandedPushedRef.current = true;
-    } catch {
-      expandedPushedRef.current = false;
-    }
+    expandedWin.open();
   };
   const closeExpanded = () => {
-    if (expandedPushedRef.current) {
-      window.history.back();
-    } else {
-      setExpanded(false);
-    }
+    expandedWin.close();
   };
-  useEffect(() => {
-    const onPopState = () => {
-      if (
-        expandedPushedRef.current &&
-        !(window.history.state as { lorcanaCollectorId?: boolean } | null)
-          ?.lorcanaCollectorId
-      ) {
-        expandedPushedRef.current = false;
-        setExpanded(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
 
   // His own profile page (the Shiny-style layout) opens
   // DIRECTLY above Home — the Home pill's target (Anthony,
   // Nov 3, 2026, late reversal): it does NOT sit on the full
-  // ID view, and Back from it returns Home. The big-QR view
-  // stacks above the profile only, reached from the
-  // profile's QR / Collector ID element. Seeded (on a restore
-  // mount only) like the QR view above; a surviving Library
-  // or My Decks entry implies the profile below it.
+  // ID view. Three-back rule (Anthony, Nov 4, 2026): the
+  // profile is main-flow navigation — it REPLACES the single
+  // app entry, never pushes; the on-screen back closes it in
+  // place and the device Back exits the app. Seeded (on a
+  // restore mount only) like before; a surviving Library or
+  // My Decks entry implies the profile below it.
   const [profileOpen, setProfileOpen] = useState(() => {
     if (!mayRestoreStack) return false;
     return (
@@ -4837,42 +5123,14 @@ function CollectorIdCard({
       readStoredProfileNav().decksOpen
     );
   });
-  const profilePushedRef = useRef(
-    mayRestoreStack &&
-      (readHistoryState()?.lorcanaOwnProfile === true ||
-        readHistoryState()?.lorcanaLibrary === true),
-  );
   const openProfile = () => {
     hapticTick();
     setProfileOpen(true);
-    try {
-      window.history.pushState({ lorcanaOwnProfile: true }, "");
-      profilePushedRef.current = true;
-    } catch {
-      profilePushedRef.current = false;
-    }
+    replaceNavState({ lorcanaOwnProfile: true });
   };
   const closeProfile = () => {
-    if (profilePushedRef.current) {
-      window.history.back();
-    } else {
-      setProfileOpen(false);
-    }
+    setProfileOpen(false);
   };
-  useEffect(() => {
-    const onPopState = () => {
-      if (
-        profilePushedRef.current &&
-        !(window.history.state as { lorcanaOwnProfile?: boolean } | null)
-          ?.lorcanaOwnProfile
-      ) {
-        profilePushedRef.current = false;
-        setProfileOpen(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   // Non-restore mounts heal the stored copy back to closed
   // (see the Home-tab guard): a stack left open by a tab
   // switch can never greet the next Home mount.
@@ -4898,9 +5156,10 @@ function CollectorIdCard({
   // comes back.)
   useEffect(() => {
     const onGoHome = () => {
-      expandedPushedRef.current = false;
-      profilePushedRef.current = false;
-      setExpanded(false);
+      // The ID window closes through its window close so its
+      // history entry is consumed/scrubbed, not left stale —
+      // three-back rule: no phantom entries in the stack.
+      closeExpanded();
       setProfileOpen(false);
     };
     window.addEventListener("vaultx:go-home", onGoHome);
@@ -4942,12 +5201,10 @@ function CollectorIdCard({
         className={`${sizeClass} shrink-0 rounded-full border-2 border-[var(--accent)]/60 object-cover`}
       />
     ) : (
-      <span
-        aria-hidden="true"
-        className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full border-2 border-[var(--accent)]/60 bg-[var(--bg)] font-album font-bold text-[var(--gold-soft)] ${textClass}`}
-      >
-        {username.charAt(0).toUpperCase() || "?"}
-      </span>
+      <LetterAvatar
+        initial={username.charAt(0).toUpperCase() || "?"}
+        className={`${sizeClass} ${textClass}`}
+      />
     );
 
   return (
@@ -5008,8 +5265,13 @@ function CollectorIdCard({
         >
           {avatar("h-9 w-9", "text-sm")}
           <span className="min-w-0">
-            <span className="block max-w-36 truncate text-[13px] font-bold leading-tight text-[var(--text)]">
-              @{username}
+            <span className="flex items-center gap-1 text-[13px] font-bold leading-tight text-[var(--text)]">
+              <span className="max-w-32 truncate">@{username}</span>
+              <VerifiedBadge
+                collectorCode={data?.collectorCode}
+                username={username}
+                className="h-3.5 w-3.5"
+              />
             </span>
             <span className="block text-[10px] leading-tight tabular-nums text-[var(--dim)]">
               {data?.collectorCode ?? "Generating…"}
@@ -5063,8 +5325,13 @@ function CollectorIdCard({
               <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--dim)]">
                 Collector ID
               </p>
-              <h2 className="font-album mt-1 text-2xl font-bold leading-tight text-white">
+              <h2 className="font-album mt-1 flex items-center justify-center gap-1.5 text-2xl font-bold leading-tight text-white">
                 @{data.username}
+                <VerifiedBadge
+                  collectorCode={data.collectorCode}
+                  username={data.username}
+                  className="h-5 w-5"
+                />
               </h2>
               <p className="mt-0.5 text-sm tabular-nums text-[var(--dim)]">
                 {data.collectorCode}
@@ -5124,7 +5391,8 @@ function CollectorIdCard({
                 Score line on the profile opens the breakdown
                 page. */}
             {/* The server registry used to sit here — it moved
-                to Settings (Anthony, Nov 3, 2026, late). */}
+                to Settings (Anthony, Nov 3, 2026, late), then
+                into Admin (Nov 4, 2026). */}
             {/* The Photo editor box that used to sit at the
                 very bottom of this screen is REMOVED (Anthony,
                 Nov 3, 2026, ~11:51 PM): this Collector ID page
@@ -5149,6 +5417,13 @@ function CollectorIdCard({
           onOpenSealed={onOpenSealed}
           onOpenBinderGroup={onOpenBinderGroup}
           onOpenSealedSection={onOpenSealedSection}
+          onOpenBinderGroupFromProfile={
+            onOpenBinderGroupFromProfile
+          }
+          onOpenBinderHomeFromProfile={onOpenBinderHomeFromProfile}
+          onOpenSealedSectionFromProfile={
+            onOpenSealedSectionFromProfile
+          }
         />
       ) : null}
       {(expanded || profileOpen) && profile.isPending ? (
@@ -5349,18 +5624,24 @@ function HomeAdminBadge({ onOpen }: { onOpen: () => void }) {
       <svg
         viewBox="0 0 24 24"
         fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
+        stroke="url(#vxShieldGrad)"
+        strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="h-6 w-6 drop-shadow-[0_2px_6px_rgba(233,196,106,0.4)]"
+        className="h-6 w-6 drop-shadow-[0_2px_8px_rgba(150,120,255,0.55)]"
         aria-hidden="true"
       >
+        <defs>
+          <linearGradient id="vxShieldGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" style={{ stopColor: "var(--gold-soft)" }} />
+            <stop offset="100%" style={{ stopColor: "var(--accent)" }} />
+          </linearGradient>
+        </defs>
         <path d="M12 3l7 3v5c0 4.6-3 7.7-7 9-4-1.3-7-4.4-7-9V6Z" />
         <path d="m9.2 12 2 2 3.6-4" />
       </svg>
       {changeCount > 0 ? (
-        <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-[0_2px_6px_rgba(59,130,246,0.5)]">
+        <span className="vx-count-badge absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums">
           {changeCount}
         </span>
       ) : null}
@@ -5411,18 +5692,24 @@ function OrderMailIndicator({ onOpen }: { onOpen: () => void }) {
       <svg
         viewBox="0 0 24 24"
         fill="none"
-        stroke="currentColor"
+        stroke="url(#vxMailGrad)"
         strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="h-6 w-6 drop-shadow-[0_2px_6px_rgba(169,195,255,0.45)]"
+        className="h-6 w-6 drop-shadow-[0_2px_8px_rgba(150,120,255,0.55)]"
         aria-hidden="true"
       >
+        <defs>
+          <linearGradient id="vxMailGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" style={{ stopColor: "var(--gold-soft)" }} />
+            <stop offset="100%" style={{ stopColor: "var(--accent)" }} />
+          </linearGradient>
+        </defs>
         <rect x="3" y="5.5" width="18" height="13" rx="2" />
         <path d="m4 7 8 6 8-6" />
       </svg>
       {count > 0 ? (
-        <span className="absolute -left-1 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold tabular-nums text-white">
+        <span className="vx-count-badge absolute -left-1 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums">
           {count}
         </span>
       ) : null}
@@ -5443,9 +5730,11 @@ type InboxItemView = ApiResponse<typeof api, "getInbox">["items"][number];
 function InboxList({
   onOpenOrder,
   onOpenTicket,
+  onOpenMail,
 }: {
   onOpenOrder: (kind: "cash" | "trade", refId: number) => void;
   onOpenTicket: (refId: number) => void;
+  onOpenMail: (refId: number) => void;
 }) {
   const queryClient = useQueryClient();
   const inbox = useQuery({
@@ -5469,19 +5758,21 @@ function InboxList({
     },
   });
   const statusLabel = (item: InboxItemView) =>
-    item.kind === "ticket"
-      ? item.status === "in_progress"
-        ? "In Progress"
-        : item.status === "completed"
-          ? "Completed"
-          : "Open"
-      : item.status === "pending"
-        ? "Pending"
-        : item.status === "accepted"
-          ? "Accepted"
-          : item.status === "declined"
-            ? "Declined"
-            : "Withdrawn";
+    item.kind === "mail"
+      ? "Shared deck"
+      : item.kind === "ticket"
+        ? item.status === "in_progress"
+          ? "In Progress"
+          : item.status === "completed"
+            ? "Completed"
+            : "Open"
+        : item.status === "pending"
+          ? "Pending"
+          : item.status === "accepted"
+            ? "Accepted"
+            : item.status === "declined"
+              ? "Declined"
+              : "Withdrawn";
   return (
     <section aria-label="Your Inbox" className="mt-4">
       {inbox.isLoading ? (
@@ -5489,8 +5780,9 @@ function InboxList({
       ) : items.length === 0 ? (
         <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-relaxed text-[var(--dim)]">
           Nothing here yet. When a purchase order or trade offer
-          involves you — and, for the owner, when a change-request
-          ticket comes in — it lands in this Inbox.
+          involves you, when a collector shares a deck list with
+          you — and, for the owner, when a change-request ticket
+          comes in — it lands in this Inbox.
         </p>
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4">
@@ -5504,6 +5796,8 @@ function InboxList({
                     hapticTick();
                     if (item.kind === "ticket") {
                       onOpenTicket(item.refId);
+                    } else if (item.kind === "mail") {
+                      onOpenMail(item.refId);
                     } else {
                       onOpenOrder(item.kind, item.refId);
                     }
@@ -5555,9 +5849,11 @@ function InboxList({
                       {unread
                         ? item.kind === "ticket"
                           ? " · Unread"
-                          : item.unreadCount > 0
-                            ? ` · ${item.unreadCount} new message${item.unreadCount === 1 ? "" : "s"}`
-                            : " · New"
+                          : item.kind === "mail"
+                            ? " · New"
+                            : item.unreadCount > 0
+                              ? ` · ${item.unreadCount} new message${item.unreadCount === 1 ? "" : "s"}`
+                              : " · New"
                         : ""}
                     </span>
                     <span
@@ -5710,8 +6006,13 @@ function WelcomeFlow({
   const syncRegistry = useMutation({
     mutationFn: () => api.syncCollectorRegistry({}),
   });
+  const [inviteCode, setInviteCode] = useState("");
   const register = useMutation({
-    mutationFn: () => api.registerCollector({ username: username.trim() }),
+    mutationFn: () =>
+      api.registerCollector({
+        username: username.trim(),
+        inviteCode: inviteCode.trim() || undefined,
+      }),
     onSuccess: (res) => {
       if (res.ok) {
         hapticConfirm();
@@ -5840,6 +6141,32 @@ function WelcomeFlow({
                   placeholder="e.g. ARUIKIS"
                   className="mt-2.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-base text-[var(--text)] placeholder:text-[var(--dim)]"
                 />
+                <label
+                  htmlFor="welcome-invite-code"
+                  className="mt-5 block text-sm font-semibold text-[var(--text)]"
+                >
+                  Invite code{" "}
+                  <span className="font-normal text-[var(--dim)]">
+                    (optional)
+                  </span>
+                </label>
+                <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+                  If a friend sent you to Vault X, their invite
+                  message carries a code like VX-XXXXXX — paste it
+                  here so the app knows who sent you. No code? Just
+                  leave it blank.
+                </p>
+                <input
+                  id="welcome-invite-code"
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  maxLength={24}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  placeholder="VX-XXXXXX"
+                  className="mt-2.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-base uppercase text-[var(--text)] placeholder:text-[var(--dim)]"
+                />
                 {nameProblem ? (
                   <p role="alert" className="mt-2 text-sm text-red-400">
                     {nameProblem}
@@ -5906,6 +6233,12 @@ function WelcomeFlow({
                 This ID is yours for good. Friends scan its QR
                 code from your Home page to connect with you.
               </p>
+              {register.data?.vouchedByUsername ? (
+                <p className="mt-2 text-sm font-medium text-[var(--gold-soft)]">
+                  @{register.data.vouchedByUsername} sent you —
+                  you're recorded as joining on their invite.
+                </p>
+              ) : null}
             </div>
             <p className="mt-6 max-w-md text-base leading-relaxed text-[var(--text)]">
               Now — take the tour. It only takes a minute, and
@@ -5991,6 +6324,117 @@ function WelcomeFlow({
             </div>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** One plain mail message (Anthony, Nov 4, 2026 — shared
+    deck lists): Subject/From header over the full text body,
+    exactly as it was mailed. Opening it stamps it read on
+    the server (the Inbox NEW badge clears). A trash beside
+    the close button removes it from the reader's Inbox. */
+function DeckMailView({
+  id,
+  onClose,
+}: {
+  id: number;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const msg = useQuery({
+    queryKey: ["mailMessage", id],
+    queryFn: () => api.getMailMessage({ id }),
+  });
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteItem = useMutation({
+    mutationFn: () => api.deleteInboxItem({ kind: "mail", refId: id }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+        onClose();
+      }
+    },
+  });
+  useEffect(() => {
+    if (msg.data?.found) {
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msg.data?.found]);
+  const data = msg.data;
+  return (
+    <div
+      className="app-shell fixed inset-0 z-[95] overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Deck list mail"
+    >
+      <div className="mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-album min-w-0 truncate text-xl text-[var(--text)]">
+            {data?.found ? data.subject : "Mail"}
+          </h2>
+          <span className="flex shrink-0 items-center gap-2">
+            {confirmDelete ? (
+              <button
+                type="button"
+                disabled={deleteItem.isPending}
+                onClick={() => {
+                  hapticTick();
+                  deleteItem.mutate();
+                }}
+                className="rounded-full bg-red-500/90 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
+                Delete from Inbox?
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  setConfirmDelete(true);
+                }}
+                aria-label="Delete this mail from my Inbox"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-base text-[var(--text)]"
+              >
+                🗑
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                onClose();
+              }}
+              aria-label="Close this mail"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-lg text-[var(--text)]"
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+        {msg.isLoading ? (
+          <p className="mt-4 text-sm text-[var(--dim)]">Opening…</p>
+        ) : !data?.found ? (
+          <p className="mt-4 text-sm leading-relaxed text-[var(--dim)]">
+            That message isn&rsquo;t available anymore.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-[var(--dim)]">
+              From @{data.fromUsername} ·{" "}
+              {new Date(data.date).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
+            <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 font-sans text-sm leading-relaxed text-[var(--text)]">
+              {data.body}
+            </pre>
+          </>
+        )}
       </div>
     </div>
   );
@@ -6163,6 +6607,11 @@ type StoredAdminNav = {
   /** The Registered Collectors page was open over the
       Settings Admin section. */
   settingsCollectorsOpen: boolean;
+  /** The Admin Hub detail view open on each surface (Hub
+      redesign, Nov 4, 2026): "hub" or one of the six tile
+      views, so a refresh restores the same detail in place. */
+  homeHubView: string;
+  settingsHubView: string;
 };
 
 function readStoredAdminNav(): StoredAdminNav {
@@ -6170,6 +6619,8 @@ function readStoredAdminNav(): StoredAdminNav {
     homeOpen: false,
     homeCollectorsOpen: false,
     settingsCollectorsOpen: false,
+    homeHubView: "hub",
+    settingsHubView: "hub",
   };
   try {
     const raw = window.sessionStorage.getItem(ADMIN_NAV_STORAGE_KEY);
@@ -6179,6 +6630,12 @@ function readStoredAdminNav(): StoredAdminNav {
       homeOpen: parsed.homeOpen === true,
       homeCollectorsOpen: parsed.homeCollectorsOpen === true,
       settingsCollectorsOpen: parsed.settingsCollectorsOpen === true,
+      homeHubView:
+        typeof parsed.homeHubView === "string" ? parsed.homeHubView : "hub",
+      settingsHubView:
+        typeof parsed.settingsHubView === "string"
+          ? parsed.settingsHubView
+          : "hub",
     };
   } catch {
     return empty;
@@ -6284,6 +6741,13 @@ function writeStoredProfileNav(patch: Partial<StoredProfileNav>): void {
     stored copy is healed back to closed, so Home is Home. */
 let profileStackRestoreUsed = false;
 let tabNavigationUsed = false;
+/** Home first-paint coordination (Anthony, Nov 4, 2026):
+    once per app session, Home holds its themed cover until
+    its core data has landed, then reveals the whole screen
+    in one paint — sections never pop in piecemeal again.
+    The flag is session-scoped: later returns to Home render
+    immediately from the query cache. */
+let homeBootRevealedOnce = false;
 
 function HomePanel({
   value,
@@ -6293,10 +6757,14 @@ function HomePanel({
   onOpenPokemon,
   onOpenMagic,
   onOpenStarwars,
+  onOpenFunko,
   onOpenCard,
   onOpenSealed,
   onOpenBinderGroup,
   onOpenSealedSection,
+  onOpenBinderGroupFromProfile,
+  onOpenBinderHomeFromProfile,
+  onOpenSealedSectionFromProfile,
   onOpenPortfolio,
   updateAvailable,
   onOpenUpdate,
@@ -6308,6 +6776,7 @@ function HomePanel({
   onOpenBinder: () => void;
   onOpenComics: () => void;
   onOpenLego: () => void;
+  onOpenFunko: () => void;
   onOpenPokemon: () => void;
   onOpenMagic: () => void;
   onOpenStarwars: () => void;
@@ -6316,6 +6785,12 @@ function HomePanel({
   onOpenBinderGroup: (key: string) => void;
   /** Opens the Sealed section (profile My Collection row). */
   onOpenSealedSection?: () => void;
+  /** Profile-originated section opens (Nov 4, 2026): the
+      My Collection rows' destinations, with the one-Back
+      return to the profile armed. */
+  onOpenBinderGroupFromProfile?: (key: string) => void;
+  onOpenBinderHomeFromProfile?: () => void;
+  onOpenSealedSectionFromProfile?: () => void;
   onOpenPortfolio: () => void;
   updateAvailable?: boolean;
   onOpenUpdate?: () => void;
@@ -6323,6 +6798,12 @@ function HomePanel({
   onOpenChangeRequests?: () => void;
   onOpenOrderMail?: () => void;
 }) {
+  const t = useT();
+  // The last-seen Home, read once from the on-device
+  // snapshot: it seeds every query Home paints from, so a
+  // launch renders the complete Home in the first frame
+  // and the fresh data swaps in quietly behind it.
+  const [homeSeed] = useState(readHomeSnapshot);
   // Hidden "Your Collections" tiles (Anthony, Nov 3, 2026):
   // the user's Settings switches — a hidden tile simply
   // isn't rendered and the rest reflow, still centered
@@ -6330,7 +6811,22 @@ function HomePanel({
   const collectionVisibility = useQuery({
     queryKey: ["collectionVisibility"],
     queryFn: () => api.getCollectionVisibility({}),
+    initialData: homeSeed.visibility?.data,
+    initialDataUpdatedAt: homeSeed.visibility?.savedAt,
   });
+  // Funko tile state (Anthony, Nov 4, 2026): the tile
+  // carries its yellow Coming Soon label — exactly like the
+  // Legos placeholder — until the Funko catalog download
+  // actually completes; then the label comes off and the
+  // tile opens the real section, the way Pokémon, Magic,
+  // and Star Wars Unlimited graduated before it.
+  const funkoCatalog = useQuery({
+    queryKey: ["gameCatalog", "funko"],
+    queryFn: () => api.getGameCatalog({ game: "funko" }),
+    initialData: homeSeed.funko?.data,
+    initialDataUpdatedAt: homeSeed.funko?.savedAt,
+  });
+  const funkoReady = funkoCatalog.data?.complete === true;
   const hiddenTiles = new Set(
     collectionVisibility.data?.hidden ?? [],
   );
@@ -6339,6 +6835,8 @@ function HomePanel({
   const priceAlerts = useQuery({
     queryKey: ["priceAlerts"],
     queryFn: () => api.getPriceAlerts({}),
+    initialData: homeSeed.priceAlerts?.data,
+    initialDataUpdatedAt: homeSeed.priceAlerts?.savedAt,
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnReconnect: true,
@@ -6355,6 +6853,8 @@ function HomePanel({
   const homeFinance = useQuery({
     queryKey: ["finance"],
     queryFn: () => api.getFinance({}),
+    initialData: homeSeed.finance?.data,
+    initialDataUpdatedAt: homeSeed.finance?.savedAt,
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnReconnect: true,
@@ -6370,7 +6870,35 @@ function HomePanel({
   // the example never shows anyway. Users WITH alerts (like
   // Anthony's booster-box alert) never see the example at all.
   const queryClient = useQueryClient();
+  // Keep the on-device Home snapshot fresh: whenever a core
+  // payload lands, it becomes the next launch's first frame.
+  useEffect(() => {
+    if (collectionVisibility.data)
+      writeHomeSnapshotSection("visibility", collectionVisibility.data);
+  }, [collectionVisibility.data]);
+  useEffect(() => {
+    if (homeFinance.data)
+      writeHomeSnapshotSection("finance", homeFinance.data);
+  }, [homeFinance.data]);
+  useEffect(() => {
+    if (priceAlerts.data)
+      writeHomeSnapshotSection("priceAlerts", priceAlerts.data);
+  }, [priceAlerts.data]);
+  useEffect(() => {
+    if (funkoCatalog.data)
+      writeHomeSnapshotSection("funko", funkoCatalog.data);
+  }, [funkoCatalog.data]);
   const [exampleOpen, setExampleOpen] = useState(false);
+  // Back-gesture trap (Anthony, Nov 4, 2026 — the app-wide
+  // rule: an open window eats the phone's Back first). The
+  // example-alert explainer was plain state; it now uses the
+  // shared sheet hook like every other window. Back closes
+  // it WITHOUT dismissing the example (no "Got it" tap, no
+  // dismissal recorded).
+  const exampleSheet = useHistorySheet(
+    "lorcanaExampleAlert",
+    setExampleOpen,
+  );
 
   // Tile order + long-hold drag (Anthony, Nov 3, 2026, late;
   // REBUILT ~11:54 PM after his on-device report that the
@@ -6391,12 +6919,24 @@ function HomePanel({
   // drift budget, the lifted tile tracks the finger through a
   // direct DOM transform (no re-render per move, so it stays
   // fluid), swaps are computed from the pointer position, the
-  // OTHER tiles glide to their new slots with a FLIP
-  // animation (measure, invert, play), and on release the
+  // OTHER tiles glide to their new slots, and on release the
   // tile settles into its slot with a short ease before the
   // order saves. A normal tap still opens the collection:
   // the drag only arms after the hold, and the click that
   // ends a drag is swallowed by the suppress timestamp.
+  // SMOOTHNESS PASS (Nov 4, 2026): Anthony reported the move
+  // WORKED but was extremely janky. Cause: even though the
+  // dragged tile moved by direct transform, every swap still
+  // wrote tileOrder state — re-rendering this whole Home
+  // screen — and the FLIP effect then re-measured every
+  // tile, while pointermove itself called getBoundingClientRect
+  // on the dragged tile and every other tile, unthrottled.
+  // The drag now runs with ZERO React state writes and ZERO
+  // layout reads between lift and drop: slot geometry is
+  // cached once at lift, pointermove is coalesced to one
+  // step per animation frame, other tiles glide by direct
+  // transforms between cached slots, and the reordered list
+  // lives in a ref until the drop commits it once.
   // Hidden tiles keep their saved place but are not rendered,
   // so the visible tiles reflow centered three-across.
   const serverTileOrder = collectionVisibility.data?.order ?? [];
@@ -6410,7 +6950,6 @@ function HomePanel({
   const suppressTileClickUntilRef = useRef(0);
   const tileGridRef = useRef<HTMLDivElement | null>(null);
   const tileElsRef = useRef(new Map<string, HTMLDivElement>());
-  const tileRectsRef = useRef(new Map<string, DOMRect>());
   const tileDragRef = useRef<{
     key: string;
     grabDX: number;
@@ -6419,6 +6958,22 @@ function HomePanel({
     transY: number;
     pointerX: number;
     pointerY: number;
+    // Home slot of the dragged tile, cached at lift time.
+    homeLeft: number;
+    homeTop: number;
+    // Slot rects of every visible tile, cached at lift time
+    // in start (visible) order — position i's rect never
+    // moves during the drag, so this serves every hit test
+    // and glide with zero layout reads.
+    slots: { left: number; top: number; right: number; bottom: number }[];
+    visibleKeys: string[];
+    // The full order as the drag has rearranged it so far,
+    // kept only in this ref until the drop commits it once.
+    logicalOrder: string[];
+    rafId: number;
+    pendingX: number;
+    pendingY: number;
+    hasPending: boolean;
     settling: boolean;
   } | null>(null);
   // Sync from the profile whenever the saved order changes and
@@ -6445,6 +7000,7 @@ function HomePanel({
           | "lego"
           | "comics"
           | "starwars"
+          | "funko"
         )[],
       }),
     onSuccess: () => {
@@ -6457,44 +7013,18 @@ function HomePanel({
     tileOrder.length > 0
       ? tileOrder
       : COLLECTION_TILE_OPTIONS.map((c) => c.key as string);
-  // FLIP: whenever the order changes mid-drag, every tile
-  // except the dragged one glides from its previous visual
-  // spot to its new slot; the dragged tile's transform is
-  // re-based onto its new slot so it never jumps out from
-  // under the finger.
-  useLayoutEffect(() => {
-    const els = tileElsRef.current;
-    const drag = tileDragRef.current;
-    els.forEach((el, key) => {
-      const rect = el.getBoundingClientRect();
-      const prev = tileRectsRef.current.get(key);
-      if (drag && drag.key === key) {
-        // The dragged tile's rect includes its drag transform;
-        // re-base so the tile stays exactly under the finger.
-        const slotLeft = rect.left - drag.transX;
-        const slotTop = rect.top - drag.transY;
-        drag.transX = drag.pointerX - drag.grabDX - slotLeft;
-        drag.transY = drag.pointerY - drag.grabDY - slotTop;
-        el.style.transform = `translate(${drag.transX}px, ${drag.transY}px) scale(1.05)`;
-        tileRectsRef.current.set(key, rect);
-        return;
-      }
-      if (prev) {
-        const dx = prev.left - rect.left;
-        const dy = prev.top - rect.top;
-        if (dx !== 0 || dy !== 0) {
-          el.style.transition = "none";
-          el.style.transform = `translate(${dx}px, ${dy}px)`;
-          requestAnimationFrame(() => {
-            el.style.transition =
-              "transform 230ms cubic-bezier(0.22, 1, 0.36, 1)";
-            el.style.transform = "";
-          });
-        }
-      }
-      tileRectsRef.current.set(key, rect);
-    });
-  }, [tileOrder]);
+  // No FLIP effect on tileOrder anymore (Nov 4, 2026,
+  // smoothness pass): the old one re-measured every tile's
+  // rect and forced a React re-render of the whole Home
+  // screen on EVERY swap mid-drag — that measurement +
+  // re-render loop, interleaved with a getBoundingClientRect
+  // per pointermove, was the jank Anthony reported. The drag
+  // now animates entirely through direct DOM transforms
+  // against geometry cached at lift time (see beginTilePress)
+  // and tileOrder only changes once, at the drop, in the same
+  // frame every transform clears — each tile is already
+  // visually in its committed slot, so the commit moves
+  // nothing and needs no FLIP.
   const beginTilePress = (
     key: string,
     startX: number,
@@ -6563,12 +7093,106 @@ function HomePanel({
       }
       window.removeEventListener("touchmove", blockTouchMove);
     };
+    // Glide every non-dragged tile to the slot its logical
+    // position occupies, using ONLY direct DOM transforms
+    // against the geometry cached at lift time. No state
+    // writes, no layout reads — the compositor does the
+    // work, so the glide stays at frame rate.
+    const glideOthers = () => {
+      const drag = tileDragRef.current;
+      if (!drag) return;
+      const visibleSeq = drag.logicalOrder.filter((k) =>
+        drag.visibleKeys.includes(k),
+      );
+      drag.visibleKeys.forEach((otherKey, startIdx) => {
+        if (otherKey === key) return;
+        const el = tileElsRef.current.get(otherKey);
+        if (!el) return;
+        const logicalIdx = visibleSeq.indexOf(otherKey);
+        const home = drag.slots[startIdx];
+        const dest = drag.slots[logicalIdx];
+        if (!home || !dest) return;
+        const dx = dest.left - home.left;
+        const dy = dest.top - home.top;
+        el.style.transition =
+          "transform 260ms cubic-bezier(0.22, 1, 0.36, 1)";
+        el.style.transform =
+          dx === 0 && dy === 0
+            ? ""
+            : `translate(${dx}px, ${dy}px)`;
+      });
+    };
+    // One pointer step per animation frame at most: the
+    // dragged tile follows the finger through a direct DOM
+    // transform computed from the cached home slot, and the
+    // swap target comes from the cached slot rects. Nothing
+    // here touches React state or forces a layout read.
+    const processMove = () => {
+      const drag = tileDragRef.current;
+      if (!drag) return;
+      drag.rafId = 0;
+      if (!drag.hasPending || drag.settling) return;
+      drag.hasPending = false;
+      const el = tileElsRef.current.get(key);
+      if (!el) return;
+      const px = drag.pendingX;
+      const py = drag.pendingY;
+      drag.pointerX = px;
+      drag.pointerY = py;
+      drag.transX = px - drag.grabDX - drag.homeLeft;
+      drag.transY = py - drag.grabDY - drag.homeTop;
+      el.style.transform = `translate(${drag.transX}px, ${drag.transY}px) scale(1.05)`;
+      let targetIdx = -1;
+      for (let i = 0; i < drag.slots.length; i++) {
+        const s = drag.slots[i];
+        if (
+          s &&
+          px >= s.left &&
+          px <= s.right &&
+          py >= s.top &&
+          py <= s.bottom
+        ) {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx < 0) return;
+      const vis = drag.logicalOrder.filter((k) =>
+        drag.visibleKeys.includes(k),
+      );
+      const from = vis.indexOf(key);
+      const to = targetIdx;
+      if (from < 0 || to < 0 || from === to) return;
+      const swapTmp = vis[from];
+      const swapDest = vis[to];
+      if (swapTmp == null || swapDest == null) return;
+      vis[from] = swapDest;
+      vis[to] = swapTmp;
+      let vi = 0;
+      drag.logicalOrder = drag.logicalOrder.map((k) =>
+        drag.visibleKeys.includes(k) ? (vis[vi++] ?? k) : k,
+      );
+      glideOthers();
+      hapticTick();
+    };
     const timer = window.setTimeout(() => {
       const el = tileElsRef.current.get(key);
       if (!el) return;
       armed = true;
       draggingTileRef.current = key;
       dragStartOrderRef.current = [...tileOrderRef.current];
+      // Cache every visible tile's slot rect BEFORE any
+      // transform is applied: this geometry serves the whole
+      // drag, so pointermove never has to measure the DOM.
+      const visibleKeys = displayTileOrder.filter(
+        (k) => !hiddenTiles.has(k),
+      );
+      const slots = visibleKeys.map((k) => {
+        const r = tileElsRef.current.get(k)?.getBoundingClientRect();
+        return r
+          ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+          : { left: 0, top: 0, right: 0, bottom: 0 };
+      });
       const rect = el.getBoundingClientRect();
       tileDragRef.current = {
         key,
@@ -6578,11 +7202,22 @@ function HomePanel({
         transY: 0,
         pointerX: lastX,
         pointerY: lastY,
+        homeLeft: rect.left,
+        homeTop: rect.top,
+        slots,
+        visibleKeys,
+        logicalOrder: [...tileOrderRef.current],
+        rafId: 0,
+        pendingX: lastX,
+        pendingY: lastY,
+        hasPending: false,
         settling: false,
       };
+      tileElsRef.current.forEach((t) => {
+        t.style.willChange = "transform";
+      });
       el.style.transition = "none";
       el.style.transform = "translate(0px, 0px) scale(1.05)";
-      el.style.willChange = "transform";
       applyScrollLock(el);
       setDraggingTile(key);
       hapticConfirm();
@@ -6601,41 +7236,12 @@ function HomePanel({
       }
       ev.preventDefault();
       const drag = tileDragRef.current;
-      const el = tileElsRef.current.get(key);
-      if (!drag || !el) return;
-      drag.pointerX = ev.clientX;
-      drag.pointerY = ev.clientY;
-      const rect = el.getBoundingClientRect();
-      const slotLeft = rect.left - drag.transX;
-      const slotTop = rect.top - drag.transY;
-      drag.transX = ev.clientX - drag.grabDX - slotLeft;
-      drag.transY = ev.clientY - drag.grabDY - slotTop;
-      el.style.transform = `translate(${drag.transX}px, ${drag.transY}px) scale(1.05)`;
-      // Swap target: the tile whose slot the pointer is over.
-      let targetKey: string | null = null;
-      tileElsRef.current.forEach((other, otherKey) => {
-        if (otherKey === key || targetKey) return;
-        const r = other.getBoundingClientRect();
-        if (
-          ev.clientX >= r.left &&
-          ev.clientX <= r.right &&
-          ev.clientY >= r.top &&
-          ev.clientY <= r.bottom
-        ) {
-          targetKey = otherKey;
-        }
-      });
-      if (targetKey) {
-        const cur = [...tileOrderRef.current];
-        const from = cur.indexOf(key);
-        const to = cur.indexOf(targetKey);
-        if (from >= 0 && to >= 0 && from !== to) {
-          cur[from] = targetKey;
-          cur[to] = key;
-          tileOrderRef.current = cur;
-          setTileOrder(cur);
-          hapticTick();
-        }
+      if (!drag || drag.settling) return;
+      drag.pendingX = ev.clientX;
+      drag.pendingY = ev.clientY;
+      drag.hasPending = true;
+      if (!drag.rafId) {
+        drag.rafId = requestAnimationFrame(processMove);
       }
     };
     const onUp = () => {
@@ -6645,22 +7251,48 @@ function HomePanel({
       suppressTileClickUntilRef.current = Date.now() + 400;
       const drag = tileDragRef.current;
       const el = tileElsRef.current.get(key);
-      const finalOrder = [...tileOrderRef.current];
+      const finalOrder = drag
+        ? [...drag.logicalOrder]
+        : [...tileOrderRef.current];
       const startOrder = dragStartOrderRef.current;
       if (drag && el) {
-        // Settle: glide from the finger position into the
-        // slot, then hand control back to the layout.
+        // Settle: glide the dragged tile from under the
+        // finger into its final slot, then commit the new
+        // order in the same frame every transform clears —
+        // each tile is already visually in that slot, so the
+        // commit itself moves nothing.
         drag.settling = true;
+        if (drag.rafId) {
+          cancelAnimationFrame(drag.rafId);
+          drag.rafId = 0;
+        }
+        const visibleSeq = finalOrder.filter((k) =>
+          drag.visibleKeys.includes(k),
+        );
+        const finalIdx = visibleSeq.indexOf(key);
+        const startIdx = drag.visibleKeys.indexOf(key);
+        const home = drag.slots[startIdx];
+        const dest = drag.slots[finalIdx];
+        const dx = home && dest ? dest.left - home.left : 0;
+        const dy = home && dest ? dest.top - home.top : 0;
         el.style.transition =
-          "transform 200ms cubic-bezier(0.22, 1, 0.36, 1)";
-        el.style.transform = "";
+          "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+        el.style.transform =
+          dx === 0 && dy === 0
+            ? ""
+            : `translate(${dx}px, ${dy}px)`;
         window.setTimeout(() => {
-          el.style.transition = "";
-          el.style.willChange = "";
+          tileElsRef.current.forEach((t) => {
+            t.style.transition = "";
+            t.style.transform = "";
+            t.style.willChange = "";
+          });
           tileDragRef.current = null;
           draggingTileRef.current = null;
+          tileOrderRef.current = finalOrder;
+          setTileOrder(finalOrder);
           setDraggingTile(null);
-        }, 210);
+        }, 230);
       } else {
         tileDragRef.current = null;
         draggingTileRef.current = null;
@@ -6684,6 +7316,7 @@ function HomePanel({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   };
+
   const tileClickGuarded = (open: () => void) => () => {
     if (Date.now() < suppressTileClickUntilRef.current) return;
     open();
@@ -6739,7 +7372,7 @@ function HomePanel({
     priceAlerts.data.alerts.length === 0 &&
     !priceAlerts.data.exampleDismissed;
   const dismissExampleAlert = async () => {
-    setExampleOpen(false);
+    exampleSheet.closeSheet();
     try {
       await api.dismissExampleAlert({});
     } catch {
@@ -6751,6 +7384,68 @@ function HomePanel({
   };
   const comicsValue = COMICS_TOTAL_VALUE;
   const totalValue = value != null ? value + comicsValue : null;
+  // FIRST-PAINT COORDINATION (Anthony, Nov 4, 2026): Home
+  // used to populate piecemeal — the portfolio pill, Top
+  // Movers, and Your Collections popping in one at a time
+  // as their queries landed. Now, once per session, Home
+  // holds a themed cover (the same spirit as the refresh
+  // cover that restores the saved view before first paint)
+  // until its core queries have settled — the data comes
+  // from the on-device query cache first, so the hold is
+  // short — and then reveals the complete screen in ONE
+  // paint. Errors settle too: a failed query never traps
+  // the user behind the cover.
+  const homeCoreReady =
+    (collectionVisibility.isSuccess ||
+      collectionVisibility.isError) &&
+    (homeFinance.isSuccess || homeFinance.isError) &&
+    (priceAlerts.isSuccess || priceAlerts.isError);
+  // CACHE-FIRST (Anthony's re-report, Nov 4, 2026): when
+  // the core data is already on the device at mount (the
+  // query cache / seeded snapshot), Home paints IMMEDIATELY
+  // from it in one frame and the fresh data swaps in behind
+  // — no cover, no wait. The cover is reserved for a true
+  // first-ever run with nothing cached yet.
+  const homeCachedAtMount =
+    collectionVisibility.data != null &&
+    homeFinance.data != null &&
+    priceAlerts.data != null;
+  const [homeRevealed, setHomeRevealed] = useState(
+    () => homeBootRevealedOnce || homeCachedAtMount,
+  );
+  useEffect(() => {
+    if (homeCoreReady && !homeRevealed) {
+      homeBootRevealedOnce = true;
+      setHomeRevealed(true);
+    }
+  }, [homeCoreReady, homeRevealed]);
+  if (!homeRevealed) {
+    return (
+      <div
+        className="fixed inset-0 z-[65] flex flex-col items-center justify-center gap-5 bg-[var(--bg)] px-8"
+        role="status"
+        aria-label={t("home.opening")}
+      >
+        <img
+          src={vaultXRingArtwork}
+          alt=""
+          className="h-24 w-24 animate-pulse rounded-full"
+        />
+        <p className="text-sm font-semibold text-[var(--dim)]">
+          {t("home.opening")}
+        </p>
+        <div aria-hidden="true" className="w-full max-w-xs space-y-3">
+          <div className="h-14 animate-pulse rounded-full bg-[var(--surface)]" />
+          <div className="h-24 animate-pulse rounded-2xl bg-[var(--surface)]" />
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="aspect-square animate-pulse rounded-2xl bg-[var(--surface)]" />
+            <div className="aspect-square animate-pulse rounded-2xl bg-[var(--surface)]" />
+            <div className="aspect-square animate-pulse rounded-2xl bg-[var(--surface)]" />
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-4">
       {/* Home header REMOVED (Anthony, Nov 2, 2026, late): the
@@ -6770,6 +7465,11 @@ function HomePanel({
         onOpenSealed={onOpenSealed}
         onOpenBinderGroup={onOpenBinderGroup}
         onOpenSealedSection={onOpenSealedSection}
+        onOpenBinderGroupFromProfile={onOpenBinderGroupFromProfile}
+        onOpenBinderHomeFromProfile={onOpenBinderHomeFromProfile}
+        onOpenSealedSectionFromProfile={
+          onOpenSealedSectionFromProfile
+        }
         updateAvailable={updateAvailable}
         onOpenUpdate={onOpenUpdate}
         onOpenUpdateTest={onOpenUpdateTest}
@@ -6820,7 +7520,7 @@ function HomePanel({
       {showExampleAlert ? (
         <button
           type="button"
-          onClick={() => setExampleOpen(true)}
+          onClick={() => exampleSheet.openSheet()}
           aria-label="Example price alert — tap to learn how price alerts work"
           className="mb-3 block w-full rounded-full border border-red-800/60 bg-red-900/30 px-6 py-2.5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
         >
@@ -6925,8 +7625,7 @@ function HomePanel({
                 <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
                   Switch a collection off and its tile leaves
                   Home; switch it back on and the tile returns.
-                  These are the same switches as Settings — a
-                  change here is a change there.
+                  This is the one place these switches live.
                 </p>
               </div>
               <button
@@ -7150,12 +7849,12 @@ function HomePanel({
                       >
                         <stop
                           offset="0%"
-                          stopColor="#6c7cff"
+                          style={{ stopColor: "var(--accent)" }}
                           stopOpacity={0.32}
                         />
                         <stop
                           offset="100%"
-                          stopColor="#6c7cff"
+                          style={{ stopColor: "var(--accent)" }}
                           stopOpacity={0.02}
                         />
                       </linearGradient>
@@ -7189,16 +7888,16 @@ function HomePanel({
               className="mt-3.5"
             >
               <h2 className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)]">
-                Top movers · 24h
+                {t("home.topMovers")}
               </h2>
-              <div className="mt-1.5 divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+              <div className="mt-1 divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
                 {homeFinance.data.movers24h.map((m) => (
                   <button
                     key={m.cardId}
                     type="button"
                     onClick={() => onOpenCard(m.cardId)}
                     aria-label={`Open ${m.name} — ${m.deltaTotal >= 0 ? "gained" : "lost"} ${fmtUSD(Math.abs(m.deltaTotal))} in the last 24 hours`}
-                    className="flex w-full items-center gap-2.5 px-3 py-[5px] text-left"
+                    className="flex w-full items-center gap-2.5 px-3 py-[3px] text-left"
                   >
                     <MoverThumb cardId={m.cardId} small />
                     <span className="min-w-0 flex-1">
@@ -7255,7 +7954,7 @@ function HomePanel({
         <div className="flex items-end justify-between gap-3">
           <div className="flex items-center gap-1.5">
             <h2 className="font-album text-lg text-[var(--text)]">
-              Your Collections
+              {t("home.yourCollections")}
             </h2>
             <button
               type="button"
@@ -7263,7 +7962,7 @@ function HomePanel({
                 hapticTick();
                 collectionsPanelSheet.openSheet();
               }}
-              aria-label="Choose which collections show on Home — opens a window with the same switches as Settings"
+              aria-label="Choose which collections show on Home — opens the Your Collections window"
               title="Show or hide collections"
               className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--dim)] transition active:scale-95"
             >
@@ -7333,7 +8032,7 @@ function HomePanel({
                   >
                     <img
                       src={collectionLorcana}
-                      alt="Lorcana collection artwork: a golden ink pot spilling blue and violet ink around floating illustrated cards"
+                      alt="Lorcana collection artwork: an open storybook with illustrated cards around it and golden magical light rising off the pages"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
@@ -7387,18 +8086,13 @@ function HomePanel({
                   >
                     <img
                       src={collectionLego}
-                      alt="Legos collection artwork: colorful interlocking building bricks with a small brick castle tower and house under a starry sky"
+                      alt="Legos collection artwork: colorful building bricks spilling out of an open dark vault chest with blue-purple glow"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="flex items-baseline justify-center gap-1.5 px-1 py-2 text-center">
-                      <span className="whitespace-nowrap text-xs font-semibold text-[var(--text)] sm:text-sm">
-                        Legos
-                      </span>
-                      <span className="whitespace-nowrap text-[9px] font-semibold uppercase tracking-wide text-[#ffb020]">
-                        Coming soon
-                      </span>
+                    <span className="block px-1 py-2 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
+                      Legos
                     </span>
                   </button>
                 ) : key === "comics" ? (
@@ -7419,7 +8113,7 @@ function HomePanel({
                       Comics
                     </span>
                   </button>
-                ) : (
+                ) : key === "starwars" ? (
                   <button
                     type="button"
                     onClick={tileClickGuarded(onOpenStarwars)}
@@ -7435,6 +8129,31 @@ function HomePanel({
                     />
                     <span className="block px-1 py-2 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
                       Star Wars Unlimited
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={tileClickGuarded(onOpenFunko)}
+                    aria-label="Open your Funko Pop! collection"
+                    className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  >
+                    <img
+                      src={collectionFunko}
+                      alt="Funko collection artwork: a minimal glowing gold crown floating over a dark vinyl figure inside a gunmetal ring, on a deep blue and violet smoky background"
+                      loading="lazy"
+                      draggable={false}
+                      className="block aspect-square w-full object-cover"
+                    />
+                    <span className="flex items-baseline justify-center gap-1.5 px-1 py-2 text-center">
+                      <span className="whitespace-nowrap text-xs font-semibold text-[var(--text)] sm:text-sm">
+                        Funko
+                      </span>
+                      {funkoReady ? null : (
+                        <span className="min-w-0 truncate whitespace-nowrap text-[9px] font-semibold uppercase tracking-wide text-[#ffb020]">
+                          {t("common.comingSoon")}
+                        </span>
+                      )}
                     </span>
                   </button>
                 )}
@@ -9558,7 +10277,13 @@ function SealedSheet({
                 <dt className="text-[11px] uppercase tracking-wide text-[var(--dim)]">
                   Owned
                 </dt>
-                <dd className="mt-0.5 text-[var(--text)]">× {item.qty}</dd>
+                <dd
+                  className={`mt-0.5 text-[var(--text)] ${
+                    item.qty === 0 ? "zero-owned" : ""
+                  }`}
+                >
+                  × {item.qty}
+                </dd>
               </div>
             </dl>
 
@@ -9673,8 +10398,8 @@ function SealedSheet({
                       >
                         <defs>
                           <linearGradient id="sealedValueFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#7aa5ff" stopOpacity={0.38} />
-                            <stop offset="100%" stopColor="#7aa5ff" stopOpacity={0.02} />
+                            <stop offset="0%" style={{ stopColor: "var(--accent)" }} stopOpacity={0.38} />
+                            <stop offset="100%" style={{ stopColor: "var(--accent)" }} stopOpacity={0.02} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
@@ -9720,8 +10445,8 @@ function SealedSheet({
                           stroke="var(--accent)"
                           strokeWidth={2.5}
                           fill="url(#sealedValueFill)"
-                          dot={{ r: 3, fill: "#7aa5ff", strokeWidth: 0 }}
-                          activeDot={{ r: 4.5, fill: "#7aa5ff", strokeWidth: 0 }}
+                          dot={{ r: 3, fill: "var(--accent)", strokeWidth: 0 }}
+                          activeDot={{ r: 4.5, fill: "var(--accent)", strokeWidth: 0 }}
                           style={{
                             filter: "drop-shadow(0 0 6px rgba(122,165,255,0.45))",
                           }}
@@ -9777,6 +10502,11 @@ function SealedSheet({
                   COMICS.find((c) => c.id === id)?.cover
                 }
               />
+              <WatchToggleButton
+                targetKind="sealed"
+                cardId={null}
+                sealedName={item.name}
+              />
               {/* No standalone "Where it lives" section at the
                   bottom anymore (Anthony's placement change,
                   Nov 2, 2026): it is merged into the Copies owned
@@ -9786,6 +10516,291 @@ function SealedSheet({
         )}
       </div>
     </div>
+  );
+}
+
+/** The standalone Sealed page (RESTORED Nov 4, 2026,
+    ~9:50 AM, as a destination only): the acrylic shelf of
+    every sealed product — booster boxes, prerelease box,
+    troves, packs, gift sets, starter decks — with the
+    Owned vs All toggle, a set filter, and sorting the old
+    page carried. It was deleted with the Sealed bottom
+    tab on Nov 3, 2026 and sealed products moved inside
+    the Lorcana set pages (they still live there too);
+    Anthony directed the page itself restored as the one
+    destination of his profile's My Collection Sealed row
+    — the row had been landing on the Lorcana binder page,
+    because the "sealed" view no longer existed and fell
+    through to it. NO Sealed tab returns to the bottom
+    menu: this page is reached from the profile row (and
+    Back returns there in one press — see
+    openSealedSectionFromProfile). Tapping a product opens
+    its own sealed-item detail, like everywhere else. */
+function SealedPanel({
+  onOpenSealed,
+}: {
+  onOpenSealed: (name: string) => void;
+}) {
+  const sealed = useQuery({
+    queryKey: ["sealed"],
+    queryFn: () => api.getSealed({}),
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+  const intro = useSectionIntro("sealed");
+  const [ownedOnly, setOwnedOnly] = useState(true);
+  const [sort, setSort] = useState<
+    "value" | "date" | "name" | "set"
+  >("value");
+  const [setFilter, setSetFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const items = sealed.data?.items ?? [];
+  const totals = sealed.data?.totals;
+  const setNames = Array.from(
+    new Set(items.map((i) => i.setName)),
+  ).sort((a, b) => a.localeCompare(b));
+  // Product type, read off the product's own name (the
+  // catalog carries no separate type field): the name
+  // itself says Booster Box, Trove, Pack, and so on.
+  const typeOf = (name: string): string => {
+    if (name.includes("Booster Box") || name.includes("Prerelease"))
+      return "Booster Boxes";
+    if (name.includes("Illumineer's Trove")) return "Troves";
+    if (name.includes("Booster Pack")) return "Booster Packs";
+    if (name.includes("Gift Set") || name.includes("Gift Box"))
+      return "Gift Sets";
+    if (name.includes("Starter Deck") || name.includes("Starter Set"))
+      return "Starter Decks";
+    if (name.includes("Illumineer's Quest")) return "Quest Boxes";
+    return "Other Products";
+  };
+  const typeNames = Array.from(
+    new Set(items.map((i) => typeOf(i.name))),
+  ).sort((a, b) => a.localeCompare(b));
+  const shown = items
+    .filter((i) => !ownedOnly || i.qty > 0)
+    .filter((i) => setFilter === "all" || i.setName === setFilter)
+    .filter((i) => typeFilter === "all" || typeOf(i.name) === typeFilter)
+    .slice()
+    .sort((a, b) => {
+      if (sort === "name") {
+        return a.name
+          .replace(/^Disney Lorcana: /, "")
+          .localeCompare(b.name.replace(/^Disney Lorcana: /, ""));
+      }
+      if (sort === "set") {
+        return (
+          a.setName.localeCompare(b.setName) ||
+          a.name.localeCompare(b.name)
+        );
+      }
+      if (sort === "date") {
+        // Newest first, from the date the quantity was
+        // last set in the app (the getSealed acquiredAt
+        // field — the date sort's honest input). Products
+        // never set in the app carry no date and sort
+        // last, never under an invented one.
+        const at = a.acquiredAt ? Date.parse(a.acquiredAt) : NaN;
+        const bt = b.acquiredAt ? Date.parse(b.acquiredAt) : NaN;
+        if (Number.isNaN(at) && Number.isNaN(bt))
+          return a.name.localeCompare(b.name);
+        if (Number.isNaN(at)) return 1;
+        if (Number.isNaN(bt)) return -1;
+        return bt - at || a.name.localeCompare(b.name);
+      }
+      return b.value - a.value || b.unitValue - a.unitValue;
+    });
+  const ownedDistinct = items.filter((i) => i.qty > 0).length;
+  return (
+    <section aria-label="Sealed products" className="pt-4">
+      <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
+        Sealed
+      </h1>
+      <p className="mt-1 text-sm text-[var(--dim)]">
+        {sealed.data
+          ? `${ownedDistinct} product${ownedDistinct === 1 ? "" : "s"} in your vault · ${totals?.qty ?? 0} copies · ${fmtUSD(totals?.value ?? 0)} total value`
+          : "Your unopened boxes, troves, and packs."}
+      </p>
+      <div className="mt-3">
+        <HideableIntroWindow
+          title={
+            <span className="text-sm font-bold text-[var(--text)]">
+              Sealed products
+            </span>
+          }
+          hidden={intro.hidden}
+          onToggle={intro.toggle}
+        >
+          <p className="mt-2 text-sm leading-relaxed text-[var(--dim)]">
+            The Sealed shelf keeps your unopened boxes, troves,
+            and packs in their acrylic cases, each with its own
+            value and history. Tap any product to open it and
+            set how many unopened copies you own.
+          </p>
+        </HideableIntroWindow>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div
+          className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
+          role="group"
+          aria-label="Show owned products or all products"
+        >
+          {(
+            [
+              ["owned", "Owned"],
+              ["all", "All"],
+            ] as const
+          ).map(([value, label]) => {
+            const active =
+              (value === "owned") === ownedOnly;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  hapticTick();
+                  setOwnedOnly(value === "owned");
+                }}
+                className={`rounded-full px-3.5 py-1.5 text-sm ${
+                  active
+                    ? "bg-[var(--gold)] font-bold text-black"
+                    : "text-[var(--text)]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <VxSelect
+          ariaLabel="Sort sealed products"
+          value={sort}
+          onChange={(v) =>
+            setSort(v as "value" | "date" | "name" | "set")
+          }
+          options={[
+            { value: "value", label: "Sort: Value" },
+            { value: "date", label: "Sort: Date added" },
+            { value: "name", label: "Sort: Name" },
+            { value: "set", label: "Sort: Set" },
+          ]}
+          dense
+        />
+        <VxSelect
+          ariaLabel="Filter sealed products by type"
+          value={typeFilter}
+          onChange={setTypeFilter}
+          options={[
+            { value: "all", label: "All types" },
+            ...typeNames.map((t) => ({ value: t, label: t })),
+          ]}
+          dense
+        />
+        <VxSelect
+          ariaLabel="Filter sealed products by set"
+          value={setFilter}
+          onChange={setSetFilter}
+          options={[
+            { value: "all", label: "All sets" },
+            ...setNames.map((s) => ({ value: s, label: s })),
+          ]}
+          dense
+        />
+      </div>
+      {sealed.isPending ? (
+        <p className="py-14 text-center text-sm text-[var(--dim)]">
+          Lining up your sealed shelf…
+        </p>
+      ) : sealed.isError ? (
+        <p className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center text-sm text-red-400">
+          The Sealed shelf couldn&rsquo;t load.{" "}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => void sealed.refetch()}
+          >
+            Try again
+          </button>
+        </p>
+      ) : shown.length === 0 ? (
+        <p className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center text-sm text-[var(--dim)]">
+          {ownedOnly
+            ? "No sealed products in your vault match those filters — switch to All to see every product, owned or not."
+            : "No sealed products match those filters."}
+        </p>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          {shown.map((item) => {
+            const photo =
+              SEALED_PHOTOS[item.name] ?? sealedBoosterFront;
+            const ghosted = item.qty <= 0;
+            return (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  onOpenSealed(item.name);
+                }}
+                aria-label={`${item.name} — sealed product. ${
+                  ghosted
+                    ? "Not in your vault yet"
+                    : `Owned ${item.qty}`
+                }. Tap to open the sealed item.`}
+                className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left transition active:scale-[0.98]"
+              >
+                {SEALED_IN_CASE.has(item.name) ? (
+                  <span className="block aspect-square bg-[var(--bg)]">
+                    <img
+                      src={photo}
+                      alt=""
+                      className={`h-full w-full object-cover ${ghosted ? "ghost-img" : ""}`}
+                    />
+                  </span>
+                ) : (
+                  <span className="acrylic-case block">
+                    <img
+                      src={photo}
+                      alt=""
+                      className={`h-full w-full object-contain px-1.5 pb-5 pt-1.5 ${ghosted ? "ghost-img" : ""}`}
+                    />
+                    <span
+                      className="acrylic-stand"
+                      aria-hidden="true"
+                    />
+                  </span>
+                )}
+                <span className="block px-2 py-2">
+                  <span className="block text-xs font-semibold leading-snug text-[var(--text)]">
+                    {item.name.replace(/^Disney Lorcana: /, "")}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-[var(--dim)]">
+                    {ghosted
+                      ? `${fmtUSD(item.unitValue)} each · not in your vault yet`
+                      : `Owned ×${item.qty} · ${fmtUSD(item.unitValue)} each`}
+                  </span>
+                  {item.jpyValue != null && item.qty > 0 ? (
+                    <span className="mt-0.5 block text-[11px] text-[var(--dim)]">
+                      ¥
+                      {Math.round(
+                        item.jpyValue / item.qty,
+                      ).toLocaleString()}{" "}
+                      each
+                      {item.marketSourceLabel
+                        ? ` · Priced from ${item.marketSourceLabel}`
+                        : ""}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -10219,6 +11234,20 @@ const SETTINGS_JUMPS: {
     ),
   },
   {
+    id: "settings-language",
+    label: "Language",
+    // Globe in the same 1.8-stroke line style as every other
+    // section icon (Anthony, Nov 4, 2026): a circle with its
+    // meridian and parallels — the language mark.
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18" />
+        <path d="M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3Z" />
+      </>
+    ),
+  },
+  {
     id: "settings-username",
     label: "Username",
     // Person/identity glyph in the same 1.8-stroke line
@@ -10230,36 +11259,6 @@ const SETTINGS_JUMPS: {
       <>
         <circle cx="12" cy="8" r="3.6" />
         <path d="M5 20c.8-3.4 3.4-5 7-5s6.2 1.6 7 5" />
-      </>
-    ),
-  },
-  {
-    id: "settings-registry",
-    label: "Vault X server registry",
-    // Original artwork in the app's icon family (Anthony,
-    // Nov 3, 2026, late): a server stack — two rack units
-    // with LED dots — held inside the Vault ring, drawn in
-    // the same 1.8-stroke line style as every other section
-    // icon. No third-party marks.
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="10" />
-        <rect x="7" y="7.5" width="10" height="4" rx="1.2" />
-        <rect x="7" y="12.5" width="10" height="4" rx="1.2" />
-        <path d="M9.4 9.5h.01" strokeWidth="2.4" />
-        <path d="M9.4 14.5h.01" strokeWidth="2.4" />
-      </>
-    ),
-  },
-  {
-    id: "settings-collections",
-    label: "Your Collections",
-    icon: (
-      <>
-        <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
-        <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
-        <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
-        <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
       </>
     ),
   },
@@ -10277,7 +11276,7 @@ const SETTINGS_JUMPS: {
   },
   {
     id: "settings-save-count",
-    label: "Save collection count",
+    label: "Save collection count confirmation",
     icon: (
       <>
         <rect x="4" y="4" width="16" height="16" rx="3" />
@@ -10330,17 +11329,6 @@ const SETTINGS_JUMPS: {
       </>
     ),
   },
-  {
-    id: "settings-updates",
-    label: "App updates",
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 16V8" />
-        <path d="m8.5 11.5 3.5-3.5 3.5 3.5" />
-      </>
-    ),
-  },
 ];
 
 /** The symbol beside a Settings section heading (Anthony,
@@ -10382,8 +11370,11 @@ function SettingsSectionIcon({ id }: { id: string }) {
     with the approvals reassurance at the end. The invite
     link is always the sharer's own pasted link — nothing
     here is invented or hard-coded. */
-function buildShareMessage(inviteLink: string): string {
-  return [
+function buildShareMessage(
+  inviteLink: string,
+  inviteCode?: string | null,
+): string {
+  const lines = [
     "First: you'll need the Muse app — Vault X runs inside Muse. Download Muse with my invite link below, then I'll get you the Vault X install file.",
     "",
     inviteLink,
@@ -10393,7 +11384,19 @@ function buildShareMessage(inviteLink: string): string {
     '2) Give that file to your Muse and say: "Please install Vault X following the instructions in this file."',
     "3) Pick your username — there's a quick required tour the first time you open it.",
     "Heads-up: Muse will ask your approval for a couple of steps — nothing you approve touches your personal data.",
-  ].join("\n");
+  ];
+  // The sharer's own Vault X invite code (Anthony, Nov 4,
+  // 2026): attribution is captured from the code itself at
+  // registration — the newcomer never types a name in. The
+  // code is derived server-side from their Collector ID, so
+  // it is always theirs and always resolvable.
+  if (inviteCode) {
+    lines.push(
+      "",
+      `My Vault X invite code: ${inviteCode} — the app asks for it when you register, so it knows I sent you.`,
+    );
+  }
+  return lines.join("\n");
 }
 
 /** Share Vault X (Anthony, Nov 3, 2026, ~2:10 PM; moved
@@ -10414,6 +11417,10 @@ function ShareVaultXSection() {
   const info = useQuery({
     queryKey: ["museInviteLink"],
     queryFn: () => api.getMuseInviteLink({}),
+  });
+  const collectorId = useQuery({
+    queryKey: ["collectorId"],
+    queryFn: () => api.getCollectorId({}),
   });
   const [draft, setDraft] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -10456,7 +11463,7 @@ function ShareVaultXSection() {
       linkInputRef.current?.focus();
       return;
     }
-    const message = buildShareMessage(current);
+    const message = buildShareMessage(current, collectorId.data?.inviteCode);
     if (typeof navigator !== "undefined" && "share" in navigator) {
       try {
         await navigator.share({ title: "Vault X", text: message });
@@ -10614,7 +11621,7 @@ function ShareVaultXSection() {
             Exactly what gets shared
           </p>
           <pre className="mt-1.5 whitespace-pre-wrap rounded-xl bg-[var(--bg)] px-3 py-2.5 font-sans text-xs leading-relaxed text-[var(--dim)]">
-            {buildShareMessage(current)}
+            {buildShareMessage(current, collectorId.data?.inviteCode)}
           </pre>
         </>
       ) : null}
@@ -10731,68 +11738,15 @@ const COLLECTION_TILE_OPTIONS = [
   { key: "lego", label: "Legos" },
   { key: "comics", label: "Comics" },
   { key: "starwars", label: "Star Wars Unlimited" },
+  { key: "funko", label: "Funko" },
 ] as const;
 
-/** The Settings "Your Collections" box as a drop-down
-    (Anthony, Nov 3, 2026, late): a clean theme-styled trigger
-    in the app's dropdown style — dark surface, rounded, glow
-    accent when open — that expands to the very same six
-    visibility switches the Home window uses, so the two stay
-    in sync through the shared collectionVisibility query.
-    Presentation only; the switches' behavior is unchanged. */
-function CollectionsDropdownBox() {
-  const [open, setOpen] = useState(false);
-  const visibility = useQuery({
-    queryKey: ["collectionVisibility"],
-    queryFn: () => api.getCollectionVisibility({}),
-  });
-  const hiddenCount = visibility.data?.hidden.length ?? 0;
-  const shownCount = COLLECTION_TILE_OPTIONS.length - hiddenCount;
-  return (
-    <div className="mt-3">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={`Your Collections on Home — ${shownCount} of ${COLLECTION_TILE_OPTIONS.length} tiles shown. ${open ? "Close" : "Open"} the list.`}
-        onClick={() => {
-          hapticTick();
-          setOpen((v) => !v);
-        }}
-        className={`flex w-full items-center justify-between gap-2 rounded-full border px-3.5 py-2 text-left text-sm font-medium text-[var(--text)] transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
-          open
-            ? "border-[var(--accent)] bg-[var(--surface)] shadow-[0_0_18px_rgba(110,155,255,0.25)]"
-            : "border-[var(--border)] bg-[var(--surface)]"
-        }`}
-      >
-        <span className="min-w-0 truncate">
-          {shownCount} of {COLLECTION_TILE_OPTIONS.length} shown on
-          Home
-        </span>
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={`h-3.5 w-3.5 shrink-0 text-[var(--dim)] transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {open ? (
-        <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3 py-1 shadow-[0_18px_44px_rgba(0,0,0,0.45)]">
-          <CollectionsVisibilitySwitches />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** The Your Collections visibility switches (Settings):
-    one per Home tile, all shown by default; the choice
-    persists on the user's profile. */
+/** The Your Collections visibility switches: one per Home
+    tile, all shown by default; the choice persists on the
+    user's profile. Rendered by the Home "Your Collections"
+    window (the eye button beside the heading) — since Nov 4,
+    2026 that window is the single home for these switches;
+    the Settings copy was deleted at Anthony's direction. */
 function CollectionsVisibilitySwitches() {
   const queryClient = useQueryClient();
   const visibility = useQuery({
@@ -10808,7 +11762,8 @@ function CollectionsVisibilitySwitches() {
         | "magic"
         | "lego"
         | "comics"
-        | "starwars";
+        | "starwars"
+        | "funko";
       hidden: boolean;
     }) => api.setCollectionHidden(args),
     onSuccess: () => {
@@ -10873,14 +11828,35 @@ function ValuePrivacySwitch() {
     queryKey: ["valuePrivacy"],
     queryFn: () => api.getValuePrivacy({}),
   });
-  const hidden = privacy.data?.hideValue ?? false;
+  // Optimistic value (Anthony, Nov 4, 2026 — the toggle felt
+  // dead: the switch only ever reflected the server query, so
+  // a tap that saved fine could still leave the switch frozen
+  // on its stale value): flip the switch instantly, write the
+  // mutation's result straight into the query cache on
+  // success, and show a plain error line if the save actually
+  // fails instead of failing silently.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const serverHidden = privacy.data?.hideValue ?? false;
+  const hidden = pending ?? serverHidden;
   const toggle = useMutation({
     mutationFn: (args: { hideValue: boolean }) =>
       api.setValuePrivacy(args),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setPending(null);
+      setSaveError(null);
+      queryClient.setQueryData(["valuePrivacy"], {
+        hideValue: data.hideValue,
+      });
       void queryClient.invalidateQueries({
         queryKey: ["valuePrivacy"],
       });
+    },
+    onError: () => {
+      setPending(null);
+      setSaveError(
+        "That didn't save — check your connection and tap it again.",
+      );
     },
   });
   return (
@@ -10904,7 +11880,10 @@ function ValuePrivacySwitch() {
           disabled={toggle.isPending || privacy.isPending}
           onClick={() => {
             hapticTick();
-            toggle.mutate({ hideValue: !hidden });
+            const next = !hidden;
+            setPending(next);
+            setSaveError(null);
+            toggle.mutate({ hideValue: next });
           }}
           className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
             hidden ? "bg-[var(--gold)]" : "bg-[var(--border)]"
@@ -10923,6 +11902,309 @@ function ValuePrivacySwitch() {
         eye button right above your total value — change it in
         either place and both agree.
       </p>
+      {saveError ? (
+        <p className="mt-2 text-xs font-semibold text-[#ff5147]">
+          {saveError}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The intro-screen download choice (Anthony, Nov 4, 2026 —
+    his design, refining the "Preparing your vault" preload):
+    while the app is opening, IF genuinely new caching is
+    pending for this device (a new artwork generation, or
+    pending images never offered before), a notice at the
+    bottom of the intro screen offers the choice: download
+    everything now — with the pending size quoted up front
+    and a size-based progress bar (real downloaded MB against
+    that same quoted total) — or opt out for real, in which
+    case no bulk job runs and images cache as the user scrolls
+    through the binders. The choice is remembered per artwork
+    generation; nothing pending = no notice; the user is
+    never locked out (entering works at every point, offline
+    included). */
+function IntroDownloadGate({ welcomeDone }: { welcomeDone: boolean }) {
+  const plan = useQuery({
+    queryKey: ["artworkWarmup"],
+    queryFn: () => api.getArtworkWarmup({}),
+    staleTime: 5 * 60 * 1000,
+  });
+  const [phase, setPhase] = useState<
+    "checking" | "offer" | "downloading" | "done" | "hidden"
+  >("checking");
+  const [pending, setPending] = useState<{
+    total: number;
+    quotedBytes: number | null;
+  } | null>(null);
+  const [progress, setProgress] = useState<{
+    bytes: number;
+    remaining: number;
+  }>({ bytes: 0, remaining: 0 });
+  const evaluatedRef = useRef(false);
+  const baselineRef = useRef<{ bytes: number; fetches: number }>({
+    bytes: 0,
+    fetches: 0,
+  });
+  // Back-gesture trap (Anthony, Nov 4, 2026 — the app-wide
+  // rule from his verified-badge report: an open window eats
+  // the phone's Back FIRST, never the app underneath). This
+  // gate is a dialog over the app during the intro: when its
+  // offer appears it takes the window's one history entry
+  // (three-back rule: layers when a window already holds the
+  // slot); Back then dismisses the gate for this visit WITHOUT
+  // recording a choice (no choice was made, so nothing is
+  // remembered); the buttons that do record a choice consume
+  // the entry through history.back(), exactly once, via
+  // hideGate.
+  const gatePushedRef = useRef(false);
+  const gateHeldRef = useRef(false);
+  const hideGate = () => {
+    if (gatePushedRef.current) {
+      window.history.back();
+    } else {
+      gateHeldRef.current = false;
+      scrubWindowKeys(["lorcanaIntroGate"]);
+      setPhase("hidden");
+    }
+  };
+  useEffect(() => {
+    if (phase !== "offer" || gateHeldRef.current) return;
+    gatePushedRef.current = pushWindowState(
+      {
+        ...(readNavState() ?? {}),
+        lorcanaIntroGate: true,
+      },
+      "lorcanaIntroGate",
+    );
+    gateHeldRef.current = true;
+  }, [phase]);
+  useEffect(() => {
+    const onPopState = () => {
+      if (
+        gateHeldRef.current &&
+        readNavState()?.lorcanaIntroGate !== true
+      ) {
+        gateHeldRef.current = false;
+        gatePushedRef.current = false;
+        setPhase("hidden");
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // One evaluation per app open: is there pending artwork
+  // this user has not already decided on for this artwork
+  // generation?
+  useEffect(() => {
+    if (!welcomeDone || !plan.data || evaluatedRef.current) return;
+    evaluatedRef.current = true;
+    const data = plan.data;
+    void (async () => {
+      const choice = readArtDownloadChoice();
+      if (choice && choice.version === data.artworkVersion) {
+        setPhase("hidden");
+        return;
+      }
+      const p = await getArtworkPending(data);
+      const total = p.gridMissing.length + p.largeMissing.length;
+      if (total === 0) {
+        setPhase("hidden");
+        return;
+      }
+      // Quote the size before the choice: the server measures
+      // its stored artwork for a sample of the pending ids;
+      // the total is that measured average times the pending
+      // count. No measurable sample = a count-only quote —
+      // never an invented size.
+      let quotedBytes: number | null = null;
+      try {
+        const quote = await api.getArtworkDownloadQuote({
+          pendingIds: [...p.gridMissing, ...p.largeMissing],
+        });
+        if (quote.avgBytes != null)
+          quotedBytes = quote.avgBytes * total;
+      } catch {
+        quotedBytes = null;
+      }
+      setPending({ total, quotedBytes });
+      setPhase("offer");
+    })();
+  }, [welcomeDone, plan.data]);
+
+  // While downloading on this screen: poll the real session
+  // download bytes and the shrinking pending set. Completion
+  // is the pending set reaching zero — then the user
+  // proceeds into the app.
+  useEffect(() => {
+    if (phase !== "downloading" || !plan.data) return;
+    const data = plan.data;
+    let alive = true;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const session = getSessionArtDownload();
+        const p = await getArtworkPending(data);
+        if (!alive) return;
+        const remaining = p.gridMissing.length + p.largeMissing.length;
+        setProgress({
+          bytes: Math.max(0, session.bytes - baselineRef.current.bytes),
+          remaining,
+        });
+        if (remaining === 0) {
+          window.clearInterval(timer);
+          setPhase("done");
+          window.setTimeout(hideGate, 1600);
+        }
+      })();
+    }, 700);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [phase, plan.data]);
+
+  if (phase === "checking" || phase === "hidden" || !plan.data)
+    return null;
+  const planData = plan.data;
+  const mb = (n: number) =>
+    n >= 1024 * 1024
+      ? `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB`
+      : `${Math.max(1, Math.round(n / 1024))} KB`;
+  const offline =
+    typeof navigator !== "undefined" && !navigator.onLine;
+  const downloaded = pending
+    ? pending.total - progress.remaining
+    : 0;
+  const pct =
+    phase === "done"
+      ? 100
+      : pending?.quotedBytes
+        ? Math.min(
+            99,
+            Math.round((progress.bytes / pending.quotedBytes) * 100),
+          )
+        : pending && pending.total > 0
+          ? Math.min(99, Math.round((downloaded / pending.total) * 100))
+          : 0;
+  return (
+    <div
+      className="fixed inset-0 z-[72] flex flex-col items-center justify-center bg-[var(--bg)] px-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Artwork download choice"
+    >
+      <img
+        src={vaultXRingArtwork}
+        alt=""
+        className="h-24 w-24 animate-pulse rounded-full"
+      />
+      <p className="mt-5 text-center text-sm font-semibold text-[var(--dim)]">
+        Opening your vault…
+      </p>
+      <div className="absolute inset-x-0 bottom-0 px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+          {phase === "offer" && pending ? (
+            <>
+              <h2 className="text-base font-bold text-[var(--text)]">
+                New artwork is ready to save
+              </h2>
+              <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+                {pending.total.toLocaleString()} card images
+                {pending.quotedBytes != null
+                  ? ` — about ${mb(pending.quotedBytes)}`
+                  : ""}{" "}
+                can be saved to this device now so browsing never
+                waits on pictures. Your own collection saves
+                first.
+                {offline
+                  ? " You're offline right now — the download will run when you're back online."
+                  : ""}
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticConfirm();
+                    writeArtDownloadChoice({
+                      version: planData.artworkVersion,
+                      choice: "download",
+                      at: new Date().toISOString(),
+                    });
+                    baselineRef.current = getSessionArtDownload();
+                    startArtworkWarmup(planData);
+                    setPhase("downloading");
+                  }}
+                  className="w-full rounded-full bg-[var(--gold)] px-4 py-2.5 text-sm font-bold text-white transition active:scale-[0.98]"
+                >
+                  Download all
+                  {pending.quotedBytes != null
+                    ? ` — ${mb(pending.quotedBytes)}`
+                    : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticTick();
+                    writeArtDownloadChoice({
+                      version: planData.artworkVersion,
+                      choice: "optout",
+                      at: new Date().toISOString(),
+                    });
+                    hideGate();
+                  }}
+                  className="w-full rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition active:scale-[0.98]"
+                >
+                  Not now — save pictures as I browse
+                </button>
+              </div>
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-[var(--dim)]">
+                Either way you can enter right away — nothing here
+                ever locks you out.
+              </p>
+            </>
+          ) : phase === "downloading" && pending ? (
+            <>
+              <h2 className="text-base font-bold text-[var(--text)]">
+                Saving artwork…
+              </h2>
+              <div
+                className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-[var(--bg)]"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={pct}
+                aria-label="Artwork download progress"
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--gold)] transition-[width] duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <p className="mt-2 text-sm tabular-nums text-[var(--dim)]">
+                {pending.quotedBytes != null
+                  ? `${mb(progress.bytes)} of ${mb(pending.quotedBytes)} · ${pct}%`
+                  : `${downloaded.toLocaleString()} of ${pending.total.toLocaleString()} images · ${pct}%`}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  hideGate();
+                }}
+                className="mt-3 w-full rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition active:scale-[0.98]"
+              >
+                Enter the app — download keeps going
+              </button>
+            </>
+          ) : phase === "done" ? (
+            <p className="py-2 text-center text-sm font-semibold text-[var(--text)]">
+              All artwork saved — welcome in.
+            </p>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -11111,15 +12393,19 @@ function SettingsUsernameSection() {
   );
 }
 
-/** Settings > Vault X server registry (Anthony, Nov 3, 2026,
-    late): the registry entry moved here from the identity
-    page — the user's registered identity as it stands on the
-    server: Collector ID, the username the server holds,
-    registration status, and the registration date the server
-    recorded (its profiles row's created_at), with the last
-    local verification time as a fallback note. Read live from
-    the same registry queries the rest of the app uses. */
-function SettingsRegistrySection() {
+/** Admin > Server Health > Vault X server registry
+    (Anthony, Nov 3, 2026, late: the registry entry moved
+    from the identity page to Settings; Nov 4, 2026: Anthony
+    moved it again — it belongs in Admin, so it now lives at
+    the top of Admin's Server Health view and Settings no
+    longer carries it): the user's registered identity as it
+    stands on the server: Collector ID, the username the
+    server holds, registration status, and the registration
+    date the server recorded (its profiles row's created_at),
+    with the last local verification time as a fallback note.
+    Read live from the same registry queries the rest of the
+    app uses. */
+function AdminRegistrySection() {
   const profile = useQuery({
     queryKey: ["collectorId"],
     queryFn: () => api.getCollectorId({}),
@@ -11141,14 +12427,28 @@ function SettingsRegistrySection() {
     });
   return (
     <section
-      id="settings-registry"
       aria-label="Vault X server registry"
-      className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+      className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
     >
-      <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
-        <SettingsSectionIcon id="settings-registry" />
+      <h3 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-5 w-5 shrink-0 text-[var(--gold-soft)]"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <rect x="7" y="7.5" width="10" height="4" rx="1.2" />
+          <rect x="7" y="12.5" width="10" height="4" rx="1.2" />
+          <path d="M9.4 9.5h.01" strokeWidth="2.4" />
+          <path d="M9.4 14.5h.01" strokeWidth="2.4" />
+        </svg>
         Vault X server registry
-      </h2>
+      </h3>
       <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
         Your registered identity on the Vault X server — what
         other collectors&rsquo; apps find when they look you up.
@@ -11220,12 +12520,15 @@ function SettingsRegistrySection() {
 function SettingsPanel({
   theme,
   onThemeChange,
-  onShowWelcome,
+  language,
+  onLanguageChange,
 }: {
   theme: ThemeId;
   onThemeChange: (next: ThemeId) => void;
-  onShowWelcome: () => void;
+  language: LangId;
+  onLanguageChange: (next: LangId) => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const [check, setCheck] = useState<UpdateCheckState>({ status: "idle" });
   // Haptics (Anthony, Nov 2, 2026): on by default, switchable here;
@@ -11282,6 +12585,10 @@ function SettingsPanel({
     "idle" | "working" | "shared" | "downloaded" | "opened" | "error"
   >("idle");
   const [iconZoom, setIconZoom] = useState(false);
+  // The merged About tile's information panel (Anthony, Nov 4,
+  // 2026): the old standalone App updates tile is gone — its
+  // detail lives behind this (i) toggle on the About tile.
+  const [aboutInfoOpen, setAboutInfoOpen] = useState(false);
   const saveIconArtwork = async () => {
     if (iconSave === "working") return;
     setIconSave("working");
@@ -11639,21 +12946,108 @@ function SettingsPanel({
             </button>
           </div>
         )}
-        {/* Re-open the one-time Welcome page on demand
-            (Anthony, Nov 3, 2026) — for anyone who dismissed
-            it too fast. Review mode: a plain close, nothing
-            forced. */}
+        {/* App updates MERGED into About (Anthony, Nov 4,
+            2026): the standalone App updates tile at the bottom
+            of Settings is deleted — the Check for Update control
+            lives here beside the version it checks, and every
+            detail the old tile showed sits behind the (i)
+            information button. The welcome re-view entry that
+            used to sit here moved to the Admin Hub (owner-only)
+            the same day. */}
         <div className="mt-4 border-t border-[var(--border)] pt-3.5">
-          <button
-            type="button"
-            onClick={() => {
-              hapticTick();
-              onShowWelcome();
-            }}
-            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--gold-soft)]"
-          >
-            See the welcome page again
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void runCheck()}
+              disabled={check.status === "checking"}
+              className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
+            >
+              {check.status === "checking"
+                ? "Checking for updates…"
+                : "Check for Update"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAboutInfoOpen((v) => !v)}
+              aria-expanded={aboutInfoOpen}
+              aria-label="About updates — how they work and what's new"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-sm font-bold italic text-[var(--gold-soft)]"
+            >
+              i
+            </button>
+          </div>
+          {check.status === "current" ? (
+            <p
+              className="mt-2.5 text-sm font-semibold text-emerald-400"
+              role="status"
+            >
+              You&rsquo;re up to date — Version {APP_VERSION} is the
+              latest.
+            </p>
+          ) : null}
+          {check.status === "error" ? (
+            <p className="mt-2.5 text-sm text-red-400" role="status">
+              Couldn&rsquo;t check for updates just now — check your
+              connection and try again.
+            </p>
+          ) : null}
+          {aboutInfoOpen ? (
+            <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3.5">
+              <p className="text-sm leading-relaxed text-[var(--dim)]">
+                You&rsquo;re running Version {APP_VERSION}. When a
+                fix or a new feature ships, check here and reload to
+                get it — no reinstall, no app store. That&rsquo;s
+                how updates reach everyone running the app.
+              </p>
+              {check.status === "available" ? (
+                <div className="mt-3" role="status">
+                  <p className="text-sm font-semibold text-[var(--gold-soft)]">
+                    Update available — Version {check.version} is
+                    ready.
+                  </p>
+                  {check.notes.length > 0 ? (
+                    <div className="mt-2">
+                      <p className="text-sm font-semibold text-[var(--text)]">
+                        What&rsquo;s new in Version {check.version}:
+                      </p>
+                      <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[var(--dim)]">
+                        {check.notes.map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void reloadToUpdate()}
+                    disabled={reloading}
+                    className="mt-2.5 w-full rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-bold text-[var(--gold-soft)] disabled:opacity-60"
+                  >
+                    {reloading ? "Reloading…" : "Reload to update"}
+                  </button>
+                </div>
+              ) : null}
+              {(CHANGELOG[APP_VERSION] ?? []).length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    What&rsquo;s new in Version {APP_VERSION}:
+                  </p>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[var(--dim)]">
+                    {(CHANGELOG[APP_VERSION] ?? []).map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+                How the version numbers work: bug fixes bump the
+                last number (1.0.1), new features bump the middle
+                (1.1.0), and a big release bumps the first (2.0.0)
+                — so the number alone tells you what kind of
+                update you&rsquo;re getting.
+              </p>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -11690,7 +13084,7 @@ function SettingsPanel({
       >
         <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
           <SettingsSectionIcon id="settings-theme" />
-          Theme
+          {t("settings.theme")}
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
           Pick the look you like. It applies right away, everywhere in
@@ -11712,35 +13106,53 @@ function SettingsPanel({
         </div>
       </section>
 
-      {/* Username + server registry (Anthony, Nov 3, 2026,
-          late): username editing lives in Settings now (one
-          change only), and the server registry entry moved
-          here from the identity page. */}
-      <SettingsUsernameSection />
-      <SettingsRegistrySection />
-
-      {/* Your Collections visibility (Anthony, Nov 3, 2026):
-          one switch per Home tile — turn off the collections
-          you don't collect and their tiles disappear from
-          Home; the rest reflow. Display-only: nothing is
-          deleted and no totals change. */}
+      {/* Language — pick the app's UI language (Anthony,
+          Nov 4, 2026). The picker is the SAME shared themed
+          dropdown as the Theme picker above (his absolute
+          rule: no native/generic dropdown anywhere, ever).
+          The choice applies app-wide the moment it's tapped
+          and saves to the user's profile, like the theme.
+          Card names and user content are never translated —
+          they stay exactly as printed / as written. */}
       <section
-        id="settings-collections"
-        aria-label="Your Collections on Home"
+        id="settings-language"
+        aria-label="App language"
         className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
       >
         <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
-          <SettingsSectionIcon id="settings-collections" />
-          Your Collections
+          <SettingsSectionIcon id="settings-language" />
+          {t("settings.language")}
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
-          Which collection tiles show on your Home page. Turn
-          one off and its tile disappears — your collection
-          itself is untouched, and you can bring the tile back
-          here any time.
+          {t("settings.languageBlurb")}
         </p>
-        <CollectionsDropdownBox />
+        <div className="mt-3">
+          <VxSelect
+            value={language}
+            onChange={(v) => onLanguageChange(v as LangId)}
+            options={LANGUAGES.map((l) => ({
+              value: l.id,
+              label:
+                l.id === "en" ? `${l.label} (Default)` : l.label,
+            }))}
+            ariaLabel="Choose a language"
+          />
+        </div>
       </section>
+
+      {/* Username (Anthony, Nov 3, 2026, late): username
+          editing lives in Settings now (one change only).
+          The server registry entry that used to sit under it
+          here moved to Admin (Nov 4, 2026 — Anthony: it
+          belongs in Admin); it now lives at the top of
+          Admin's Server Health view. */}
+      <SettingsUsernameSection />
+
+      {/* No "Your Collections" section in Settings anymore
+          (Anthony, Nov 4, 2026): the tile show/hide control
+          lives in exactly one place — the eye button beside
+          "Your Collections" on Home, which opens its own
+          window with all seven collection toggles. */}
 
       {/* Sharing — per-friend switches in Settings (Anthony,
           Nov 3, 2026): when sharing is on, that connected
@@ -11755,7 +13167,7 @@ function SettingsPanel({
       >
         <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
           <SettingsSectionIcon id="settings-sharing" />
-          Sharing
+          {t("settings.sharing")}
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
           When sharing is on, that connected friend can see your
@@ -11782,6 +13194,10 @@ function SettingsPanel({
                 <span className="min-w-0">
                   <span className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
                     <span className="truncate">{f.username}</span>
+                    <VerifiedBadge
+                      collectorCode={f.code}
+                      username={f.username}
+                    />
                     {f.isTest ? (
                       <span className="shrink-0 rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">
                         Test
@@ -11833,14 +13249,14 @@ function SettingsPanel({
           there is no Save button. */}
       <section
         id="settings-save-count"
-        aria-label="Save collection count"
+        aria-label="Save collection count confirmation"
         className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
               <SettingsSectionIcon id="settings-save-count" />
-              Save collection count
+              Save collection count confirmation
             </h2>
             <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
               On a card&rsquo;s page, the plus and minus buttons
@@ -11853,7 +13269,7 @@ function SettingsPanel({
             type="button"
             role="switch"
             aria-checked={manualSaveOn}
-            aria-label="Save collection count button"
+            aria-label="Save collection count confirmation button"
             onClick={toggleManualSave}
             className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors ${
               manualSaveOn ? "bg-[var(--gold)]" : "bg-[var(--border)]"
@@ -12138,79 +13554,6 @@ function SettingsPanel({
           only. "Send a change request" above stays: it is the
           form tickets are sent FROM. */}
 
-      {/* Updates — Check for Update lives here, next to the version
-          it checks. */}
-      <section
-        id="settings-updates"
-        aria-label="App updates"
-        className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
-      >
-        <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
-          <SettingsSectionIcon id="settings-updates" />
-          App updates
-        </h2>
-        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
-          You&rsquo;re running Version {APP_VERSION}. When a fix or a
-          new feature ships, check here and reload to get it — no
-          reinstall, no app store. That&rsquo;s how updates reach
-          everyone running the app.
-        </p>
-        <button
-          type="button"
-          onClick={() => void runCheck()}
-          disabled={check.status === "checking"}
-          className="mt-3 w-full rounded-full bg-[var(--gold)] px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
-        >
-          {check.status === "checking"
-            ? "Checking for updates…"
-            : "Check for Update"}
-        </button>
-        {check.status === "current" ? (
-          <p className="mt-3 text-sm font-semibold text-emerald-400" role="status">
-            You&rsquo;re up to date — Version {APP_VERSION} is the
-            latest.
-          </p>
-        ) : null}
-        {check.status === "available" ? (
-          <div className="mt-3" role="status">
-            <p className="text-sm font-semibold text-[var(--gold-soft)]">
-              Update available — Version {check.version} is ready.
-            </p>
-            {check.notes.length > 0 ? (
-              <div className="mt-2.5">
-                <p className="text-sm font-semibold text-[var(--text)]">
-                  What&rsquo;s new in Version {check.version}:
-                </p>
-                <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[var(--dim)]">
-                  {check.notes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void reloadToUpdate()}
-              disabled={reloading}
-              className="mt-2.5 w-full rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-bold text-[var(--gold-soft)] disabled:opacity-60"
-            >
-              {reloading ? "Reloading…" : "Reload to update"}
-            </button>
-          </div>
-        ) : null}
-        {check.status === "error" ? (
-          <p className="mt-3 text-sm text-red-400" role="status">
-            Couldn&rsquo;t check for updates just now — check your
-            connection and try again.
-          </p>
-        ) : null}
-        <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
-          How the version numbers work: bug fixes bump the last number
-          (1.0.1), new features bump the middle (1.1.0), and a big
-          release bumps the first (2.0.0) — so the number alone tells
-          you what kind of update you&rsquo;re getting.
-        </p>
-      </section>
 
     </div>
   );
@@ -12265,10 +13608,10 @@ function AdminStat({
         </p>
       ) : null}
       {changed ? (
-        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300">
+        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider vx-changed-text">
           Changed — tap to clear
           {change ? (
-            <span className="mt-0.5 block text-[11px] font-semibold normal-case tracking-normal text-blue-200">
+            <span className="mt-0.5 block text-[11px] font-semibold normal-case tracking-normal vx-changed-text">
               {change.before == null
                 ? `New · now ${change.after}`
                 : `${change.before} → ${change.after}`}
@@ -12284,7 +13627,7 @@ function AdminStat({
   );
   const cls = `rounded-xl px-3 py-2.5 text-center transition ${
     changed
-      ? "bg-blue-500/20 ring-1 ring-inset ring-blue-300/50"
+      ? "vx-changed-row vx-changed-ring"
       : "bg-[var(--bg)]"
   }`;
   if (interactive) {
@@ -12409,6 +13752,34 @@ function ChangeRequestSection() {
   const [sent, setSent] = useState(false);
   const [sentTicketId, setSentTicketId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bug-report screenshot (Anthony, Nov 4, 2026): an optional
+  // photo on a bug report — the user circles the area in their
+  // phone's own editor before picking it (no in-app markup,
+  // per his correction); the photo travels with the ticket.
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const onPhotoPicked = (file: File | undefined) => {
+    if (!file) return;
+    setPhotoError(null);
+    const preview = URL.createObjectURL(file);
+    void imageFileToJpegBase64(file)
+      .then((b64) => {
+        setPhotoBase64(b64);
+        setPhotoPreview(preview);
+      })
+      .catch(() => {
+        URL.revokeObjectURL(preview);
+        setPhotoError("That photo couldn't be read — try another.");
+      });
+  };
+  const clearPhoto = () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoBase64(null);
+    setPhotoPreview(null);
+    setPhotoError(null);
+  };
   // Your tickets (Anthony, Nov 3, 2026 — ticket system):
   // everything this collector has submitted, with status and
   // assignee, so a ticket can be followed after it's sent.
@@ -12418,13 +13789,19 @@ function ChangeRequestSection() {
   });
   const send = useMutation({
     mutationFn: () =>
-      api.submitChangeRequest({ kind, message: message.trim() }),
+      api.submitChangeRequest({
+        kind,
+        message: message.trim(),
+        imageBase64:
+          kind === "bug" && photoBase64 ? photoBase64 : undefined,
+      }),
     onSuccess: (res) => {
       if (res.ok) {
         hapticConfirm();
         setSent(true);
         setSentTicketId(res.ticketId);
         setMessage("");
+        clearPhoto();
         setError(null);
         void queryClient.invalidateQueries({ queryKey: ["myTickets"] });
         void queryClient.invalidateQueries({
@@ -12518,6 +13895,56 @@ function ChangeRequestSection() {
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-sm leading-relaxed text-[var(--text)] placeholder:text-[var(--dim)]"
             />
           </label>
+          {kind === "bug" ? (
+            <div className="mt-3">
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                aria-label="Attach a screenshot to this bug report"
+                onChange={(e) => {
+                  onPhotoPicked(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              {photoPreview ? (
+                <div className="flex items-start gap-3">
+                  <img
+                    src={photoPreview}
+                    alt="Screenshot attached to this bug report"
+                    className="max-h-40 w-auto rounded-xl border border-[var(--border)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hapticTick();
+                      clearPhoto();
+                    }}
+                    className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--text)]"
+                  >
+                    Remove photo
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticTick();
+                    photoInputRef.current?.click();
+                  }}
+                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)]"
+                >
+                  Attach a screenshot (optional)
+                </button>
+              )}
+              {photoError ? (
+                <p role="alert" className="mt-2 text-sm text-red-400">
+                  {photoError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {error ? (
             <p role="alert" className="mt-2 text-sm text-red-400">
               {error}
@@ -12531,6 +13958,12 @@ function ChangeRequestSection() {
           >
             {send.isPending ? "Sending…" : "Send to the developer"}
           </button>
+          {kind === "bug" ? (
+            <p className="mt-2.5 text-xs leading-relaxed text-[var(--dim)]">
+              * If you are uploading a photo, please make sure to
+              circle the affected area you&rsquo;re reporting.
+            </p>
+          ) : null}
         </>
       )}
       <h3 className="mt-5 font-album text-base text-[var(--text)]">
@@ -12561,6 +13994,13 @@ function ChangeRequestSection() {
               <span className="mt-0.5 block truncate text-sm text-[var(--dim)]">
                 {t.message}
               </span>
+              {t.photoUrl ? (
+                <img
+                  src={t.photoUrl}
+                  alt="Screenshot attached to this ticket"
+                  className="mt-1.5 max-h-32 w-auto rounded-lg border border-[var(--border)]"
+                />
+              ) : null}
               <span className="mt-0.5 block text-xs text-[var(--dim)]">
                 {t.assignee
                   ? `Assigned to ${t.assignee}`
@@ -13032,6 +14472,100 @@ function AdminDashboard({
         : { homeCollectorsOpen: collectorsOpen },
     );
   }, [collectorsOpen, scope]);
+  // The Hub (Admin redesign — Concept B, Anthony's pick,
+  // Nov 4, 2026): Admin opens as six tappable tiles; each
+  // opens its detail view. The view rides the same history
+  // pattern as the collectors page above it: opening a tile
+  // pushes { lorcanaAdminHub: view }, the phone back button
+  // pops it and lands on the hub (never out of the app), and
+  // the stored copy restores the same detail after a refresh
+  // in place. The collectors page stacks ABOVE a detail view
+  // exactly as it stacked above the dashboard before.
+  type HubView =
+    | "hub"
+    | "users"
+    | "activity"
+    | "trades"
+    | "tickets"
+    | "catalog"
+    | "server";
+  const hubViews: HubView[] = [
+    "hub",
+    "users",
+    "activity",
+    "trades",
+    "tickets",
+    "catalog",
+    "server",
+  ];
+  const readHubSeed = (): HubView => {
+    const st = readHistoryState() as { lorcanaAdminHub?: unknown } | null;
+    if (
+      typeof st?.lorcanaAdminHub === "string" &&
+      hubViews.includes(st.lorcanaAdminHub as HubView)
+    )
+      return st.lorcanaAdminHub as HubView;
+    const stored =
+      scope === "settings"
+        ? readStoredAdminNav().settingsHubView
+        : readStoredAdminNav().homeHubView;
+    return hubViews.includes(stored as HubView)
+      ? (stored as HubView)
+      : "hub";
+  };
+  const [hubView, setHubView] = useState<HubView>(readHubSeed);
+  useEffect(() => {
+    const onPop = () => {
+      const st = readHistoryState() as { lorcanaAdminHub?: unknown } | null;
+      const v =
+        typeof st?.lorcanaAdminHub === "string" &&
+        hubViews.includes(st.lorcanaAdminHub as HubView)
+          ? (st.lorcanaAdminHub as HubView)
+          : "hub";
+      setHubView(v);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    writeStoredAdminNav(
+      scope === "settings"
+        ? { settingsHubView: hubView }
+        : { homeHubView: hubView },
+    );
+  }, [hubView, scope]);
+  const openHubView = (view: HubView) => {
+    hapticTick();
+    if (view !== "hub") {
+      // Three-back rule (Anthony, Nov 4, 2026): admin detail
+      // views are main-flow navigation — replace, never push.
+      replaceNavState({
+        ...(readNavState() ?? {}),
+        lorcanaAdminHub: view,
+      });
+    }
+    setHubView(view);
+  };
+  const closeHubView = () => {
+    hapticTick();
+    setHubView("hub");
+  };
+  // Photo review queue (Anthony, Nov 4, 2026): accessory
+  // listing photos waiting on the owner's approval. The
+  // block on the hub shows the count; the review screen
+  // presents them one by one.
+  const photoQueue = useQuery({
+    queryKey: ["pendingListingPhotos"],
+    queryFn: () => api.getPendingListingPhotos({}),
+  });
+  const [photoReviewOpen, setPhotoReviewOpen] = useState(false);
+  // Binder totals for the Catalog hub tile (shared cache with
+  // the binder views — no extra fetch when warm).
+  const binderForHub = useQuery({
+    queryKey: ["binder"],
+    queryFn: () => api.getBinder({}),
+  });
   // Live numbers win; until they land, the stored snapshot
   // stands in (flagged as such by the banner in the render).
   const s = stats.data ?? snapshot.data?.stats ?? null;
@@ -13077,10 +14611,12 @@ function AdminDashboard({
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2">
           {[
-            "Registered users",
-            "Items logged",
-            "Trades completed",
-            "Average Trust Score",
+            "Users",
+            "Activity",
+            "Trades",
+            "Tickets",
+            "Catalog",
+            "Server Health",
           ].map((label) => (
             <div
               key={label}
@@ -13095,12 +14631,7 @@ function AdminDashboard({
             </div>
           ))}
         </div>
-        {[
-          "Users",
-          "Items logged",
-          "Trades, deals, and trust",
-          "System",
-        ].map((title) => (
+        {["Opening the hub"].map((title) => (
           <div key={title}>
             <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
               {title}
@@ -13171,8 +14702,8 @@ function AdminDashboard({
           rows. Tapping a row acknowledges that one change
           (and clears it in place at once). */}
       {visibleChanges.length > 0 ? (
-        <div className="mt-3 rounded-2xl border border-blue-300/30 bg-blue-400/10 p-3">
-          <h3 className="text-sm font-bold text-blue-200">
+        <div className="mt-3 rounded-2xl vx-changed-panel p-3">
+          <h3 className="text-sm font-bold vx-changed-text">
             What changed — {visibleChanges.length}{" "}
             {visibleChanges.length === 1 ? "change" : "changes"}
           </h3>
@@ -13185,7 +14716,7 @@ function AdminDashboard({
                   aria-label={`Mark seen: ${c.label}`}
                   className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left transition active:scale-[0.99]"
                 >
-                  <span className="shrink-0 rounded-full bg-blue-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-100">
+                  <span className="shrink-0 rounded-full vx-changed-chip px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
                     Changed
                   </span>
                   <span className="min-w-0 text-sm leading-snug text-[var(--text)]">
@@ -13207,52 +14738,258 @@ function AdminDashboard({
         </div>
       ) : null}
 
-      {/* Headline tiles — the whole app at a glance. */}
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <AdminStat
-          label="Registered users"
-          value={s.users ? s.users.total.toLocaleString() : "—"}
-          sub={
-            s.users
-              ? `+${s.users.newThisWeek.toLocaleString()} this week`
-              : undefined
-          }
-          onClick={
-            s.users ? () => collectorsPage.openSheet() : undefined
-          }
-          {...ackProps("users.total")}
-        />
-        <AdminStat
-          label="Items logged"
-          value={s.activity ? s.activity.totalCopies.toLocaleString() : "—"}
-          sub={
-            s.activity
-              ? `${s.activity.totalRows.toLocaleString()} stored entries, app-wide`
-              : undefined
-          }
-          {...ackProps("activity.totalCopies")}
-        />
-        <AdminStat
-          label="Trades completed"
-          value={s.deals ? s.deals.tradesCompleted.toLocaleString() : "—"}
-          sub={
-            s.deals
-              ? `${s.deals.dealsCompleted.toLocaleString()} marketplace deals done`
-              : undefined
-          }
-          {...ackProps("deals.tradesCompleted")}
-        />
-        <AdminStat
-          label="Average Trust Score"
-          value={s.users ? s.users.avgTrustScore.toLocaleString() : "—"}
-          sub={
-            s.users
-              ? `across ${s.users.total.toLocaleString()} users`
-              : undefined
-          }
-          {...ackProps("users.avgTrustScore")}
-        />
-      </div>
+      {/* THE HUB (Admin redesign — Concept B, Anthony's pick,
+          Nov 4, 2026): Admin opens as six large tappable
+          tiles, each with its headline number and a small
+          trend cue. A tile whose area has unacknowledged
+          changes carries the Changed tag (the same changed
+          set the What-changed panel lists — opening a tile
+          acknowledges nothing; the changed item inside is
+          tapped to clear, exactly as before). Below the hub,
+          each tile's detail view carries the real sections
+          Admin has always shown. */}
+      {hubView === "hub" ? (
+        <>
+          {(photoQueue.data?.pending.length ?? 0) > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                setPhotoReviewOpen(true);
+              }}
+              aria-label={`Photos needed for approval — ${photoQueue.data?.pending.length ?? 0} waiting. Open the review screen.`}
+              className="mt-3 flex w-full items-center gap-3 rounded-2xl vx-changed-panel p-3.5 text-left transition active:scale-[0.99]"
+            >
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--gold)] text-lg text-white shadow-[0_4px_14px_rgba(110,92,245,0.4)]"
+              >
+                🖼
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-[var(--text)]">
+                  Photos needed for approval
+                </span>
+                <span className="block text-xs text-[var(--dim)]">
+                  {photoQueue.data?.pending.length}{" "}
+                  {photoQueue.data?.pending.length === 1
+                    ? "photo is"
+                    : "photos are"}{" "}
+                  waiting — the listings are live; only the photos
+                  are held for your eye.
+                </span>
+              </span>
+              <span className="vx-count-badge flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1.5 text-xs font-bold tabular-nums">
+                {photoQueue.data?.pending.length}
+              </span>
+            </button>
+          ) : null}
+          {/* View the welcome page again (Anthony, Nov 4,
+              2026): the re-view entry that used to live in
+              Settings moved here — owner-only, since only the
+              owner ever sees Admin. The root listens for the
+              event and opens WelcomeFlow in review mode. */}
+          <button
+            type="button"
+            onClick={() => {
+              hapticTick();
+              window.dispatchEvent(
+                new CustomEvent("vaultx:view-welcome"),
+              );
+            }}
+            aria-label="View the welcome page again"
+            className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition active:scale-[0.99]"
+          >
+            <span
+              aria-hidden="true"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--gold)] text-lg text-white shadow-[0_4px_14px_rgba(110,92,245,0.4)]"
+            >
+              👋
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold text-[var(--text)]">
+                View welcome page
+              </span>
+              <span className="block text-xs text-[var(--dim)]">
+                Open the first-run welcome page again, the way a
+                brand-new collector sees it.
+              </span>
+            </span>
+            <span aria-hidden="true" className="text-[var(--dim)]">
+              ›
+            </span>
+          </button>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {(
+              [
+                {
+                  view: "users" as const,
+                  icon: "👥",
+                  name: "Users",
+                  headline: s.users
+                    ? s.users.total.toLocaleString()
+                    : "—",
+                  cue: s.users
+                    ? `+${s.users.newThisWeek.toLocaleString()} this week · avg trust ${s.users.avgTrustScore.toLocaleString()}`
+                    : "Registered collectors",
+                  changed: [...changedSet].some(
+                    (k) => k.startsWith("users.") || k.startsWith("roster:"),
+                  ),
+                },
+                {
+                  view: "activity" as const,
+                  icon: "🗂",
+                  name: "Activity",
+                  headline: s.activity
+                    ? s.activity.totalCopies.toLocaleString()
+                    : "—",
+                  cue: s.activity
+                    ? `${s.activity.totalRows.toLocaleString()} stored entries, app-wide`
+                    : "Items logged",
+                  changed: [...changedSet].some(
+                    (k) =>
+                      k.startsWith("activity.") || k.startsWith("mostOwned:"),
+                  ),
+                },
+                {
+                  view: "trades" as const,
+                  icon: "🔄",
+                  name: "Trades",
+                  headline: s.deals
+                    ? s.deals.tradesCompleted.toLocaleString()
+                    : "—",
+                  cue: s.deals
+                    ? `${s.deals.tradesProposed.toLocaleString()} awaiting · ${s.deals.dealsCompleted.toLocaleString()} marketplace deals done`
+                    : "Trades, deals, and trust",
+                  changed: [...changedSet].some(
+                    (k) => k.startsWith("deals.") || k.startsWith("social."),
+                  ),
+                },
+                {
+                  view: "tickets" as const,
+                  icon: "✉️",
+                  name: "Tickets",
+                  headline: s.deals
+                    ? s.deals.ticketsByStatus.open.toLocaleString()
+                    : "—",
+                  cue: s.deals
+                    ? `${s.deals.ticketsByStatus.inProgress.toLocaleString()} in progress · ${s.deals.ticketsByStatus.completed.toLocaleString()} completed`
+                    : "Change requests",
+                  badge: s.deals?.ticketsByStatus.open ?? 0,
+                  changed: changedSet.has("tickets.status"),
+                },
+                {
+                  view: "catalog" as const,
+                  icon: "📚",
+                  name: "Catalog",
+                  headline: binderForHub.data
+                    ? binderForHub.data.groups
+                        .reduce((sum, g) => sum + g.total, 0)
+                        .toLocaleString()
+                    : "—",
+                  cue: "Lorcana printings in the binder · daily audit + game catalogs inside",
+                  changed: false,
+                },
+                {
+                  view: "server" as const,
+                  icon: "🖥",
+                  name: "Server Health",
+                  headline: `${Math.max(
+                    Math.round(
+                      (s.system.storage.dbUsedMb /
+                        Math.max(1, s.system.storage.dbAllotmentMb)) *
+                        100,
+                    ),
+                    Math.round(
+                      (s.system.storage.fileUsedMb /
+                        Math.max(1, s.system.storage.fileAllotmentMb)) *
+                        100,
+                    ),
+                  )}%`,
+                  cue: "Fullest free-tier allowance · storage bars inside",
+                  changed: [...changedSet].some(
+                    (k) => k.startsWith("system.") || k.startsWith("own."),
+                  ),
+                },
+              ] as const
+            ).map((tile) => (
+              <button
+                key={tile.view}
+                type="button"
+                onClick={() => openHubView(tile.view)}
+                aria-label={`Open Admin — ${tile.name}${tile.changed ? " (has changes)" : ""}`}
+                className={`relative rounded-2xl border p-3.5 text-left transition active:scale-[0.98] ${
+                  tile.changed
+                    ? "vx-changed-panel"
+                    : "border-[var(--border)] bg-[var(--surface)]"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--gold)] text-[15px] text-white shadow-[0_4px_12px_rgba(110,92,245,0.35)]"
+                  >
+                    {tile.icon}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-[var(--text)]">
+                    {tile.name}
+                  </span>
+                  {"badge" in tile && tile.badge > 0 ? (
+                    <span className="vx-count-badge flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums">
+                      {tile.badge}
+                    </span>
+                  ) : null}
+                  <span aria-hidden="true" className="text-[var(--dim)]">
+                    ›
+                  </span>
+                </span>
+                <span className="mt-2.5 block text-[26px] font-bold leading-none tabular-nums text-[var(--text)]">
+                  {tile.headline}
+                </span>
+                <span className="mt-1.5 block text-[11px] leading-snug text-[var(--dim)]">
+                  {tile.cue}
+                </span>
+                {tile.changed ? (
+                  <span className="mt-2 inline-block rounded-full vx-changed-chip px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                    Changed
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={closeHubView}
+            aria-label="Back to the Admin hub"
+            className="flex h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-semibold text-[var(--text)] transition active:scale-[0.97]"
+          >
+            ← Admin
+          </button>
+          <h3 className="font-album text-lg text-[var(--text)]">
+            {hubView === "users"
+              ? "Users"
+              : hubView === "activity"
+                ? "Activity"
+                : hubView === "trades"
+                  ? "Trades"
+                  : hubView === "tickets"
+                    ? "Tickets"
+                    : hubView === "catalog"
+                      ? "Catalog"
+                      : "Server Health"}
+          </h3>
+        </div>
+      )}
+
+      {/* Photo review screen (Anthony, Nov 4, 2026): pending
+          accessory photos one by one, each with its listing
+          context, Approve / Reject per photo. */}
+      {photoReviewOpen ? (
+        <PhotoReviewScreen onClose={() => setPhotoReviewOpen(false)} />
+      ) : null}
 
       {/* The dedicated Registered Users page, opened
           from the headline tile above (Anthony, Nov 3,
@@ -13270,11 +15007,35 @@ function AdminDashboard({
         />
       ) : null}
 
-      {/* Users: growth line, daily bars, roster table. */}
-      <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
-        Users
-      </h3>
-      <div className="mt-2 space-y-2">
+      {/* Users detail (Hub): growth line, daily bars, roster
+          table — plus the door to the full Registered Users
+          page (which carries the per-user trust detail:
+          badge, vouched-by lineage, Verify/Revoke). */}
+      {hubView === "users" ? (
+        <>
+      <button
+        type="button"
+        onClick={() => {
+          hapticTick();
+          collectorsPage.openSheet();
+        }}
+        aria-label="Open the full Registered Users list"
+        className="mt-1 flex w-full items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left transition active:scale-[0.99]"
+      >
+        <span>
+          <span className="block text-sm font-bold text-[var(--text)]">
+            Registered Users — the full list
+          </span>
+          <span className="block text-xs text-[var(--dim)]">
+            Every collector, with verified badges, invite lineage,
+            and Verify / Revoke.
+          </span>
+        </span>
+        <span aria-hidden="true" className="text-[var(--dim)]">
+          ›
+        </span>
+      </button>
+      <div className="mt-3 space-y-2">
         <AdminLineChart
           title="Registered users — cumulative, last 14 days"
           points={s.series.usersCumulative}
@@ -13336,7 +15097,7 @@ function AdminDashboard({
                   }
                   className={
                     changedSet.has(`roster:${m.collectorId}`)
-                      ? "cursor-pointer bg-blue-500/15"
+                      ? "cursor-pointer vx-changed-row"
                       : undefined
                   }
                 >
@@ -13385,11 +15146,12 @@ function AdminDashboard({
         they change. The Jarvis profile is test data and is labeled
         TEST wherever it appears.
       </p>
+        </>
+      ) : null}
 
-      {/* Items: kind donut + most-owned table. */}
-      <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
-        Items logged
-      </h3>
+      {/* Activity detail (Hub): kind donut + most-owned table. */}
+      {hubView === "activity" ? (
+        <>
       <div className="mt-2">
         <AdminDonut
           title="Items by kind — copies, app-wide"
@@ -13448,7 +15210,7 @@ function AdminDashboard({
                   }
                   className={
                     changedSet.has(`mostOwned:${c.name}`)
-                      ? "cursor-pointer bg-blue-500/15"
+                      ? "cursor-pointer vx-changed-row"
                       : undefined
                   }
                 >
@@ -13456,8 +15218,8 @@ function AdminDashboard({
                     {c.name}
                     {changedSet.has(`mostOwned:${c.name}`) &&
                     changeByKey.get(`mostOwned:${c.name}`) ? (
-                      <span className="mt-0.5 block text-[11px] font-semibold leading-snug text-blue-200">
-                        <span className="mr-1 rounded-full bg-blue-400/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-100">
+                      <span className="mt-0.5 block text-[11px] font-semibold leading-snug vx-changed-text">
+                        <span className="mr-1 rounded-full vx-changed-chip px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
                           Changed
                         </span>
                         {changeByKey.get(`mostOwned:${c.name}`)?.before ==
@@ -13485,10 +15247,12 @@ function AdminDashboard({
         </p>
       )}
 
-      {/* Deals, connections, trust. */}
-      <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
-        Trades, deals, and trust
-      </h3>
+        </>
+      ) : null}
+
+      {/* Trades detail (Hub): deals, connections, trust. */}
+      {hubView === "trades" ? (
+        <>
       <div className="mt-2 grid grid-cols-3 gap-2">
         <AdminStat
           label="Connections"
@@ -13561,14 +15325,16 @@ function AdminDashboard({
         Jarvis.
       </p>
 
-      {/* Tickets by status. */}
-      <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
-        Change-request tickets
-      </h3>
+        </>
+      ) : null}
+
+      {/* Tickets detail (Hub): change-request tickets by status. */}
+      {hubView === "tickets" ? (
+        <>
       <div
         className={`mt-2 ${
           changedSet.has("tickets.status")
-            ? "cursor-pointer rounded-xl bg-blue-500/15 p-2 ring-1 ring-inset ring-blue-300/40"
+            ? "cursor-pointer rounded-xl vx-changed-row vx-changed-ring p-2"
             : ""
         }`}
         onClick={
@@ -13588,7 +15354,7 @@ function AdminDashboard({
           completed={s.deals?.ticketsByStatus.completed ?? 0}
         />
         {changedSet.has("tickets.status") ? (
-          <p className="mt-1 text-center text-[10px] font-semibold uppercase tracking-wider text-blue-300">
+          <p className="mt-1 text-center text-[10px] font-semibold uppercase tracking-wider vx-changed-text">
             Changed — tap to clear
           </p>
         ) : null}
@@ -13599,10 +15365,21 @@ function AdminDashboard({
         envelope on Home.
       </p>
 
-      {/* System + storage. */}
-      <h3 className="mt-5 text-sm font-semibold text-[var(--text)]">
-        System
-      </h3>
+        </>
+      ) : null}
+
+      {/* Catalog detail (Hub): binder coverage, the daily
+          audit's last run, and the game-catalog counts. */}
+      {hubView === "catalog" ? <AdminCatalogDetail /> : null}
+
+      {/* Server Health detail (Hub): System + storage. */}
+      {hubView === "server" ? (
+        <>
+      {/* Vault X server registry (moved here from Settings,
+          Nov 4, 2026 — Anthony: it belongs in Admin): the
+          owner's registered identity on the server, at the
+          top of Server Health. */}
+      <AdminRegistrySection />
       <dl className="mt-2 space-y-1.5 rounded-xl bg-[var(--bg)] px-3 py-3 text-sm">
         <div className="flex items-baseline justify-between gap-3">
           <dt className="text-[var(--dim)]">App</dt>
@@ -13623,7 +15400,7 @@ function AdminDashboard({
         <div
           className={`flex items-baseline justify-between gap-3 ${
             changedSet.has("system.storedRows")
-              ? "-mx-2 cursor-pointer rounded-lg bg-blue-500/15 px-2 py-1"
+              ? "-mx-2 cursor-pointer rounded-lg vx-changed-row px-2 py-1"
               : ""
           }`}
           onClick={
@@ -13696,6 +15473,277 @@ function AdminDashboard({
           {...ackProps("own.value")}
         />
       </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** One game catalog's line in the Admin Catalog detail. */
+function AdminGameCatalogLine({
+  game,
+  label,
+}: {
+  game: "pokemon" | "magic" | "starwars" | "funko";
+  label: string;
+}) {
+  const q = useQuery({
+    queryKey: ["gameCatalog", game],
+    queryFn: () => api.getGameCatalog({ game }),
+  });
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-[var(--dim)]">{label}</dt>
+      <dd className="text-right font-medium tabular-nums text-[var(--text)]">
+        {q.data
+          ? `${q.data.cardsTotal.toLocaleString()} printings${q.data.complete ? " · complete" : ` · ${q.data.setsDone.toLocaleString()}/${q.data.setsTotal.toLocaleString()} sets in`}`
+          : q.isError
+            ? "Couldn't load"
+            : "Loading…"}
+      </dd>
+    </div>
+  );
+}
+
+/** The Hub's Catalog detail (Admin redesign, Nov 4, 2026):
+    Lorcana binder coverage (printings across every group),
+    the daily catalog audit's last run, and the other
+    collections' catalog counts — the same live sources the
+    sections themselves read, nothing recomputed or
+    invented here. */
+function AdminCatalogDetail() {
+  const binder = useQuery({
+    queryKey: ["binder"],
+    queryFn: () => api.getBinder({}),
+  });
+  const audit = useQuery({
+    queryKey: ["catalogAuditStatus"],
+    queryFn: () => api.getCatalogAuditStatus({}),
+  });
+  const totalPrintings = binder.data
+    ? binder.data.groups.reduce((sum, g) => sum + g.total, 0)
+    : null;
+  const ownedPrintings = binder.data
+    ? binder.data.groups.reduce((sum, g) => sum + g.owned, 0)
+    : null;
+  return (
+    <div>
+      <dl className="space-y-1.5 rounded-xl bg-[var(--bg)] px-3 py-3 text-sm">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--dim)]">Lorcana printings cataloged</dt>
+          <dd className="text-right font-medium tabular-nums text-[var(--text)]">
+            {totalPrintings != null
+              ? totalPrintings.toLocaleString()
+              : "Loading…"}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--dim)]">Printings you own</dt>
+          <dd className="text-right font-medium tabular-nums text-[var(--text)]">
+            {ownedPrintings != null
+              ? ownedPrintings.toLocaleString()
+              : "Loading…"}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--dim)]">Binder groups</dt>
+          <dd className="text-right font-medium tabular-nums text-[var(--text)]">
+            {binder.data ? binder.data.groups.length.toLocaleString() : "—"}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--dim)]">Daily catalog audit — last run</dt>
+          <dd className="text-right font-medium text-[var(--text)]">
+            {audit.data?.lastRunAt
+              ? `${fmtAdminWhen(audit.data.lastRunAt)} · +${(audit.data.lastAdded ?? 0).toLocaleString()} printings`
+              : "No run recorded yet"}
+          </dd>
+        </div>
+      </dl>
+      <h4 className="mt-4 text-sm font-semibold text-[var(--text)]">
+        Other catalogs
+      </h4>
+      <dl className="mt-2 space-y-1.5 rounded-xl bg-[var(--bg)] px-3 py-3 text-sm">
+        <AdminGameCatalogLine game="pokemon" label="Pokémon" />
+        <AdminGameCatalogLine game="magic" label="Magic: The Gathering" />
+        <AdminGameCatalogLine game="starwars" label="Star Wars: Unlimited" />
+        <AdminGameCatalogLine game="funko" label="Funko Pop!" />
+      </dl>
+      <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+        The daily audit compares the binder against the complete
+        Lorcana card universe and adds newly released or newly
+        sourced printings — existing cards, ownership, and prices
+        are never touched by it. The game catalogs download in
+        resumable chunks until complete.
+      </p>
+    </div>
+  );
+}
+
+/** The photo review screen (Anthony, Nov 4, 2026): pending
+    accessory-listing photos presented ONE BY ONE — photo,
+    listing title, category, price, seller — with an
+    individual Approve / Reject per photo. Approving makes
+    the photo visible on the already-live listing; rejecting
+    means it never displays (the seller can upload a
+    replacement, which comes back here). */
+function PhotoReviewScreen({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const queue = useQuery({
+    queryKey: ["pendingListingPhotos"],
+    queryFn: () => api.getPendingListingPhotos({}),
+  });
+  const [index, setIndex] = useState(0);
+  const review = useMutation({
+    mutationFn: (args: {
+      listingId: number;
+      decision: "approved" | "rejected";
+    }) => api.reviewListingPhoto(args),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        void queryClient.invalidateQueries({
+          queryKey: ["pendingListingPhotos"],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["marketplace"],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["myListings"] });
+      }
+    },
+  });
+  const pending = queue.data?.pending ?? [];
+  const current = pending[Math.min(index, Math.max(0, pending.length - 1))];
+  return (
+    <div
+      className="app-shell fixed inset-0 z-[80] overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photos needed for approval"
+    >
+      <div className="mx-auto w-full max-w-xl px-4 pt-5 pb-[max(2rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              hapticTick();
+              onClose();
+            }}
+            aria-label="Back to Admin"
+            className="flex h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-semibold text-[var(--text)]"
+          >
+            ← Admin
+          </button>
+          <h3 className="font-album text-lg text-[var(--text)]">
+            Photos needed for approval
+          </h3>
+        </div>
+        {queue.isPending ? (
+          <p className="mt-6 text-sm text-[var(--dim)]">
+            Loading the queue…
+          </p>
+        ) : pending.length === 0 ? (
+          <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-center">
+            <p className="text-base font-semibold text-[var(--text)]">
+              All caught up
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+              No listing photos are waiting on your approval right
+              now.
+            </p>
+          </div>
+        ) : current ? (
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">
+              Photo {Math.min(index, pending.length - 1) + 1} of{" "}
+              {pending.length}
+            </p>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+              {current.photoUrl ? (
+                <img
+                  src={current.photoUrl}
+                  alt={`Seller photo for ${current.title}`}
+                  className="max-h-[46vh] w-full object-contain bg-black/30"
+                />
+              ) : (
+                <p className="p-6 text-center text-sm text-[var(--dim)]">
+                  The photo itself couldn&rsquo;t be loaded.
+                </p>
+              )}
+              <div className="p-4">
+                <p className="text-base font-bold text-[var(--text)]">
+                  {current.title}
+                </p>
+                <p className="mt-0.5 text-sm text-[var(--dim)]">
+                  {current.category ?? "Accessory"} ·{" "}
+                  {fmtUSD(current.price)} · listed by @
+                  {current.sellerUsername}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+                  The listing is already live — approving shows this
+                  photo on it; rejecting means the photo never
+                  displays and the seller can upload a replacement.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={review.isPending}
+                onClick={() =>
+                  review.mutate({
+                    listingId: current.listingId,
+                    decision: "rejected",
+                  })
+                }
+                className="rounded-full border border-red-400/50 px-4 py-3 text-sm font-bold text-red-300 transition active:scale-[0.98] disabled:opacity-50"
+              >
+                Reject photo
+              </button>
+              <button
+                type="button"
+                disabled={review.isPending}
+                onClick={() =>
+                  review.mutate({
+                    listingId: current.listingId,
+                    decision: "approved",
+                  })
+                }
+                className="rounded-full bg-[var(--gold)] px-4 py-3 text-sm font-bold text-white shadow-[0_5px_14px_rgba(110,92,245,0.4)] transition active:scale-[0.98] disabled:opacity-50"
+              >
+                Approve photo
+              </button>
+            </div>
+            {pending.length > 1 ? (
+              <div className="mt-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  disabled={index <= 0}
+                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                  className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-sm font-semibold text-[var(--text)] disabled:opacity-40"
+                >
+                  ← Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={index >= pending.length - 1}
+                  onClick={() =>
+                    setIndex((i) => Math.min(pending.length - 1, i + 1))
+                  }
+                  className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-sm font-semibold text-[var(--text)] disabled:opacity-40"
+                >
+                  Next →
+                </button>
+              </div>
+            ) : null}
+            {review.data && !review.data.ok ? (
+              <p role="alert" className="mt-2 text-sm text-red-400">
+                {review.data.error}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -13749,6 +15797,17 @@ function RegisteredUsersPage({
   onClose: () => void;
 }) {
   const connectionsUnread = roster.some((m) => m.connections == null);
+  // Owner-only trust detail (Anthony, Nov 4, 2026): the
+  // verified-badge record and invite lineage per user —
+  // served by getAdminUserTrust and shown ONLY on this
+  // Admin page, never on any public profile.
+  const trust = useQuery({
+    queryKey: ["adminUserTrust"],
+    queryFn: () => api.getAdminUserTrust({}),
+  });
+  const trustByCode = new Map(
+    (trust.data?.users ?? []).map((u) => [u.collectorCode, u]),
+  );
   return (
     <div
       className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--bg)]"
@@ -13818,17 +15877,19 @@ function RegisteredUsersPage({
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <span
-                      aria-hidden="true"
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--accent)]/50 bg-[var(--bg)] font-album text-base font-bold text-[var(--gold-soft)]"
-                    >
-                      {initial}
-                    </span>
+                    <LetterAvatar
+                      initial={initial}
+                      className="h-11 w-11 text-base"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="text-base font-semibold text-[var(--text)]">
                           @{m.username}
                         </span>
+                        <VerifiedBadge
+                          collectorCode={m.collectorId}
+                          username={m.username}
+                        />
                         {m.isYou ? (
                           <span className="rounded-full bg-[var(--accent)] px-1.5 py-px text-[9px] font-bold text-[var(--on-accent)]">
                             YOU
@@ -13840,17 +15901,17 @@ function RegisteredUsersPage({
                           </span>
                         ) : null}
                         {changed ? (
-                          <span className="ml-auto rounded-full bg-blue-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-100">
+                          <span className="ml-auto rounded-full vx-changed-chip px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
                             Changed
                           </span>
                         ) : null}
                       </div>
                       {changed && changes?.get(key) ? (
-                        <p className="mt-1 text-[11px] font-semibold leading-snug text-blue-200">
+                        <p className="mt-1 text-[11px] font-semibold leading-snug vx-changed-text">
                           {changes.get(key)?.before == null
                             ? `New on the roster · now ${changes.get(key)?.after}`
                             : `${changes.get(key)?.before} → ${changes.get(key)?.after}`}
-                          <span className="font-normal text-blue-300/80">
+                          <span className="font-normal vx-changed-text opacity-80">
                             {" "}
                             — tap the row to mark it seen
                           </span>
@@ -13886,6 +15947,17 @@ function RegisteredUsersPage({
                           {m.joinedAt ? fmtAdminDay(m.joinedAt) : "—"}
                         </span>
                       </p>
+                      {trustByCode.get(m.collectorId) ? (
+                        <AdminUserTrustBlock
+                          collectorCode={m.collectorId}
+                          username={m.username}
+                          isRoot={
+                            m.collectorId === "MC-XFU8-Z5WD" ||
+                            m.collectorId === "MC-JARVIS"
+                          }
+                          trust={trustByCode.get(m.collectorId)!}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 </li>
@@ -13921,6 +15993,232 @@ function RegisteredUsersPage({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One user's Admin-only trust detail (Anthony, Nov 4,
+    2026): verified-badge state, invite lineage (vouched by /
+    vouched in — audit data that lives ONLY here in Admin),
+    the owner's Verify / Revoke actions, and their forum
+    role. Verify and Revoke are two-tap confirms in place —
+    no modal, no navigation. Granting a forum role
+    server-side requires a currently verified badge; a
+    revoked badge shows the role as suspended (it confers
+    nothing until re-verification + a fresh grant). */
+function AdminUserTrustBlock({
+  collectorCode,
+  username,
+  isRoot,
+  trust,
+}: {
+  collectorCode: string;
+  username: string;
+  isRoot: boolean;
+  trust: {
+    badgeStatus: string | null;
+    badgeBasis: string | null;
+    vouchedBy: {
+      username: string;
+      collectorCode: string;
+      at: string;
+      source: string;
+    } | null;
+    vouchedIn: {
+      username: string;
+      collectorCode: string;
+      at: string;
+      source: string;
+    }[];
+  };
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState<
+    "verify" | "revoke" | null
+  >(null);
+  const roles = useQuery({
+    queryKey: ["forumRoles"],
+    queryFn: () => api.getForumRoles({}),
+  });
+  const myRole = (roles.data?.roles ?? []).find(
+    (r) => r.collectorCode === collectorCode,
+  );
+  const invalidateTrust = () => {
+    void queryClient.invalidateQueries({ queryKey: ["adminUserTrust"] });
+    void queryClient.invalidateQueries({ queryKey: ["verifiedBadges"] });
+    void queryClient.invalidateQueries({ queryKey: ["forumRoles"] });
+    void queryClient.invalidateQueries({ queryKey: ["adminStats"] });
+  };
+  const verify = useMutation({
+    mutationFn: () => api.grantVerifiedBadge({ collectorCode, username }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        setConfirming(null);
+        invalidateTrust();
+      }
+    },
+  });
+  const revoke = useMutation({
+    mutationFn: () => api.revokeVerifiedBadge({ collectorCode }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        setConfirming(null);
+        invalidateTrust();
+      }
+    },
+  });
+  const grantRole = useMutation({
+    mutationFn: (role: "admin" | "moderator") =>
+      api.grantForumRole({ collectorCode, role }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        invalidateTrust();
+      }
+    },
+  });
+  const revokeRole = useMutation({
+    mutationFn: () => api.revokeForumRole({ collectorCode }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        invalidateTrust();
+      }
+    },
+  });
+  const actionError =
+    verify.data && !verify.data.ok
+      ? verify.data.error
+      : revoke.data && !revoke.data.ok
+        ? revoke.data.error
+        : grantRole.data && !grantRole.data.ok
+          ? grantRole.data.error
+          : revokeRole.data && !revokeRole.data.ok
+            ? revokeRole.data.error
+            : null;
+  const verified = trust.badgeStatus === "verified";
+  const revoked = trust.badgeStatus === "revoked";
+  return (
+    <div className="mt-2.5 rounded-xl bg-[var(--bg)] px-3 py-2.5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">
+        Trust — Admin only
+      </p>
+      <p className="mt-1 text-[13px] leading-relaxed text-[var(--text)]">
+        {verified
+          ? `Verified${trust.badgeBasis === "root" ? " — owner, root of the chain" : trust.badgeBasis === "owner" ? " — verified by the owner" : trust.badgeBasis === "builtin" ? " — built-in friend" : " — earned through a confirmed trade"}`
+          : revoked
+            ? "Badge revoked by the owner"
+            : "Not verified"}
+      </p>
+      <p className="mt-1 text-[13px] leading-relaxed text-[var(--dim)]">
+        {isRoot
+          ? "Root account — no voucher"
+          : trust.vouchedBy
+            ? `Vouched by: @${trust.vouchedBy.username} (${trust.vouchedBy.collectorCode}) — ${fmtAdminDay(trust.vouchedBy.at)}${trust.vouchedBy.source === "backfill" ? " · invited by the owner before invite codes" : ""}`
+            : "No voucher on file"}
+      </p>
+      <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--dim)]">
+        Vouched in: {trust.vouchedIn.length.toLocaleString()}
+        {trust.vouchedIn.length > 0
+          ? ` — ${trust.vouchedIn.map((v) => `@${v.username} (${fmtAdminDay(v.at)})`).join(", ")}`
+          : ""}
+      </p>
+      {myRole ? (
+        <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--dim)]">
+          Forum role:{" "}
+          <span className="font-semibold text-[var(--text)]">
+            {myRole.role === "admin" ? "Admin" : "Moderator"}
+          </span>
+          {myRole.suspended || !myRole.effective
+            ? " — suspended (badge not verified)"
+            : ""}
+        </p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {!isRoot && !verified ? (
+          <button
+            type="button"
+            disabled={verify.isPending}
+            onClick={() => {
+              if (confirming === "verify") verify.mutate();
+              else setConfirming("verify");
+            }}
+            className="rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs font-bold text-white transition active:scale-[0.97] disabled:opacity-50"
+          >
+            {confirming === "verify"
+              ? `Tap again — verify @${username}`
+              : "Verify"}
+          </button>
+        ) : null}
+        {!isRoot && verified ? (
+          <button
+            type="button"
+            disabled={revoke.isPending}
+            onClick={() => {
+              if (confirming === "revoke") revoke.mutate();
+              else setConfirming("revoke");
+            }}
+            className="rounded-full border border-red-400/50 px-3 py-1.5 text-xs font-bold text-red-300 transition active:scale-[0.97] disabled:opacity-50"
+          >
+            {confirming === "revoke"
+              ? "Tap again — revoke the badge"
+              : "Revoke"}
+          </button>
+        ) : null}
+        {verified && !myRole ? (
+          <>
+            <button
+              type="button"
+              disabled={grantRole.isPending}
+              onClick={() => grantRole.mutate("moderator")}
+              className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--text)] transition active:scale-[0.97] disabled:opacity-50"
+            >
+              Make forum Moderator
+            </button>
+            <button
+              type="button"
+              disabled={grantRole.isPending}
+              onClick={() => grantRole.mutate("admin")}
+              className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--text)] transition active:scale-[0.97] disabled:opacity-50"
+            >
+              Make forum Admin
+            </button>
+          </>
+        ) : null}
+        {verified && myRole && !myRole.effective ? (
+          <button
+            type="button"
+            disabled={grantRole.isPending}
+            onClick={() =>
+              grantRole.mutate(myRole.role === "admin" ? "admin" : "moderator")
+            }
+            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--text)] transition active:scale-[0.97] disabled:opacity-50"
+          >
+            Re-grant forum role
+          </button>
+        ) : null}
+        {myRole ? (
+          <button
+            type="button"
+            disabled={revokeRole.isPending}
+            onClick={() => revokeRole.mutate()}
+            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--dim)] transition active:scale-[0.97] disabled:opacity-50"
+          >
+            Remove forum role
+          </button>
+        ) : null}
+      </div>
+      {actionError ? (
+        <p role="alert" className="mt-1.5 text-xs text-red-400">
+          {actionError}
+        </p>
+      ) : null}
+      <p className="mt-1.5 text-[11px] leading-snug text-[var(--dim)]">
+        Invite lineage is an audit trail only — being vouched in
+        never grants or implies the verified badge.
+      </p>
     </div>
   );
 }
@@ -14216,6 +16514,13 @@ function TicketsInbox({
           <p className="mt-3 whitespace-pre-wrap border-t border-[var(--border)] pt-3 text-sm leading-relaxed text-[var(--text)]">
             {open.message}
           </p>
+          {open.photoUrl ? (
+            <img
+              src={open.photoUrl}
+              alt="Screenshot attached to this ticket"
+              className="mt-3 max-h-96 w-auto rounded-xl border border-[var(--border)]"
+            />
+          ) : null}
           <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--dim)]">
             Set status
           </p>
@@ -14482,9 +16787,17 @@ function BadgeIcon({
   );
 }
 
-/** The badge row beside a collector's name (Anthony's Shiny
-    screenshot has the same little icon row): up to four earned
-    badges plus a count, opening the full achievements list. */
+/** The achievements row on a profile (Anthony, Nov 4, 2026):
+    it sits UNDERNEATH the name + verified badge unit — never
+    beside the name — and spans the FULL width of the profile
+    card, its icons spread across that width instead of
+    clustering in one spot. The row shows as many earned
+    badges as FIT across the card; the rest collapse into a
+    "+N" chip at the row's end. Tapping the row (chip
+    included) opens the full achievements list. The fit is
+    measured off the row's own width: icons are 24px with a
+    4px minimum gap, and room for the chip is reserved only
+    when there is overflow to show. */
 function BadgeRow({
   states,
   onOpen,
@@ -14493,24 +16806,54 @@ function BadgeRow({
   onOpen: () => void;
 }) {
   const earned = states.filter((s) => s.earned);
+  const rowRef = useRef<HTMLButtonElement | null>(null);
+  const [rowWidth, setRowWidth] = useState(0);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const update = () => setRowWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, []);
   if (earned.length === 0) return null;
-  const shown = earned.slice(0, 4);
+  const ICON = 24;
+  const MIN_GAP = 4;
+  const CHIP = 44;
+  const inner = Math.max(0, rowWidth - 24); // the row's px-3 padding
+  const fitsAll =
+    earned.length * ICON + (earned.length - 1) * MIN_GAP <= inner;
+  const fitCount = fitsAll
+    ? earned.length
+    : Math.max(
+        1,
+        Math.floor((inner - CHIP + MIN_GAP) / (ICON + MIN_GAP)),
+      );
+  const shown = earned.slice(0, fitCount);
+  const overflow = earned.length - shown.length;
   return (
     <button
+      ref={rowRef}
       type="button"
       onClick={() => {
         hapticTick();
         onOpen();
       }}
       aria-label={`Achievements — ${earned.length} of ${states.length} earned. View all achievements.`}
-      className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1 pl-1.5 pr-2.5"
+      className="mt-2.5 flex w-full items-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
     >
-      {shown.map((s) => (
-        <BadgeIcon key={s.badge.id} state={s} />
-      ))}
-      {earned.length > shown.length ? (
-        <span className="text-[11px] font-bold text-[var(--dim)]">
-          +{earned.length - shown.length}
+      <span className="flex min-w-0 flex-1 items-center justify-between">
+        {shown.map((s) => (
+          <BadgeIcon key={s.badge.id} state={s} />
+        ))}
+      </span>
+      {overflow > 0 ? (
+        <span className="ml-2 shrink-0 rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[11px] font-bold text-[var(--dim)]">
+          +{overflow}
         </span>
       ) : null}
     </button>
@@ -14537,52 +16880,57 @@ function useHistorySheet(
   setOpen: (v: boolean) => void,
   seededPush = false,
 ) {
+  // Three-back rule (Anthony, Nov 4, 2026): a sheet may hold ONE
+  // history entry; a sheet opened while another window holds the
+  // slot layers into the same entry instead of stacking. See
+  // historyNav.ts — this keeps the exact openSheet/closeSheet
+  // contract every call site already uses.
   const pushedRef = useRef(seededPush);
+  const heldRef = useRef(seededPush);
   const openSheet = () => {
-    setOpen(true);
-    try {
-      // Carry the underlying entry's state forward into the
-      // sheet's entry (refresh-in-place fix, Anthony, Nov 3,
-      // 2026, ~11:37 AM — the Library case): a sheet entry
-      // used to hold ONLY its own key, so a page refresh on
-      // an open sheet found none of the layers underneath in
-      // the surviving state — the profile/ID seeds below it
-      // read false, the app's nav-init treated the stack as
-      // broken and normalized it to Home, and the refresh
-      // bounced all the way out. Merged, the sheet's entry
-      // names the whole stack (the profile's key, or the
-      // Social friend entry's keys), every layer seeds itself
-      // back open from it, and Back still unwinds one layer
-      // at a time: the entry below lacks this sheet's key,
-      // which is all the trap below checks.
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
-      window.history.pushState(
-        { ...(cur ?? {}), [key]: true },
-        "",
-      );
-      pushedRef.current = true;
-    } catch {
-      pushedRef.current = false;
+    if (heldRef.current) {
+      setOpen(true);
+      return;
     }
+    setOpen(true);
+    // Carry the underlying entry's state forward into the
+    // sheet's entry (refresh-in-place fix, Anthony, Nov 3,
+    // 2026, ~11:37 AM — the Library case): a sheet entry
+    // used to hold ONLY its own key, so a page refresh on
+    // an open sheet found none of the layers underneath in
+    // the surviving state — the profile/ID seeds below it
+    // read false, the app's nav-init treated the stack as
+    // broken and normalized it to Home, and the refresh
+    // bounced all the way out. Merged, the sheet's entry
+    // names the whole stack (the profile's key, or the
+    // Social friend entry's keys), every layer seeds itself
+    // back open from it, and Back still closes the sheet.
+    const pushed = pushWindowState(
+      {
+        ...(readNavState() ?? {}),
+        [key]: true,
+      },
+      key,
+    );
+    pushedRef.current = pushed;
+    heldRef.current = true;
   };
   const closeSheet = () => {
     if (pushedRef.current) {
       window.history.back();
     } else {
+      // Layered (or the push failed): drop the key in place —
+      // no extra back press is owed and no stale key may
+      // reseed the sheet on a later refresh.
+      scrubWindowKeys([key]);
+      heldRef.current = false;
       setOpen(false);
     }
   };
   useEffect(() => {
     const onPopState = () => {
-      if (
-        pushedRef.current &&
-        !(window.history.state as Record<string, unknown> | null)?.[
-          key
-        ]
-      ) {
+      if (heldRef.current && readNavState()?.[key] == null) {
+        heldRef.current = false;
         pushedRef.current = false;
         setOpen(false);
       }
@@ -14592,46 +16940,6 @@ function useHistorySheet(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return { openSheet, closeSheet };
-}
-
-/** The My Decks entry on a profile (Anthony, Nov 3, 2026,
-    refined ~1 AM): deliberately a small CIRCULAR icon like an
-    app icon — a line-drawn deck of cards inside a circle with
-    a thick border, drawn in the same stroke style as the
-    Settings quick-jump icons and colored with the theme's own
-    variables, so it follows whichever theme is running. NO
-    label and no explanation text (the decks page itself
-    carries the explanation). A discoverable Easter egg, not
-    a big button. It renders under the profile's Trust Score
-    stat, pushed to the far right edge so it lines up with
-    the rest of the page (see ProfileHeader). */
-function MyDecksButton({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        hapticTick();
-        onOpen();
-      }}
-      aria-label="My Decks — open the decks page"
-      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-[var(--accent)]/30 bg-[var(--surface)] text-[var(--gold-soft)] shadow-[0_4px_14px_rgba(0,0,0,0.45)] transition active:scale-95"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-6 w-6"
-        aria-hidden="true"
-      >
-        <rect x="9" y="3" width="12" height="15" rx="2" />
-        <rect x="3" y="6" width="12" height="15" rx="2" />
-        <path d="M6.5 10.5h5" />
-      </svg>
-    </button>
-  );
 }
 
 /** Deck box color choices (Anthony, Nov 2, 2026, late;
@@ -14720,17 +17028,17 @@ function deckBoxInk(swatch: string): {
       };
 }
 
-/** The featured-card window of a deck box (refined Nov 3,
-    2026, ~11:00 PM): like the window on a real deck box, it
-    shows a CLOSE-UP of the featured card — the character's
-    face / the card's art portion only, never the whole
-    card. The full-card art is zoomed on its art band (the
-    illustration occupies roughly the top fifth-to-half of
-    a Lorcana card, the character's face in its upper
-    middle), so the small window frames the face the way a
-    real box's window frames the sleeved card behind it.
-    Typeset name until the art arrives. */
-function DeckBoxWindow({
+/** The FULL card that rises out of a deck box in the
+    opening animation (Anthony, Nov 4, 2026, ~10:15 AM
+    re-report: the card that came out showed only HALF the
+    card — the old window's zoomed face close-up, clipped
+    by a short slot). This renders the whole card art,
+    unzoomed and unclipped, at the card's own proportions;
+    DeckBoxOpening gives it a slot tall enough for the
+    entire card to rise clear of the box. Typeset name
+    until the art arrives. (The box-face window this used
+    to feed is REMOVED — see DeckBoxCard.) */
+function DeckBoxFullCard({
   cardId,
   name,
 }: {
@@ -14744,15 +17052,38 @@ function DeckBoxWindow({
       alt=""
       aria-hidden="true"
       className="h-full w-full object-cover"
-      style={{
-        transform: "scale(2.15)",
-        transformOrigin: "50% 21%",
-      }}
     />
   ) : (
-    <span className="flex h-full w-full items-center justify-center bg-black/45 p-1.5 text-center text-[9px] font-semibold leading-tight text-amber-50">
+    <span className="flex h-full w-full items-center justify-center bg-black/45 p-1.5 text-center text-[11px] font-semibold leading-tight text-amber-50">
       {name}
     </span>
+  );
+}
+
+/** The profile row's four box colors (Anthony, Nov 4,
+    2026, ~10:14 AM): the profile ALWAYS spans four deck
+    boxes across, and each slot wears a DIFFERENT color
+    that fits the Vault theme — a sweep across the app's
+    own blue-to-violet glow family (the avatar ring's
+    cyan, royal blue, violet, and magenta-violet), darkened
+    to box-body depth. Slot colors belong to the SLOT, not
+    the deck: a filled slot and an empty slot in the same
+    position wear the same color, so the row reads as one
+    set of four boxes whether decks exist or not. The My
+    Decks shelves keep each deck's own picked color; only
+    this profile row uses the sweep. */
+const PROFILE_DECK_BOX_COLORS: { id: string; label: string; swatch: string }[] = [
+  { id: "profile-cyan", label: "Deep cyan", swatch: "#1e7f9e" },
+  { id: "profile-royal", label: "Royal blue", swatch: "#3b5bd6" },
+  { id: "profile-violet", label: "Violet", swatch: "#6d3fd4" },
+  { id: "profile-magenta", label: "Magenta violet", swatch: "#a83bc2" },
+];
+
+/** A profile slot's color entry by slot position. */
+function profileDeckBoxColor(slot: number) {
+  return (
+    PROFILE_DECK_BOX_COLORS[slot % PROFILE_DECK_BOX_COLORS.length] ??
+    PROFILE_DECK_BOX_COLORS[0]!
   );
 }
 
@@ -14762,14 +17093,15 @@ function DeckBoxWindow({
     generic, so the box is now modeled on real deck boxes):
     a solid box in the deck's OWN body color (picked in the
     deck builder) with molded construction — the deck's
-    custom name EMBOSSED across the top band, a fine lid
-    seam under it, and a recessed front panel holding ONE
-    SMALL window with a thick molded rim, the way a real
-    deck box's window shows just the face of the card
-    sleeved behind it. The window shows a close-up of ONE
-    featured card from the deck — the character's face /
-    the art portion only (see DeckBoxWindow), the owner's
-    pick or the deck's signature card until they pick.
+    custom name EMBOSSED across the top band and a fine lid
+    seam under it. WINDOW REMOVED (Anthony, Nov 4, 2026,
+    ~10:15 AM): the recessed front panel and its featured-
+    card window are GONE — the box front is one solid
+    color, the same color as the body around where the
+    window was, with only a short molded maker's rule
+    stamped into it. The featured card still exists on the
+    deck (it is the card that rises in the opening); it
+    just no longer shows through a window on the face.
     Boxes are per deck, one per displayed deck, standing
     Library-style on the shelves. Tapping a closed box
     plays the opening (see DeckBoxOpening) and then lands
@@ -14818,42 +17150,18 @@ function DeckBoxCard({
           boxShadow: "0 1px 0 rgba(255,255,255,0.16)",
         }}
       />
-      {/* The recessed front panel, molded into the box
-          face, holding the small window. */}
+      {/* The solid front (WINDOW REMOVED, Anthony, Nov 4,
+          2026, ~10:15 AM): no panel, no window — the face
+          is the box's own color straight through, holding
+          its height with empty body and one short molded
+          rule stamped into the plastic like a maker's
+          line. */}
       <span
-        className="mt-2 block rounded-[9px] px-2 pb-2 pt-2.5"
-        style={{
-          backgroundColor: "rgba(0,0,0,0.16)",
-          boxShadow:
-            "inset 0 2px 6px rgba(0,0,0,0.38), inset 0 -1px 0 rgba(255,255,255,0.15)",
-        }}
+        aria-hidden="true"
+        className="mt-2 flex h-24 items-center justify-center"
       >
-        {/* The small window with its thick molded rim:
-            just the featured card's face shows through. */}
         <span
-          className="mx-auto block aspect-[5/4] w-[68%] overflow-hidden rounded-[6px] bg-black/50"
-          style={{
-            border: "3px solid rgba(0,0,0,0.55)",
-            boxShadow:
-              "inset 0 0 0 2px rgba(255,255,255,0.20), inset 0 3px 8px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.40)",
-          }}
-        >
-          {deck.featured ? (
-            <DeckBoxWindow
-              cardId={deck.featured.cardId}
-              name={deck.featured.fullName}
-            />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center bg-black/45 p-1.5 text-center text-[9px] font-semibold leading-tight text-amber-50">
-              {deck.name}
-            </span>
-          )}
-        </span>
-        {/* A short molded rule under the window, like a
-            maker's line stamped into the plastic. */}
-        <span
-          aria-hidden="true"
-          className="mx-auto mt-2 block h-[3px] w-8 rounded-full"
+          className="block h-[3px] w-10 rounded-full"
           style={{ backgroundColor: ink, opacity: 0.32 }}
         />
       </span>
@@ -14870,10 +17178,18 @@ function DeckBoxCard({
 
 /** The opening beat (Anthony, Nov 3, 2026, ~12:00 PM):
     tapping a closed deck box flips its lid up on the back
-    hinge while the deck inside rises a little — then the
-    deck's own page takes over with every card and its
-    copies. Rendered by DecksSheet while its timer runs;
-    purely presentational. */
+    hinge while the deck inside rises — then the deck's own
+    page takes over with every card and its copies.
+    Rendered by DecksSheet while its timer runs; purely
+    presentational. FULL-CARD FIX (Anthony, Nov 4, 2026,
+    ~10:15 AM re-report: only HALF the card showed): the
+    rising card is now the featured card at its FULL card
+    proportions (DeckBoxFullCard, unzoomed), sliding up
+    inside a clipped slot as tall as the card itself, so
+    when the rise settles the ENTIRE card stands clear
+    above the box front — nothing clipped, nothing zoomed
+    to a face. The box front here is solid too, matching
+    the window removal on the shelf boxes. */
 function DeckBoxOpening({ deck }: { deck: DeckViewT }) {
   const c = deckBoxColor(deck.color);
   const { ink, emboss } = deckBoxInk(c.swatch);
@@ -14883,27 +17199,38 @@ function DeckBoxOpening({ deck }: { deck: DeckViewT }) {
       role="status"
       aria-label={`Opening the ${deck.name} deck box`}
     >
-      <div className="relative h-80 w-56">
-        {/* The dark interior slot the deck sits in. */}
+      <div className="relative h-[430px] w-60">
+        {/* The interior slot the card rises through: a
+            clipped well whose bottom edge is exactly the
+            box front's top edge, so the card slides up out
+            of the seam and the well hides the part that
+            has not risen yet. Tall enough (248px) for the
+            full card at this width (about 235px). */}
         <div
           aria-hidden="true"
-          className="absolute inset-x-3 bottom-[104px] h-[120px] rounded-t-lg bg-black/60 shadow-[inset_0_4px_10px_rgba(0,0,0,0.8)]"
-        />
-        {/* The deck inside: at rest it hides behind the lid
-            and the box front; as the lid lifts it rises out
-            of the slot. */}
-        <div className="deck-card-rise absolute inset-x-6 bottom-[110px] h-24 overflow-hidden rounded-t-md bg-[#20242e] shadow-[0_6px_18px_rgba(0,0,0,0.55)]">
-          {deck.featured ? (
-            <DeckBoxWindow
-              cardId={deck.featured.cardId}
-              name={deck.featured.fullName}
-            />
-          ) : null}
+          className="absolute inset-x-0 bottom-[144px] h-[248px] overflow-hidden"
+        >
+          <div
+            className="absolute inset-x-3 bottom-0 top-6 rounded-t-lg bg-black/60 shadow-[inset_0_4px_10px_rgba(0,0,0,0.8)]"
+          />
+          <div className="deck-card-rise absolute inset-x-9 bottom-0 aspect-[63/88] overflow-hidden rounded-md bg-[#20242e] shadow-[0_6px_18px_rgba(0,0,0,0.55)]">
+            {deck.featured ? (
+              <DeckBoxFullCard
+                cardId={deck.featured.cardId}
+                name={deck.featured.fullName}
+              />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center bg-black/45 p-2 text-center text-xs font-semibold leading-tight text-amber-50">
+                {deck.name}
+              </span>
+            )}
+          </div>
         </div>
-        {/* The box front, over the deck's lower half: the
-            bordered window and the count. */}
+        {/* The box front: SOLID (window removed, Nov 4,
+            2026) — the deck's name and count ride on the
+            plain colored face. */}
         <div
-          className="absolute inset-x-0 bottom-10 z-10 h-[104px] overflow-hidden rounded-[12px] p-2 shadow-[0_16px_30px_rgba(0,0,0,0.6)]"
+          className="absolute inset-x-0 bottom-10 z-10 flex h-[104px] flex-col items-center justify-center gap-1.5 overflow-hidden rounded-[12px] p-2 shadow-[0_16px_30px_rgba(0,0,0,0.6)]"
           style={{
             backgroundColor: c.swatch,
             backgroundImage:
@@ -14911,22 +17238,18 @@ function DeckBoxOpening({ deck }: { deck: DeckViewT }) {
           }}
         >
           <span
-            className="mx-auto block h-16 w-[52%] overflow-hidden rounded-[6px] bg-black/50"
-            style={{
-              border: "3px solid rgba(0,0,0,0.55)",
-              boxShadow:
-                "inset 0 0 0 2px rgba(255,255,255,0.20), inset 0 3px 8px rgba(0,0,0,0.55)",
-            }}
+            className="block max-w-full truncate px-2 text-center text-xs font-black uppercase tracking-[0.13em]"
+            style={{ color: ink, textShadow: emboss }}
           >
-            {deck.featured ? (
-              <DeckBoxWindow
-                cardId={deck.featured.cardId}
-                name={deck.featured.fullName}
-              />
-            ) : null}
+            {deck.name}
           </span>
           <span
-            className="block pt-1.5 text-center text-[10px] font-bold tabular-nums"
+            aria-hidden="true"
+            className="block h-[3px] w-10 rounded-full"
+            style={{ backgroundColor: ink, opacity: 0.32 }}
+          />
+          <span
+            className="block text-center text-[10px] font-bold tabular-nums"
             style={{ color: ink, opacity: 0.9 }}
           >
             {deck.totalCards} card{deck.totalCards === 1 ? "" : "s"}{" "}
@@ -14967,8 +17290,9 @@ function DeckBoxOpening({ deck }: { deck: DeckViewT }) {
     The page is treated like the Library: every deck ON
     DISPLAY stands on the shelves as its own cartridge-style
     deck box (its picked body color, its custom name
-    embossed on the top band, its featured card in the front
-    window), and tapping a closed box — owner or visitor —
+    embossed on the top band, a solid front — the window
+    was removed Nov 4, 2026), and tapping a closed box —
+    owner or visitor —
     plays the opening animation and lands on that deck's
     page with every card and its copies. (This per-deck box
     supersedes the morning's singular drawn box and the
@@ -15041,6 +17365,46 @@ function DecksSheet({
   const [copiedDeckIds, setCopiedDeckIds] = useState<Set<number>>(
     () => new Set(),
   );
+  // Share a deck by mail (Anthony, Nov 4, 2026 — simplified
+  // at his direction): the deck renders to a plain-text list
+  // on the server and lands in the picked collector's Inbox
+  // as mail. The picker lists the Collector ID registry
+  // (connected users); no shared-deck object is created.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareNote, setShareNote] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+  const registryQ = useQuery({
+    queryKey: ["registryMembers"],
+    queryFn: () => api.getRegistryMembers({}),
+    enabled: isOwn && shareOpen,
+  });
+  const shareDeckMut = useMutation({
+    mutationFn: (args: { deckId: number; toCode: string }) =>
+      api.sendDeckByMail(args),
+    onSuccess: (res, args) => {
+      if (res.ok) {
+        const who =
+          (registryQ.data?.members ?? []).find(
+            (m) => m.collectorId === args.toCode,
+          )?.username ?? "them";
+        setShareNote({
+          ok: true,
+          text: `Sent ✓ — the deck list is on its way to @${who}'s Inbox as mail.`,
+        });
+        setShareOpen(false);
+        void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      } else {
+        setShareNote({
+          ok: false,
+          text: res.error ?? "That didn't send — try again.",
+        });
+      }
+    },
+    onError: () =>
+      setShareNote({ ok: false, text: "That didn't send — try again." }),
+  });
   // Profile deck-box deep link (Anthony, Nov 4, 2026,
   // ~12:22 AM): tapping one of the four boxes on a profile
   // stores the deck id and opens this page; when the decks
@@ -15089,43 +17453,38 @@ function DecksSheet({
     decksQuery.isSuccess,
     friendDecksQuery.isSuccess,
   ]);
-  // Nested back trap (Anthony, Nov 3, 2026, ~5:24 PM): an
-  // opened deck — its detail view, the builder, the
-  // collection check — is a step INSIDE this page, so Back
-  // from it must land on the deck boxes; only a back from
-  // the boxes list itself returns to the profile. Entering
-  // any non-list mode pushes one history entry of its own:
-  // the device back pops that entry and returns to the
-  // list, and the in-page back controls route through
-  // backToList so both paths stay in step.
-  const detailPushedRef = useRef(false);
+  // Three-back rule (Anthony, Nov 4, 2026): an opened deck —
+  // its detail view, the builder, the collection check — is
+  // main-flow navigation, so entering any non-list mode
+  // REPLACES the single app entry instead of pushing; the
+  // device Back exits the app, and the in-page back controls
+  // route through backToList to return to the boxes in place.
   const backToList = () => {
-    if (detailPushedRef.current) {
-      window.history.back();
-    } else {
-      setDeckMode({ kind: "list" });
-    }
+    setShareOpen(false);
+    setShareNote(null);
+    setDeckMode({ kind: "list" });
   };
   useEffect(() => {
-    if (deckMode.kind !== "list" && !detailPushedRef.current) {
-      try {
-        window.history.pushState({ lorcanaDeckDetail: true }, "");
-        detailPushedRef.current = true;
-      } catch {
-        detailPushedRef.current = false;
+    if (deckMode.kind !== "list") {
+      replaceNavState({
+        ...(readNavState() ?? {}),
+        lorcanaDeckDetail: true,
+      });
+    } else {
+      const cur = readNavState();
+      if (cur?.lorcanaDeckDetail) {
+        const next = { ...cur };
+        delete next.lorcanaDeckDetail;
+        replaceNavState(next);
       }
     }
   }, [deckMode.kind]);
   useEffect(() => {
     const onPopState = () => {
-      if (
-        detailPushedRef.current &&
-        !(window.history.state as { lorcanaDeckDetail?: boolean } | null)
-          ?.lorcanaDeckDetail
-      ) {
-        detailPushedRef.current = false;
-        setDeckMode({ kind: "list" });
-      }
+      // The detail no longer holds its own entry (three-back
+      // rule): a pop here means the app is exiting, so drop
+      // back to the list for a clean unmount.
+      setDeckMode({ kind: "list" });
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -15198,7 +17557,13 @@ function DecksSheet({
     },
   });
   // Beat two of the box opening: once the lid has flipped,
-  // the deck's own page takes over.
+  // the deck's own page takes over. The wait matches the
+  // cleaned-up animation's real length (Nov 4, 2026: lid
+  // 0.85s, deck rise done by ~0.95s) plus a settle beat so
+  // the finished pose can be enjoyed for a moment before
+  // the deck page takes over — Anthony (Nov 4, 2026,
+  // ~12:16 PM): the opening itself is good but ran too
+  // fast to enjoy; slowed a little across the board.
   useEffect(() => {
     if (!openingDeck) return;
     const reduced = window.matchMedia(
@@ -15209,7 +17574,7 @@ function DecksSheet({
         setDeckMode({ kind: "view", deck: openingDeck });
         setOpeningDeck(null);
       },
-      reduced ? 350 : 1000,
+      reduced ? 350 : 1250,
     );
     return () => window.clearTimeout(t);
   }, [openingDeck]);
@@ -15274,8 +17639,9 @@ function DecksSheet({
                 (Anthony, Nov 3, 2026, ~12:00 PM): each
                 displayed deck stands on the shelf as its own
                 cartridge-style box — its color, its name
-                embossed on top, its featured card in the
-                window — openable by any viewer. */}
+                embossed on top, a solid front (the window
+                was removed Nov 4, 2026) — openable by any
+                viewer. */}
             <div className="mt-3 space-y-5">
               {Array.from(
                 {
@@ -15414,6 +17780,114 @@ function DecksSheet({
                 </li>
               ))}
             </ul>
+            {isOwn ? (
+              // Share this deck by mail (Anthony, Nov 4,
+              // 2026): renders the deck to a plain-text list
+              // and mails it to the picked collector's Inbox.
+              <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <h4 className="font-album text-base text-[var(--text)]">
+                  Share this deck
+                </h4>
+                <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+                  Send the deck list as plain text to a connected
+                  collector&rsquo;s Inbox — name, inks, and every
+                  card with its quantity, number, and set.
+                </p>
+                {shareNote?.ok ? (
+                  <p
+                    role="status"
+                    className="mt-3 text-sm font-semibold text-emerald-400"
+                  >
+                    {shareNote.text}
+                  </p>
+                ) : shareOpen ? (
+                  <div className="mt-3">
+                    {(registryQ.data?.members ?? []).filter(
+                      (m) =>
+                        m.collectorId !==
+                        registryQ.data?.myCollectorCode,
+                    ).length === 0 ? (
+                      <p className="text-sm text-[var(--dim)]">
+                        {registryQ.isLoading
+                          ? "Loading your connections…"
+                          : "No other collectors are on the network yet."}
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-[var(--border)]">
+                        {(registryQ.data?.members ?? [])
+                          .filter(
+                            (m) =>
+                              m.collectorId !==
+                              registryQ.data?.myCollectorCode,
+                          )
+                          .map((m) => (
+                            <li
+                              key={m.collectorId}
+                              className="flex items-center justify-between gap-2 py-2"
+                            >
+                              <span className="min-w-0 truncate text-sm text-[var(--text)]">
+                                @{m.username}
+                                <span className="ml-1.5 text-xs text-[var(--dim)]">
+                                  {m.collectorId}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                disabled={shareDeckMut.isPending}
+                                onClick={() => {
+                                  hapticTick();
+                                  setShareNote(null);
+                                  shareDeckMut.mutate({
+                                    deckId: deckMode.deck.id,
+                                    toCode: m.collectorId,
+                                  });
+                                }}
+                                aria-label={`Send the ${deckMode.deck.name} deck list to ${m.username} by mail`}
+                                className="shrink-0 rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--on-accent)] disabled:opacity-50"
+                              >
+                                {shareDeckMut.isPending
+                                  ? "Sending…"
+                                  : "Send"}
+                              </button>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        hapticTick();
+                        setShareOpen(false);
+                      }}
+                      className="mt-2 text-sm font-semibold text-[var(--gold-soft)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hapticTick();
+                      setShareNote(null);
+                      setShareOpen(true);
+                    }}
+                    aria-label={`Share the ${deckMode.deck.name} deck by mail`}
+                    className="mt-3 w-full rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)]"
+                  >
+                    Share this deck by mail
+                  </button>
+                )}
+                {shareNote && !shareNote.ok ? (
+                  <p
+                    role="alert"
+                    className="mt-2 text-sm font-medium text-red-300"
+                  >
+                    {shareNote.text}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {/* Copy-a-deck (Anthony, Nov 3, 2026): on someone
                 else's displayed deck, offer the copy + check.
                 The copy lands in YOUR My Decks, attributed,
@@ -15971,8 +18445,10 @@ function DeckBuilder({
   const [name, setName] = useState(initial?.name ?? "");
   // The deck box's presentation (Anthony, Nov 3, 2026,
   // ~12:00 PM): its body color, and which of the deck's
-  // cards is featured in the box's front window (null = the
-  // deck's signature card shows instead).
+  // cards is featured — the card that rises out when the
+  // box opens (null = the deck's signature card instead).
+  // The box-face window it used to show in was removed
+  // Nov 4, 2026; the featured pick itself stays.
   const [boxColor, setBoxColor] = useState<string>(
     initial?.color ?? "midnight",
   );
@@ -16103,8 +18579,10 @@ function DeckBuilder({
       />
       {/* The deck's box (Anthony, Nov 3, 2026, ~12:00 PM):
           the name above is embossed across its top band;
-          here the owner picks the box's body color and the
-          card featured in its front window. */}
+          here the owner picks the box's body color and its
+          featured card — the card that rises out of the box
+          when it opens. (The box-face window was removed
+          Nov 4, 2026.) */}
       <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
         <p className="text-sm font-semibold text-[var(--text)]">
           Its deck box
@@ -16112,9 +18590,8 @@ function DeckBuilder({
         <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
           On display, this deck stands on your shelf as a deck
           box with its name embossed on top. Pick its color
-          and the card whose face shows in its little window
-          — the window shows a close-up of the card&rsquo;s
-          art, not the whole card.
+          and the featured card — the one that rises out of
+          the box, shown whole, when the box opens.
         </p>
         <p
           id="deck-box-color-label"
@@ -16156,7 +18633,7 @@ function DeckBuilder({
           htmlFor="deck-box-featured"
           className="mt-3.5 block text-xs font-semibold uppercase tracking-wide text-[var(--dim)]"
         >
-          Featured card in the window
+          Featured card — rises when the box opens
         </label>
         <VxSelect
           id="deck-box-featured"
@@ -17179,17 +19656,6 @@ const SPINE_TONES = [
     ProfileHeader's call (see there): underneath the
     Value + Collected stats, dropped down a few lines
     (Anthony, Nov 3, 2026, ~11:29 AM). */
-/** One of the owner's most valuable card printings
-    (exact printing + finish, per-unit value) — the
-    showcase stock for unfilled profile deck boxes
-    (Anthony, Nov 4, 2026, ~12:22 AM). */
-type TopCardWindow = {
-  cardId: number;
-  name: string;
-  finish: string;
-  unitValue: number;
-};
-
 function ShelfPhoto({
   groups,
   ownerName,
@@ -17199,6 +19665,16 @@ function ShelfPhoto({
   ownerName: string;
   onOpen: () => void;
 }) {
+  /* Sized to fit its window (Anthony, Nov 4, 2026): the
+     picture used to sit small in the middle of the Library
+     window — fixed 4–5px spines, 22–32px tall, in a 36px
+     row. Now the row targets a fuller width (about 12px of
+     window per book, capped at 280px) and the spines flex
+     to share that width evenly and stand taller, so the
+     shelf fills the window. The unit is still sized TO the
+     books and centered AS ONE UNIT (mx-auto + w-fit),
+     exactly as before — only the scale changed. */
+  const rowWidth = Math.min(280, groups.length * 12);
   return (
     <button
       type="button"
@@ -17211,19 +19687,15 @@ function ShelfPhoto({
     >
       <span
         aria-hidden="true"
-        className="flex h-9 items-end justify-center gap-[2px] overflow-hidden px-0.5"
+        className="flex h-[54px] max-w-full items-end justify-center gap-[3px] overflow-hidden px-1"
+        style={{ width: rowWidth }}
       >
         {groups.map((g, i) => (
           <span
             key={g.key}
-            className="shrink-0 rounded-t-[2px] shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_-1px_0_0_rgba(0,0,0,0.35),0_0_6px_rgba(108,124,255,0.22)]"
+            className="min-w-[4px] flex-1 basis-0 rounded-t-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_-1px_0_0_rgba(0,0,0,0.35),0_0_6px_rgba(108,124,255,0.22)]"
             style={{
-              /* Slimmer spines once the shelf gets crowded
-                 (23+ books), so the centered picture stays
-                 clear of the deck-box icon at the row's right
-                 edge on narrow phones. */
-              width: groups.length >= 23 ? 4 : 5,
-              height: `${22 + ((i * 5) % 3) * 5}px`,
+              height: `${38 + ((i * 5) % 3) * 6}px`,
               background: SPINE_TONES[i % SPINE_TONES.length],
             }}
           />
@@ -17231,9 +19703,9 @@ function ShelfPhoto({
       </span>
       <span
         aria-hidden="true"
-        className="block h-[3px] rounded bg-gradient-to-r from-[#33477c] via-[#6c7cff]/50 to-[#33477c] shadow-[0_2px_6px_rgba(0,0,0,0.55)]"
+        className="block h-1 rounded bg-gradient-to-r from-[#33477c] via-[#6c7cff]/50 to-[#33477c] shadow-[0_2px_6px_rgba(0,0,0,0.55)]"
       />
-      <span className="mt-0.5 block text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-[var(--dim)]">
+      <span className="mt-1 block text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--dim)]">
         Library ›
       </span>
     </button>
@@ -17264,8 +19736,12 @@ type LibraryEntry = {
       "Lorcana"), "promos" (ALL the promo binders, shelf
       sign "Lorcana Promos" with Promos in playful sticker
       lettering), "quests" (the Illumineer's Quest binders),
-      or "comics". Shelves never mix families. */
-  section: "chapters" | "promos" | "quests" | "comics";
+      or "comics". Shelves never mix families. Funko and
+      Legos joined Nov 4, 2026 (~12:12 PM, PROVISIONAL —
+      revisit after Anthony adds his first items): each gets
+      its own signed shelf, a spine per line/theme he owns
+      at least one item in. */
+  section: "chapters" | "promos" | "quests" | "comics" | "funko" | "lego";
 };
 
 /** One Library spine: a light TAP peeks — a small floating
@@ -18223,16 +20699,248 @@ function ComicsFlipBinder({
     what's clear) naming the owner and the chapter and saying
     what they hold there; press and hold a spine (or use the
     window's Open button) to open that binder. */
+/** A slab on the Library display wall, at wall size
+    (Anthony, Nov 4, 2026): SlabFront's label is built at
+    fixed print sizes, so laying the slab out directly at
+    wall width left the label band taking about a fifth of
+    the height — stretched and fake-looking next to a real
+    slab, whose label is a slim band of roughly a tenth.
+    The wall instead renders the slab at a natural width
+    and scales the FINISHED piece down to fit, so the label
+    keeps its real proportion at any wall size. In this
+    view the label text is not meant to be read — Anthony
+    is explicit that proportion and a legitimate real-slab
+    look are the whole goal here. */
+function ScaledSlabFront({ comic }: { comic: Comic }) {
+  // Library wall uniformity (Anthony, Nov 4, 2026): every slab
+  // on the wall renders SlabFront in uniform-label mode — one
+  // fixed slim label height and one fixed cover aspect for all
+  // slabs — so the scaled results share identical geometry and
+  // align evenly side by side, like real slabs on a shelf.
+  // Label text readability in this view does not matter.
+  const NATURAL_WIDTH = 264;
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0.5);
+  const [naturalHeight, setNaturalHeight] = useState(400);
+  useEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const update = () => {
+      const w = outer.clientWidth;
+      if (w > 0) setScale(w / NATURAL_WIDTH);
+      const h = inner.offsetHeight;
+      if (h > 0) setNaturalHeight(h);
+    };
+    update();
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(update);
+      ro.observe(outer);
+      ro.observe(inner);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, []);
+  return (
+    <div
+      ref={outerRef}
+      className="relative w-full overflow-hidden"
+      style={{ height: naturalHeight * scale }}
+    >
+      <div
+        ref={innerRef}
+        className="absolute left-0 top-0"
+        style={{
+          width: NATURAL_WIDTH,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <SlabFront comic={comic} uniformLabel />
+      </div>
+    </div>
+  );
+}
+
+/** The Library's Comics display wall (Anthony, Nov 4, 2026):
+    the Comics binder in the Library is replaced by a wall of
+    chosen slabs — up to FIVE, picked from the owner's own
+    graded comics, rendered as slabs (label and all), never as
+    raw photos. Never chosen (the stored list is null), the
+    wall defaults to Anthony's two signed comics: Aliens #1
+    (CGC Signature Series, signed by Sigourney Weaver) and
+    Batman #136 (Whatnot Foil, signed + sketch by Tyler
+    Kirkham). Tapping a slab opens that comic's detail sheet,
+    float-and-turn view and all. */
+function LibraryComicWall() {
+  const queryClient = useQueryClient();
+  const display = useQuery({
+    queryKey: ["libraryComicDisplay"],
+    queryFn: () => api.getLibraryComicDisplay({}),
+  });
+  const [openComic, setOpenComic] = useState<Comic | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string[]>([]);
+  const saveDisplay = useMutation({
+    mutationFn: (ids: string[]) =>
+      api.setLibraryComicDisplay({ ids }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["libraryComicDisplay"],
+      });
+      setEditing(false);
+    },
+  });
+  const DEFAULT_WALL = ["aliens-1", "batman-136"];
+  const chosen = display.data?.ids ?? DEFAULT_WALL;
+  const shown = chosen
+    .map((id) => COMICS.find((c) => c.id === id))
+    .filter((c): c is Comic => Boolean(c));
+  const toggleDraft = (id: string) => {
+    setDraft((d) =>
+      d.includes(id)
+        ? d.filter((x) => x !== id)
+        : d.length >= 5
+          ? d
+          : [...d, id],
+    );
+  };
+  return (
+    <div>
+      {shown.length > 0 ? (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 pb-3 pt-4">
+          <div className="flex flex-wrap items-end justify-center gap-3">
+            {shown.map((comic) => (
+              <button
+                key={comic.id}
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  setOpenComic(comic);
+                }}
+                aria-label={`Open ${comic.title}`}
+                className="w-[30%] max-w-[130px] shrink-0 transition active:scale-[0.98]"
+              >
+                <ScaledSlabFront comic={comic} />
+                <span className="mt-1.5 block truncate text-center text-[11px] font-semibold text-[var(--text)]">
+                  {comic.title}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div
+            aria-hidden="true"
+            className="mt-3 h-[6px] rounded bg-gradient-to-b from-[#3d5086] to-[#141f3d] shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
+          />
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--dim)]">
+          No slabs on display — choose up to five of your graded
+          comics to hang here.
+        </p>
+      )}
+      <div className="mt-2.5 flex justify-center">
+        <button
+          type="button"
+          onClick={() => {
+            hapticTick();
+            setDraft(chosen);
+            setEditing((v) => !v);
+          }}
+          aria-expanded={editing}
+          className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-xs font-semibold text-[var(--gold-soft)]"
+        >
+          {editing ? "Close the display picker" : "Edit display"}
+        </button>
+      </div>
+      {editing ? (
+        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
+          <p className="text-sm font-semibold text-[var(--text)]">
+            On the wall — {draft.length} of 5
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--dim)]">
+            Tap your comics to add or remove them. The wall holds
+            at most five.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {COMICS.map((comic) => {
+              const on = draft.includes(comic.id);
+              const full = !on && draft.length >= 5;
+              return (
+                <button
+                  key={comic.id}
+                  type="button"
+                  disabled={full}
+                  onClick={() => toggleDraft(comic.id)}
+                  aria-pressed={on}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                    on
+                      ? "bg-[var(--gold)] text-black"
+                      : "border border-[var(--border)] text-[var(--text)] disabled:opacity-40"
+                  }`}
+                >
+                  {comic.title}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={saveDisplay.isPending}
+              onClick={() => saveDisplay.mutate(draft)}
+              className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
+            >
+              {saveDisplay.isPending ? "Saving…" : "Save display"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)]"
+            >
+              Cancel
+            </button>
+          </div>
+          {saveDisplay.isError ? (
+            <p role="alert" className="mt-2 text-xs text-red-400">
+              That didn't save — try again.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {openComic ? (
+        /* The Library overlay sits at z-70 and ComicSheet's own
+            root is z-50 — this wrapper's stacking context lifts
+            the sheet above the Library it was opened from. */
+        <div className="fixed inset-0 z-[80]">
+          <ComicSheet
+            comic={openComic}
+            onClose={() => setOpenComic(null)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LibraryPage({
   ownerName,
   entries,
   onClose,
   onOpenEntry,
+  comicsWall,
 }: {
   ownerName: string;
   entries: LibraryEntry[];
   onClose: () => void;
   onOpenEntry: (entry: LibraryEntry) => void;
+  /** The Comics slab display wall (Anthony, Nov 4, 2026):
+      on the owner's own Library, the Comics binder spine is
+      REPLACED by this wall of chosen slabs (max five). When
+      provided, comics entries are not shelved as spines and
+      the wall renders under the Comics sign instead. */
+  comicsWall?: ReactNode;
 }) {
   // The peek is a FLOATING WINDOW now (Anthony, Nov 3, 2026,
   // ~10:18 AM): the bottom info panel is deleted. The window
@@ -18268,6 +20976,8 @@ function LibraryPage({
     "promos",
     "quests",
     "comics",
+    "funko",
+    "lego",
   ];
   const shelves: {
     section: LibraryEntry["section"];
@@ -18276,6 +20986,8 @@ function LibraryPage({
   }[] = [];
   let shelfRunning = 0;
   for (const section of SECTION_ORDER) {
+    // With the slab wall in place, Comics has no spines.
+    if (section === "comics" && comicsWall) continue;
     const list = entries.filter((e) => e.section === section);
     for (let i = 0; i < list.length; i += shelfCapacity) {
       const slice = list.slice(i, i + shelfCapacity);
@@ -18379,6 +21091,17 @@ function LibraryPage({
                       Comics
                     </span>
                   </span>
+                ) : shelf.section === "funko" || shelf.section === "lego" ? (
+                  /* Funko / Legos shelf signs (Anthony, Nov 4,
+                      2026, PROVISIONAL): plain themed plaques in
+                      the same Library sign language — no
+                      brand-wordmarks borrowed, just the family
+                      name in the app's album lettering. */
+                  <span className="rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] px-2.5 py-[3px] shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
+                    <span className="font-album text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--gold-soft)]">
+                      {shelf.section === "funko" ? "Funko" : "Legos"}
+                    </span>
+                  </span>
                 ) : (
                   <span className="rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] px-2.5 py-[3px] shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
                     {/* "Lorcana" (and the Quest shelf's sign)
@@ -18413,6 +21136,20 @@ function LibraryPage({
               />
             </div>
           ))}
+          {comicsWall ? (
+            <div>
+              {/* The Comics sign over the slab display wall —
+                  same masthead as the old Comics shelf sign. */}
+              <div className="mb-1.5 flex justify-center">
+                <span className="comics-sign" aria-label="Comics">
+                  <span aria-hidden="true" className="comics-masthead">
+                    Comics
+                  </span>
+                </span>
+              </div>
+              {comicsWall}
+            </div>
+          ) : null}
         </div>
 
         {entries.length === 0 ? (
@@ -18498,21 +21235,26 @@ function LibraryPage({
 }
 
 /** A miniature deck box for the profile's four boxes
-    (Anthony, Nov 4, 2026, ~12:22 AM): the shelf box's
-    construction at profile scale — the deck's own body
-    color, its name embossed across the top band, the lid
-    seam, and the recessed panel whose small window shows
-    the featured card's face (DeckBoxWindow). Tapping
-    opens the decks page at this deck. */
+    (Anthony, Nov 4, 2026, ~12:22 AM; reshaped ~10:14 AM
+    the same day): the shelf box's construction at profile
+    scale, in the SLOT's theme color (see
+    PROFILE_DECK_BOX_COLORS) — the deck's name embossed
+    across the top band, the lid seam, and a SOLID front:
+    the recessed panel and its featured-card window are
+    REMOVED (Nov 4, ~10:15 AM), so the face is the slot
+    color straight through with one small molded rule.
+    Tapping opens the decks page at this deck. */
 function ProfileDeckBox({
   deck,
+  swatch,
   onOpen,
 }: {
   deck: DeckViewT;
+  /** The slot's theme color (PROFILE_DECK_BOX_COLORS). */
+  swatch: string;
   onOpen: (deck: DeckViewT) => void;
 }) {
-  const c = deckBoxColor(deck.color);
-  const { ink, emboss } = deckBoxInk(c.swatch);
+  const { ink, emboss } = deckBoxInk(swatch);
   return (
     <button
       type="button"
@@ -18525,7 +21267,7 @@ function ProfileDeckBox({
       }`}
       className="relative block w-full overflow-hidden rounded-[10px] px-1.5 pb-1.5 pt-1 text-left shadow-[inset_2px_0_4px_rgba(255,255,255,0.20),inset_-3px_0_5px_rgba(0,0,0,0.35),0_5px_12px_rgba(0,0,0,0.5)] transition active:scale-[0.97]"
       style={{
-        backgroundColor: c.swatch,
+        backgroundColor: swatch,
         backgroundImage:
           "linear-gradient(165deg, rgba(255,255,255,0.30), rgba(255,255,255,0) 42%, rgba(0,0,0,0.32))",
       }}
@@ -18545,33 +21287,17 @@ function ProfileDeckBox({
           boxShadow: "0 1px 0 rgba(255,255,255,0.16)",
         }}
       />
+      {/* The solid front — same construction and height
+          as an empty slot's, so filled and empty boxes
+          stand as one even row. */}
       <span
-        className="mt-1.5 block rounded-[7px] px-1.5 pb-1.5 pt-2"
-        style={{
-          backgroundColor: "rgba(0,0,0,0.16)",
-          boxShadow:
-            "inset 0 2px 6px rgba(0,0,0,0.38), inset 0 -1px 0 rgba(255,255,255,0.15)",
-        }}
+        aria-hidden="true"
+        className="mt-1.5 flex h-11 items-center justify-center"
       >
         <span
-          className="mx-auto block aspect-[5/4] w-[74%] overflow-hidden rounded-[5px] bg-black/50"
-          style={{
-            border: "3px solid rgba(0,0,0,0.55)",
-            boxShadow:
-              "inset 0 0 0 2px rgba(255,255,255,0.20), inset 0 3px 8px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.40)",
-          }}
-        >
-          {deck.featured ? (
-            <DeckBoxWindow
-              cardId={deck.featured.cardId}
-              name={deck.featured.fullName}
-            />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center bg-black/45 p-1 text-center text-[8px] font-semibold leading-tight text-amber-50">
-              {deck.name}
-            </span>
-          )}
-        </span>
+          className="block h-[3px] w-7 rounded-full"
+          style={{ backgroundColor: ink, opacity: 0.32 }}
+        />
       </span>
       <span
         className="block truncate pb-0.5 pt-1 text-center text-[8px] font-bold tabular-nums"
@@ -18583,41 +21309,37 @@ function ProfileDeckBox({
   );
 }
 
-/** A showcase box for a profile deck-box slot no deck
-    fills (Anthony, Nov 4, 2026, ~12:22 AM): the same
-    box construction in Midnight, its window showing one
-    of the owner's highest-valued cards (face close-up),
-    the card's name on the band and its value stamped
-    underneath. Tapping opens the card. */
-function ProfileShowcaseBox({
-  card,
-  onOpen,
+/** An EMPTY profile deck box (Anthony, Nov 4, 2026,
+    ~10:14 AM): the profile spans four boxes whether or
+    not decks exist, so a slot with no deck on display is
+    a plain empty box in that slot's theme color — same
+    construction as a filled box (name band reading
+    "Empty", lid seam, solid front), nothing invented
+    inside it. On the owner's own profile it is a button
+    into the decks page, where a deck can be created and
+    put on display; on a visitor's view of someone else's
+    profile it is a plain, non-interactive box. */
+function ProfileEmptyDeckBox({
+  swatch,
+  colorLabel,
+  isOwn,
+  ownerName,
+  onCreate,
 }: {
-  card: TopCardWindow;
-  onOpen?: (cardId: number) => void;
+  swatch: string;
+  colorLabel: string;
+  isOwn: boolean;
+  ownerName: string;
+  onCreate?: () => void;
 }) {
-  const c = deckBoxColor("midnight");
-  const { ink, emboss } = deckBoxInk(c.swatch);
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        hapticTick();
-        onOpen?.(card.cardId);
-      }}
-      aria-label={`Showcase card: ${card.name}, worth ${fmtUSD(card.unitValue)}`}
-      className="relative block w-full overflow-hidden rounded-[10px] px-1.5 pb-1.5 pt-1 text-left shadow-[inset_2px_0_4px_rgba(255,255,255,0.20),inset_-3px_0_5px_rgba(0,0,0,0.35),0_5px_12px_rgba(0,0,0,0.5)] transition active:scale-[0.97]"
-      style={{
-        backgroundColor: c.swatch,
-        backgroundImage:
-          "linear-gradient(165deg, rgba(255,255,255,0.30), rgba(255,255,255,0) 42%, rgba(0,0,0,0.32))",
-      }}
-    >
+  const { ink, emboss } = deckBoxInk(swatch);
+  const body = (
+    <>
       <span
         className="block truncate px-0.5 pb-0.5 pt-0.5 text-center text-[8.5px] font-black uppercase leading-tight tracking-[0.1em]"
         style={{ color: ink, textShadow: emboss }}
       >
-        {card.name}
+        Empty
       </span>
       <span
         aria-hidden="true"
@@ -18629,31 +21351,54 @@ function ProfileShowcaseBox({
         }}
       />
       <span
-        className="mt-1.5 block rounded-[7px] px-1.5 pb-1.5 pt-2"
-        style={{
-          backgroundColor: "rgba(0,0,0,0.16)",
-          boxShadow:
-            "inset 0 2px 6px rgba(0,0,0,0.38), inset 0 -1px 0 rgba(255,255,255,0.15)",
-        }}
+        aria-hidden="true"
+        className="mt-1.5 flex h-11 items-center justify-center"
       >
         <span
-          className="mx-auto block aspect-[5/4] w-[74%] overflow-hidden rounded-[5px] bg-black/50"
-          style={{
-            border: "3px solid rgba(0,0,0,0.55)",
-            boxShadow:
-              "inset 0 0 0 2px rgba(255,255,255,0.20), inset 0 3px 8px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.40)",
-          }}
-        >
-          <DeckBoxWindow cardId={card.cardId} name={card.name} />
-        </span>
+          className="block h-[3px] w-7 rounded-full"
+          style={{ backgroundColor: ink, opacity: 0.32 }}
+        />
       </span>
       <span
-        className="block truncate pb-0.5 pt-1 text-center text-[8px] font-bold tabular-nums"
+        className="block truncate pb-0.5 pt-1 text-center text-[8px] font-bold"
         style={{ color: ink, opacity: 0.85 }}
       >
-        {fmtUSD(card.unitValue)}
+        {isOwn ? "Add a deck" : "No deck"}
       </span>
-    </button>
+    </>
+  );
+  const className =
+    "relative block w-full overflow-hidden rounded-[10px] px-1.5 pb-1.5 pt-1 text-left shadow-[inset_2px_0_4px_rgba(255,255,255,0.20),inset_-3px_0_5px_rgba(0,0,0,0.35),0_5px_12px_rgba(0,0,0,0.5)]";
+  const style = {
+    backgroundColor: swatch,
+    backgroundImage:
+      "linear-gradient(165deg, rgba(255,255,255,0.30), rgba(255,255,255,0) 42%, rgba(0,0,0,0.32))",
+  };
+  if (isOwn && onCreate) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          hapticTick();
+          onCreate();
+        }}
+        aria-label={`Empty ${colorLabel} deck box — tap to open your decks page and add a deck`}
+        className={`${className} transition active:scale-[0.97]`}
+        style={style}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div
+      role="img"
+      aria-label={`Empty ${colorLabel} deck box on ${ownerName}'s profile — no deck on display in this slot`}
+      className={className}
+      style={style}
+    >
+      {body}
+    </div>
   );
 }
 
@@ -18682,10 +21427,8 @@ function ProfileHeader({
   onPhotoEdit,
   onEditProfile,
   shelfGroups,
-  topCards,
   profileDecks,
   onOpenDeckBox,
-  onOpenShowcaseCard,
   onOpenLibrary,
   valueHidden,
   onToggleValuePrivacy,
@@ -18729,19 +21472,17 @@ function ProfileHeader({
       at least one card in. Rendered only when both this and
       onOpenLibrary are supplied. */
   shelfGroups?: { key: string }[];
-  /** The owner's most valuable cards: the showcase stock
-      for profile deck-box slots not filled by a deck
-      (Anthony, Nov 4, 2026, ~12:22 AM). */
-  topCards?: TopCardWindow[];
-  /** The owner's displayed decks — the profile's four
-      boxes are deck boxes first (Anthony, Nov 4, 2026,
-      ~12:22 AM). */
+  /** The owner's displayed decks, filling the profile's
+      four deck-box slots in order (Anthony, Nov 4, 2026,
+      ~10:14 AM): the row ALWAYS spans four boxes — decks
+      fill the first slots with their names on the boxes,
+      and every slot past the last deck renders as a plain
+      EMPTY box in that slot's theme color, whether the
+      owner has four decks, one, or none at all. */
   profileDecks?: DeckViewT[];
   /** Opens the decks page at this specific deck (its
       box-opening animation plays there). */
   onOpenDeckBox?: (deck: DeckViewT) => void;
-  /** Opens a showcase card's detail (unfilled-box tap). */
-  onOpenShowcaseCard?: (cardId: number) => void;
   /** Opens the owner's Library page (the shelf photo's tap). */
   onOpenLibrary?: () => void;
   /** Own-profile only (Anthony, Nov 3, 2026, ~11:23 AM):
@@ -18771,17 +21512,15 @@ function ProfileHeader({
     }
     setMenuOpen(false);
   };
-  // The profile's four boxes (Anthony, Nov 4, 2026,
-  // ~12:22 AM): deck boxes first — up to four displayed
-  // decks, each window showing the owner's chosen
-  // featured card; the slots the decks don't fill
-  // showcase the owner's highest-valued cards, one per
-  // box — even for a collector with no deck built.
+  // The profile's boxes (Anthony, Nov 4, 2026, ~10:14 AM,
+  // superseding the ~9:47 AM "only active boxes" rule):
+  // ALWAYS four slots spanned across — the first slots
+  // hold the owner's displayed decks (up to four), and
+  // every remaining slot is a plain empty deck box, so
+  // the row is four boxes whether the owner has decks
+  // or not. Each slot wears its own theme color from
+  // PROFILE_DECK_BOX_COLORS.
   const boxDecks = (profileDecks ?? []).slice(0, 4);
-  const boxCards = (topCards ?? []).slice(
-    0,
-    Math.max(0, 4 - boxDecks.length),
-  );
   // Joined, shortened for the stat strip ("Nov 2026").
   const joinedShort = joined
     ? joined
@@ -18799,83 +21538,36 @@ function ProfileHeader({
         .replace("December", "Dec")
     : null;
   // The big scannable QR view (used when no onQrTap destination
-  // was supplied — e.g. a friend's profile): its own history
-  // entry, so Back closes it like every other sheet in the app.
+  // was supplied — e.g. a friend's profile): a window, so Back
+  // closes it like every other window in the app (three-back
+  // rule, Anthony, Nov 4, 2026: one entry; layers when a window
+  // already holds the slot).
   const [qrOpen, setQrOpen] = useState(false);
-  const qrPushedRef = useRef(false);
+  const qrWin = useWindowHistory("lorcanaProfileQr", setQrOpen);
   // Trust Score breakdown page (Anthony, Nov 3, 2026, late):
   // the breakdown's home is the profile — tapping the Trust
   // Score line under the join date opens this page; Back
-  // returns to the profile. Its own history entry, like the
-  // QR view's, so the phone back/gesture closes it too.
+  // closes it like every other window (three-back rule).
   const [trustOpen, setTrustOpen] = useState(false);
-  const trustPushedRef = useRef(false);
+  const trustWin = useWindowHistory("lorcanaTrustBreakdown", setTrustOpen);
   const openTrust = () => {
     hapticTick();
-    setTrustOpen(true);
-    try {
-      window.history.pushState({ lorcanaTrustBreakdown: true }, "");
-      trustPushedRef.current = true;
-    } catch {
-      trustPushedRef.current = false;
-    }
+    trustWin.open();
   };
   const closeTrust = () => {
-    if (trustPushedRef.current) {
-      window.history.back();
-    } else {
-      setTrustOpen(false);
-    }
+    trustWin.close();
   };
-  useEffect(() => {
-    const onPopState = () => {
-      if (
-        trustPushedRef.current &&
-        !(window.history.state as { lorcanaTrustBreakdown?: boolean } | null)
-          ?.lorcanaTrustBreakdown
-      ) {
-        trustPushedRef.current = false;
-        setTrustOpen(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   const openQr = () => {
     hapticTick();
     if (onQrTap) {
       onQrTap();
       return;
     }
-    setQrOpen(true);
-    try {
-      window.history.pushState({ lorcanaProfileQr: true }, "");
-      qrPushedRef.current = true;
-    } catch {
-      qrPushedRef.current = false;
-    }
+    qrWin.open();
   };
   const closeQr = () => {
-    if (qrPushedRef.current) {
-      window.history.back();
-    } else {
-      setQrOpen(false);
-    }
+    qrWin.close();
   };
-  useEffect(() => {
-    const onPopState = () => {
-      if (
-        qrPushedRef.current &&
-        !(window.history.state as { lorcanaProfileQr?: boolean } | null)
-          ?.lorcanaProfileQr
-      ) {
-        qrPushedRef.current = false;
-        setQrOpen(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   const onBanner = Boolean(bannerUrl);
   return (
     <div>
@@ -19121,9 +21813,21 @@ function ProfileHeader({
             <h2 className="text-[27px] font-extrabold leading-none tracking-[0.005em] text-[var(--text)]">
               {onEditProfile ? `@${displayName}` : displayName}
             </h2>
+            {/* Verified badge (Anthony, Nov 4, 2026): beside
+                the username on every profile — own and
+                friends' alike — exactly when the server's
+                ledger says this collector holds it. */}
+            <VerifiedBadge
+              collectorCode={collectorCode}
+              username={displayName}
+              className="h-6 w-6"
+            />
             {nameChip}
-            <BadgeRow states={badges} onOpen={onOpenBadges} />
           </div>
+          {/* Achievements row (Anthony, Nov 4, 2026): UNDER
+              the name + verified badge unit, spanning the
+              full width of the profile card — see BadgeRow. */}
+          <BadgeRow states={badges} onOpen={onOpenBadges} />
           {bio ? (
             <p className="relative mx-auto mt-2.5 max-w-[308px] text-sm leading-relaxed text-[var(--text)]/85">
               {bio}
@@ -19164,35 +21868,50 @@ function ProfileHeader({
           Score · Confirmed connections · Joined, value over
           label on a single baseline, the Trust cell
           highlighted and tappable into the breakdown. */}
+      {/* Stat strip inset symmetry (Anthony, Nov 4, 2026,
+          bug): the Trust highlight used to sit in a button
+          with only a 2px margin, while the strip's own
+          padding put 6px on its left — so the highlight ran
+          too far toward the divider on the right. Now every
+          segment is a cell with the SAME 6px horizontal
+          padding (px-1.5), the strip itself carries no
+          horizontal padding, and the Trust highlight fills
+          its cell's content box: it stops 6px short of the
+          strip's left edge AND 6px short of the divider,
+          and the Confirmed connections / Joined segments
+          are inset 6px from their dividers on both sides
+          the same way. */}
       <section
         aria-label="Profile stats"
-        className="mt-3.5 grid grid-cols-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-1 py-1.5"
+        className="mt-3.5 grid grid-cols-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] py-1.5"
       >
-        <button
-          type="button"
-          onClick={openTrust}
-          aria-label={`Trust Score ${trustScore} — tap to see how the Trust Score works`}
-          className="m-0.5 flex flex-col items-center rounded-2xl px-1 py-2 text-center transition active:scale-[0.98]"
-          style={{
-            background:
-              "radial-gradient(120% 130% at 50% 0%, rgba(88,101,255,0.20), rgba(88,101,255,0.05))",
-            boxShadow: "inset 0 0 0 1px rgba(126,140,255,0.22)",
-          }}
-        >
-          <span className="flex h-7 items-center gap-1 text-[21px] font-extrabold leading-none text-[var(--text)]">
-            {trustScore}
-            <span
-              aria-hidden="true"
-              className="text-base font-bold text-[var(--gold-soft)]"
-            >
-              ›
+        <div className="px-1.5">
+          <button
+            type="button"
+            onClick={openTrust}
+            aria-label={`Trust Score ${trustScore} — tap to see how the Trust Score works`}
+            className="flex h-full w-full flex-col items-center rounded-2xl px-1 py-2 text-center transition active:scale-[0.98]"
+            style={{
+              background:
+                "radial-gradient(120% 130% at 50% 0%, rgba(88,101,255,0.20), rgba(88,101,255,0.05))",
+              boxShadow: "inset 0 0 0 1px rgba(126,140,255,0.22)",
+            }}
+          >
+            <span className="flex h-7 items-center gap-1 text-[21px] font-extrabold leading-none text-[var(--text)]">
+              {trustScore}
+              <span
+                aria-hidden="true"
+                className="text-base font-bold text-[var(--gold-soft)]"
+              >
+                ›
+              </span>
             </span>
-          </span>
-          <span className="mt-1 flex min-h-[28px] items-start justify-center text-[10.5px] font-bold uppercase leading-[1.35] tracking-[0.07em] text-[var(--dim)]">
-            Trust Score
-          </span>
-        </button>
-        <div className="flex flex-col items-center border-l border-[var(--border)]/70 px-1 py-2.5 text-center">
+            <span className="mt-1 flex min-h-[28px] items-start justify-center text-[10.5px] font-bold uppercase leading-[1.35] tracking-[0.07em] text-[var(--dim)]">
+              Trust Score
+            </span>
+          </button>
+        </div>
+        <div className="flex flex-col items-center border-l border-[var(--border)]/70 px-1.5 py-2.5 text-center">
           <span className="flex h-7 items-center text-[21px] font-extrabold leading-none text-[var(--text)]">
             {connections}
           </span>
@@ -19200,7 +21919,7 @@ function ProfileHeader({
             Confirmed connections
           </span>
         </div>
-        <div className="flex flex-col items-center border-l border-[var(--border)]/70 px-1 py-2.5 text-center">
+        <div className="flex flex-col items-center border-l border-[var(--border)]/70 px-1.5 py-2.5 text-center">
           <span className="flex h-7 items-center whitespace-nowrap text-lg font-extrabold leading-none text-[var(--text)]">
             {joinedShort ?? "—"}
           </span>
@@ -19290,15 +22009,18 @@ function ProfileHeader({
           </span>
         ) : null}
       </div>
-      {/* My Library + My Decks (Anthony, Nov 4, 2026): the
-          Library picture stays as it was — the little shelf
-          — with the owner's top four most valuable cards in
-          its top four windows; tapping it opens the Library
-          page as before. The deck button keeps its place
-          beside the shelf. */}
-      {onOpenDecks || (onOpenLibrary && shelfGroups) ? (
+      {/* My Library (Anthony, Nov 4, 2026): the Library
+          picture is the little shelf (sized to fill this
+          window, still centered — see ShelfPhoto); tapping
+          it opens the Library page as before. The round
+          deck-boxes icon that used to sit beside the shelf
+          in this window is REMOVED (Anthony, Nov 4, 2026):
+          the deck boxes themselves sit right below this
+          window, so the icon was redundant. The deck-boxes
+          section below is untouched. */}
+      {onOpenLibrary && shelfGroups ? (
         <section
-          aria-label={`${displayName}'s Library and decks`}
+          aria-label={`${displayName}'s Library`}
           className="mt-4"
         >
           <div className="flex items-baseline justify-between px-1">
@@ -19309,67 +22031,71 @@ function ProfileHeader({
               Shelf
             </span>
           </div>
-          <div className="mt-2 flex items-end gap-2 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3">
-            <div className="relative min-w-0 flex-1">
-              {onOpenLibrary && shelfGroups ? (
-                <ShelfPhoto
-                  groups={shelfGroups}
-                  ownerName={displayName}
-                  onOpen={onOpenLibrary}
-                />
-              ) : null}
-            </div>
-            {onOpenDecks ? (
-              <MyDecksButton onOpen={onOpenDecks} />
-            ) : null}
+          <div className="mt-2 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3">
+            <ShelfPhoto
+              groups={shelfGroups}
+              ownerName={displayName}
+              onOpen={onOpenLibrary}
+            />
           </div>
         </section>
       ) : null}
 
-      {boxDecks.length > 0 || boxCards.length > 0 ? (
-        <section
-          aria-label={
-            onEditProfile
-              ? "Your deck boxes"
-              : `${displayName}'s deck boxes`
-          }
-          className="mt-3"
-        >
-          <div className="mb-2 flex items-baseline justify-between gap-2 px-0.5">
-            <h3 className="text-[13px] font-bold uppercase tracking-[0.08em] text-[var(--dim)]">
-              {onEditProfile ? "My Deck Boxes" : "Deck Boxes"}
-            </h3>
-            {(profileDecks?.length ?? 0) > 4 && onOpenDecks ? (
-              <button
-                type="button"
-                onClick={() => {
-                  hapticTick();
-                  onOpenDecks();
-                }}
-                className="text-xs font-semibold text-[var(--gold-soft)] transition active:scale-95"
-              >
-                {onEditProfile ? "All my boxes →" : "All boxes →"}
-              </button>
-            ) : null}
-          </div>
-          <div className="grid grid-cols-4 items-start gap-2">
-            {boxDecks.map((deck) => (
+      {/* The four deck boxes (Anthony, Nov 4, 2026,
+          ~10:14 AM): ALWAYS four spanned across, empty or
+          full — decks fill the first slots, empty colored
+          boxes fill the rest, each slot in a different
+          theme color. The section renders even when the
+          owner has no decks at all. */}
+      <section
+        aria-label={
+          onEditProfile
+            ? "Your deck boxes"
+            : `${displayName}'s deck boxes`
+        }
+        className="mt-3"
+      >
+        <div className="mb-2 flex items-baseline justify-between gap-2 px-0.5">
+          <h3 className="text-[13px] font-bold uppercase tracking-[0.08em] text-[var(--dim)]">
+            {onEditProfile ? "My Deck Boxes" : "Deck Boxes"}
+          </h3>
+          {(profileDecks?.length ?? 0) > 4 && onOpenDecks ? (
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                onOpenDecks();
+              }}
+              className="text-xs font-semibold text-[var(--gold-soft)] transition active:scale-95"
+            >
+              {onEditProfile ? "All my boxes →" : "All boxes →"}
+            </button>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-4 items-start gap-2">
+          {[0, 1, 2, 3].map((slot) => {
+            const deck = boxDecks[slot];
+            const color = profileDeckBoxColor(slot);
+            return deck ? (
               <ProfileDeckBox
                 key={`deck-${deck.id}`}
                 deck={deck}
+                swatch={color.swatch}
                 onOpen={(d) => onOpenDeckBox?.(d)}
               />
-            ))}
-            {boxCards.map((card) => (
-              <ProfileShowcaseBox
-                key={`card-${card.cardId}-${card.finish}`}
-                card={card}
-                onOpen={onOpenShowcaseCard}
+            ) : (
+              <ProfileEmptyDeckBox
+                key={`empty-${slot}`}
+                swatch={color.swatch}
+                colorLabel={color.label}
+                isOwn={Boolean(onEditProfile)}
+                ownerName={displayName}
+                onCreate={onOpenDecks}
               />
-            ))}
-          </div>
-        </section>
-      ) : null}
+            );
+          })}
+        </div>
+      </section>
 
       {trustOpen ? (
         <div
@@ -19683,6 +22409,17 @@ function JarvisFriendProfile({
     binderCatalog.data?.groups ?? []
   )
     .filter((g) => g.kind !== "puzzle")
+    // Same Library shelf rule as the owner's shelf (Anthony,
+    // Nov 4, 2026): a chapter, promo, or Quest binder shows
+    // only when the friend owns at least one card from that
+    // set/family/quest — no exceptions.
+    .filter(
+      (g) =>
+        (g.kind !== "set" &&
+          g.kind !== "promo" &&
+          g.kind !== "quest") ||
+        (jarvisCounts.get(g.name) ?? 0) > 0,
+    )
     .map((g) => ({
       id: g.name,
       spineLabel:
@@ -19718,12 +22455,11 @@ function JarvisFriendProfile({
         onBack={onBack}
         backLabel="Back to friends list"
         avatar={
-          <span
-            aria-hidden="true"
-            className="flex h-24 w-24 items-center justify-center rounded-full bg-[var(--accent)] font-album text-4xl font-bold text-[var(--on-accent)] ring-4 ring-[var(--bg)]"
-          >
-            J
-          </span>
+          <LetterAvatar
+            initial="J"
+            jarvis
+            className="h-24 w-24 text-4xl ring-4 ring-[var(--bg)]"
+          />
         }
         displayName={JARVIS_FRIEND.displayName}
         nameChip={jarvisNameChip}
@@ -19740,16 +22476,6 @@ function JarvisFriendProfile({
         onOpenBadges={badgesSheet.openSheet}
         onOpenDecks={decksSheet.openSheet}
         shelfGroups={jarvisShelfGroups}
-        topCards={items
-          .filter((i) => i.cardId != null && i.unitValue != null)
-          .sort((a, b) => (b.unitValue ?? 0) - (a.unitValue ?? 0))
-          .slice(0, 4)
-          .map((i) => ({
-            cardId: i.cardId as number,
-            name: i.name,
-            finish: i.finish,
-            unitValue: i.unitValue as number,
-          }))}
         profileDecks={jarvisProfileDecks}
         onOpenDeckBox={(deck) => {
           try {
@@ -19762,7 +22488,6 @@ function JarvisFriendProfile({
           }
           decksSheet.openSheet();
         }}
-        onOpenShowcaseCard={onOpenCard}
         onOpenLibrary={librarySheet.openSheet}
       />
       <p className="mt-1.5 px-1 text-xs leading-relaxed text-[var(--dim)]">
@@ -19954,14 +22679,51 @@ function MarketArt({
   comicId,
   name,
   finish,
+  photoUrl,
+  photoStatus,
 }: {
-  kind: "card" | "sealed" | "comic";
+  kind: "card" | "sealed" | "comic" | "other";
   cardId: number | null;
   sealedName: string | null;
   comicId: string | null;
   name: string;
   finish: string;
+  /** Accessory listings: the seller's photo URL (already
+      visibility-resolved server-side — null while the photo
+      is pending/rejected for anyone but the seller). */
+  photoUrl?: string | null;
+  photoStatus?: "pending" | "approved" | "rejected" | null;
 }) {
+  if (kind === "other") {
+    // Accessory art: the seller's own photo once approved
+    // (or the seller's own view of it); until then, the
+    // neutral themed placeholder — the listing is live, only
+    // the photo is gated (Anthony's corrected flow, Nov 4,
+    // 2026).
+    return (
+      <span className="relative block aspect-square overflow-hidden rounded-lg border border-[var(--pocket-edge)] bg-[var(--pocket)]">
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt={`${name} — seller's photo`}
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center">
+            <span aria-hidden="true" className="text-2xl">
+              🖼
+            </span>
+            <span className="text-xs font-semibold text-[var(--dim)]">
+              {photoStatus === "rejected"
+                ? "Photo not approved"
+                : "Photo pending approval"}
+            </span>
+          </span>
+        )}
+      </span>
+    );
+  }
   if (kind === "card" && cardId != null) {
     return (
       <JarvisFriendCardArt
@@ -20037,15 +22799,81 @@ function MarketCompareChip({
   );
 }
 
+/** The Marketplace switch (the "Allow offers" control and its
+    kin): a themed pill track with a sliding knob — never a
+    native checkbox. Used in the Sell flow and in Your
+    Listings management. */
+function MarketSwitch({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-[var(--text)]">{label}</p>
+        {description ? (
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => {
+          hapticTick();
+          onChange(!checked);
+        }}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+          checked
+            ? "bg-[var(--accent)] shadow-[0_0_10px_var(--accent)]"
+            : "border border-[var(--border)] bg-[var(--bg)]"
+        }`}
+      >
+        <span
+          aria-hidden="true"
+          className={`absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow transition-all ${
+            checked ? "left-[24px]" : "left-[3px]"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function ListingTile({
   listing,
   trust,
   onOpen,
+  onBuy,
+  buyPending,
+  onOpenShop,
 }: {
   listing: MarketListing;
   trust: number | null;
   onOpen: () => void;
+  /** One-tap Buy Now right on the tile (the approved design:
+      Buy lives on the tile, beside the seller's Trust Score). */
+  onBuy?: () => void;
+  buyPending?: boolean;
+  /** Tapping the seller opens their shop inside the
+      Marketplace. */
+  onOpenShop?: () => void;
 }) {
+  const canBuy =
+    onBuy != null && !listing.mine && listing.status === "available";
   return (
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5">
       <button
@@ -20061,6 +22889,8 @@ function ListingTile({
           comicId={listing.comicId}
           name={listing.name}
           finish={listing.finish}
+          photoUrl={listing.photoUrl}
+          photoStatus={listing.photoStatus}
         />
         <span className="mt-2 block text-sm font-semibold leading-tight text-[var(--text)]">
           {listing.name}
@@ -20082,18 +22912,57 @@ function ListingTile({
             market={listing.marketValue}
           />
         </span>
-        <span className="mt-1 block text-xs text-[var(--dim)]">
-          @{listing.sellerUsername}
-          {trust != null ? ` · Trust ${trust}` : ""}
-          {listing.sellerIsTest ? " · Test user" : ""}
-          {listing.mine ? " · Your listing" : ""}
-        </span>
         {listing.status === "pending" ? (
           <span className="mt-1.5 inline-block rounded-full bg-amber-400/15 px-2 py-0.5 text-[11px] font-bold text-amber-400">
             Sale pending
           </span>
         ) : null}
       </button>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        {onOpenShop ? (
+          <span className="flex min-w-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={onOpenShop}
+              aria-label={`Visit ${listing.sellerUsername}'s shop`}
+              className="min-w-0 truncate text-left text-xs text-[var(--dim)] underline-offset-2 hover:underline"
+            >
+              @{listing.sellerUsername}
+              {trust != null ? ` · Trust ${trust}` : ""}
+            </button>
+            <VerifiedBadge
+              collectorCode={listing.sellerCode}
+              username={listing.sellerUsername}
+              className="h-3.5 w-3.5"
+            />
+          </span>
+        ) : (
+          <span className="flex min-w-0 items-center gap-1 text-xs text-[var(--dim)]">
+            <span className="truncate">
+              @{listing.sellerUsername}
+              {trust != null ? ` · Trust ${trust}` : ""}
+              {listing.sellerIsTest ? " · Test user" : ""}
+              {listing.mine ? " · Your listing" : ""}
+            </span>
+            <VerifiedBadge
+              collectorCode={listing.sellerCode}
+              username={listing.sellerUsername}
+              className="h-3.5 w-3.5"
+            />
+          </span>
+        )}
+        {canBuy ? (
+          <button
+            type="button"
+            disabled={buyPending}
+            onClick={onBuy}
+            aria-label={`Buy ${listing.name} now for ${fmtUSD(listing.askingPrice)}`}
+            className="shrink-0 rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--on-accent)] disabled:opacity-50"
+          >
+            {buyPending ? "Buying…" : "Buy"}
+          </button>
+        ) : null}
+      </div>
     </li>
   );
 }
@@ -20113,6 +22982,7 @@ function ListingSheet({
   onChanged,
   onOpenJarvisProfile,
   onGoInbox,
+  onOpenShop,
 }: {
   listing: MarketListing;
   trust: number | null;
@@ -20122,6 +22992,8 @@ function ListingSheet({
   onChanged: () => void;
   onOpenJarvisProfile: () => void;
   onGoInbox: () => void;
+  /** Opens the seller's shop page inside the Marketplace. */
+  onOpenShop: (sellerCode: string, sellerUsername: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [offerOpen, setOfferOpen] = useState(false);
@@ -20235,6 +23107,8 @@ function ListingSheet({
             comicId={listing.comicId}
             name={listing.name}
             finish={listing.finish}
+            photoUrl={listing.photoUrl}
+            photoStatus={listing.photoStatus}
           />
         </Turntable>
 
@@ -20246,6 +23120,33 @@ function ListingSheet({
           {listing.groupName} · {listing.finish} · {listing.condition}
           {listing.qty > 1 ? ` · Qty ${listing.qty}` : ""}
         </p>
+        {listing.kind === "other" ? (
+          <>
+            {listing.description ? (
+              <p className="mt-2.5 whitespace-pre-line rounded-xl bg-[var(--surface)] px-3.5 py-3 text-sm leading-relaxed text-[var(--text)]">
+                {listing.description}
+              </p>
+            ) : null}
+            {listing.mine && listing.photoStatus === "pending" ? (
+              <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+                Your photo is waiting on the owner&rsquo;s approval —
+                you see it here, but everyone else sees a placeholder
+                until it&rsquo;s approved. The listing itself is live.
+              </p>
+            ) : listing.mine && listing.photoStatus === "rejected" ? (
+              <p className="mt-2 text-xs leading-relaxed text-red-300">
+                Your photo wasn&rsquo;t approved, so it isn&rsquo;t
+                shown. You can upload a replacement from Your
+                listings in the Marketplace.
+              </p>
+            ) : !listing.mine && listing.photoStatus === "pending" ? (
+              <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+                The seller&rsquo;s photo is pending approval — it
+                appears here once the owner has seen it.
+              </p>
+            ) : null}
+          </>
+        ) : null}
 
         {/* Price + Buy Now, side by side — Buy Now is the primary
             action and sits right next to the asking price. */}
@@ -20280,6 +23181,11 @@ function ListingSheet({
             </button>
           ) : null}
         </div>
+        {!listing.allowOffers && !listing.mine ? (
+          <p className="mt-2 text-xs font-medium text-[var(--dim)]">
+            Fixed price · buys instantly · no offers on this listing
+          </p>
+        ) : null}
 
         {message ? (
           <p
@@ -20327,7 +23233,7 @@ function ListingSheet({
               ) : null}
             </div>
           </div>
-        ) : canAct ? (
+        ) : canAct && listing.allowOffers ? (
           <div className="mt-3">
             {!offerOpen ? (
               <button
@@ -20394,17 +23300,19 @@ function ListingSheet({
             Seller
           </p>
           <div className="mt-2 flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] font-album text-lg font-bold text-[var(--on-accent)]"
-            >
-              {listing.sellerUsername.charAt(0).toUpperCase() || "?"}
-            </span>
+            <LetterAvatar
+              initial={listing.sellerUsername.charAt(0).toUpperCase() || "?"}
+              className="h-11 w-11 text-lg"
+            />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-[var(--text)]">
-                @{listing.sellerUsername}
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+                <span className="truncate">@{listing.sellerUsername}</span>
+                <VerifiedBadge
+                  collectorCode={listing.sellerCode}
+                  username={listing.sellerUsername}
+                />
                 {listing.sellerIsTest ? (
-                  <span className="ml-1.5 rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--dim)]">
+                  <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--dim)]">
                     Test user
                   </span>
                 ) : null}
@@ -20416,15 +23324,26 @@ function ListingSheet({
                   : ""}
               </p>
             </div>
-            {sellerIsJarvis ? (
+            <span className="flex shrink-0 flex-col items-end gap-1.5">
               <button
                 type="button"
-                onClick={onOpenJarvisProfile}
-                className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--text)]"
+                onClick={() =>
+                  onOpenShop(listing.sellerCode, listing.sellerUsername)
+                }
+                className="rounded-full border border-[var(--accent)]/60 px-3 py-1.5 text-xs font-semibold text-[var(--gold-soft)]"
               >
-                View profile
+                Visit shop
               </button>
-            ) : null}
+              {sellerIsJarvis ? (
+                <button
+                  type="button"
+                  onClick={onOpenJarvisProfile}
+                  className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--text)]"
+                >
+                  View profile
+                </button>
+              ) : null}
+            </span>
           </div>
         </div>
 
@@ -20454,14 +23373,32 @@ function SellSheet({
   onClose: () => void;
   onPublished: () => void;
 }) {
-  const [kind, setKind] = useState<"card" | "sealed" | "comic">("card");
+  const [kind, setKind] = useState<"card" | "sealed" | "comic" | "other">(
+    "card",
+  );
   const [search, setSearch] = useState("");
+  /** Accessory ("Other item") listing state (Anthony, Nov 4,
+      2026): free-form — the seller writes the title and
+      description, picks a preset category, sets their own
+      price, and MUST attach a photo of the actual item. It
+      is not tied to the collection, and there is NO market
+      comparison for these (nothing tracks accessories). */
+  const [otherTitle, setOtherTitle] = useState("");
+  const [otherDescription, setOtherDescription] = useState("");
+  const [otherCategory, setOtherCategory] = useState("Playmats");
+  const [otherCondition, setOtherCondition] = useState("Like New");
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState<ProfileItemView | null>(null);
   const [selectedComic, setSelectedComic] = useState<
     (typeof COMICS)[number] | null
   >(null);
   const [price, setPrice] = useState("");
   const [condition, setCondition] = useState("Near Mint");
+  /** "Allow offers" (approved design, Nov 4, 2026): OFF by
+      default — a listing sells at its fixed price unless the
+      seller deliberately turns offers on for it. */
+  const [allowOffers, setAllowOffers] = useState(false);
   const [qty, setQty] = useState(1);
   const [qtyDialOpen, setQtyDialOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20474,7 +23411,7 @@ function SellSheet({
         sort: "name",
         filter: kind === "card" ? "cards" : "sealed",
       }),
-    enabled: kind !== "comic",
+    enabled: kind === "card" || kind === "sealed",
   });
   const comicResults = COMICS.filter((c) =>
     c.title.toLowerCase().includes(search.trim().toLowerCase()),
@@ -20482,6 +23419,27 @@ function SellSheet({
   const publish = useMutation({
     mutationFn: () => {
       const askingPrice = Number.parseFloat(price);
+      if (kind === "other") {
+        return api.createListing({
+          kind: "other",
+          cardId: null,
+          sealedName: null,
+          comicId: null,
+          comicName: "",
+          comicGroup: "",
+          comicFinish: "",
+          comicValue: null,
+          finish: "Accessory",
+          condition: otherCondition,
+          qty: 1,
+          askingPrice,
+          allowOffers,
+          otherTitle: otherTitle.trim(),
+          otherDescription: otherDescription.trim(),
+          otherCategory,
+          photoBase64,
+        });
+      }
       if (selected) {
         return api.createListing({
           kind: selected.sealedName != null ? "sealed" : "card",
@@ -20497,6 +23455,11 @@ function SellSheet({
             selected.sealedName != null ? "Sealed" : condition,
           qty,
           askingPrice,
+          allowOffers,
+          otherTitle: "",
+          otherDescription: "",
+          otherCategory: "",
+          photoBase64: null,
         });
       }
       const comic = selectedComic as (typeof COMICS)[number];
@@ -20513,6 +23476,11 @@ function SellSheet({
         condition: "Graded slab",
         qty: 1,
         askingPrice,
+        allowOffers,
+        otherTitle: "",
+        otherDescription: "",
+        otherCategory: "",
+        photoBase64: null,
       });
     },
     onSuccess: (res) => {
@@ -20543,8 +23511,13 @@ function SellSheet({
     setError(null);
     setPrice(String(comic.value));
   };
-  const ready = (selected != null || selectedComic != null) &&
-    Number.parseFloat(price) > 0;
+  const ready =
+    kind === "other"
+      ? otherTitle.trim().length > 0 &&
+        photoBase64 != null &&
+        Number.parseFloat(price) > 0
+      : (selected != null || selectedComic != null) &&
+        Number.parseFloat(price) > 0;
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
@@ -20579,21 +23552,23 @@ function SellSheet({
           Sell an item
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
-          Pick something from your own collection, set your asking
-          price, and publish it to the Marketplace. You can change
-          the price or pull the listing any time.
+          Pick something from your own collection — or use Other
+          item for an accessory — set your asking price, and
+          publish it to the Marketplace. You can change the price
+          or pull the listing any time.
         </p>
 
         <div
           role="tablist"
           aria-label="What are you selling"
-          className="mt-4 grid grid-cols-3 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
+          className="mt-4 grid grid-cols-4 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
         >
           {(
             [
               ["card", "Cards"],
               ["sealed", "Sealed"],
               ["comic", "Comics"],
+              ["other", "Other item"],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -20620,6 +23595,7 @@ function SellSheet({
           ))}
         </div>
 
+        {kind !== "other" ? (
         <div className="relative mt-3">
           <svg
             aria-hidden="true"
@@ -20642,8 +23618,181 @@ function SellSheet({
             className="h-[52px] w-full rounded-full border border-[var(--border)] bg-[var(--surface)] pl-12 pr-4 text-base text-[var(--text)] placeholder:text-[#8a8a96]"
           />
         </div>
+        ) : null}
 
-        {kind !== "comic" ? (
+        {kind === "other" ? (
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <p className="text-sm leading-relaxed text-[var(--dim)]">
+              For Lorcana accessories — playmats, oversized cards,
+              lore counters, pins, and the like. These aren&rsquo;t
+              part of your tracked collection, so selling one
+              changes no counts. There&rsquo;s no tracked market
+              for accessories, so no market comparison is shown —
+              your price stands on its own.
+            </p>
+            <label className="mt-3 block">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                Title
+              </span>
+              <input
+                type="text"
+                value={otherTitle}
+                onChange={(e) => setOtherTitle(e.target.value)}
+                maxLength={120}
+                placeholder="e.g. Hyperia City playmat"
+                aria-label="Item title"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-base text-[var(--text)] placeholder:text-[var(--dim)]"
+              />
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                  Category
+                </span>
+                <VxSelect
+                  ariaLabel="Accessory category"
+                  value={otherCategory}
+                  onChange={setOtherCategory}
+                  className="mt-1 w-full"
+                  options={[
+                    "Oversized cards",
+                    "Playmats",
+                    "Lore counters",
+                    "Flags & banners",
+                    "Pins",
+                    "Deck boxes & storage",
+                    "Other accessories",
+                  ].map((c) => ({ value: c, label: c }))}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                  Condition
+                </span>
+                <VxSelect
+                  ariaLabel="Item condition"
+                  value={otherCondition}
+                  onChange={setOtherCondition}
+                  className="mt-1 w-full"
+                  options={[
+                    "Like New",
+                    "Lightly Used",
+                    "Well Used",
+                    "Damaged",
+                  ].map((c) => ({ value: c, label: c }))}
+                />
+              </label>
+            </div>
+            <label className="mt-3 block">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                Description
+              </span>
+              <textarea
+                value={otherDescription}
+                onChange={(e) => setOtherDescription(e.target.value)}
+                maxLength={1200}
+                rows={3}
+                placeholder="What it is, its condition, anything a buyer should know…"
+                aria-label="Item description"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-base text-[var(--text)] placeholder:text-[var(--dim)]"
+              />
+            </label>
+            <div className="mt-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                Photo of the actual item (required)
+              </span>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                aria-label="Choose a photo of the item"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  void imageFileToJpegBase64(file)
+                    .then((b64) => {
+                      setPhotoBase64(b64);
+                      setError(null);
+                    })
+                    .catch(() =>
+                      setError(
+                        "That photo couldn't be read — try another.",
+                      ),
+                    );
+                }}
+              />
+              {photoBase64 ? (
+                <div className="mt-1.5 flex items-center gap-3">
+                  <img
+                    src={`data:image/jpeg;base64,${photoBase64}`}
+                    alt="Your item photo"
+                    className="h-20 w-20 rounded-xl border border-[var(--border)] object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="rounded-full border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--text)]"
+                  >
+                    Change photo
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="mt-1.5 w-full rounded-xl border border-dashed border-[var(--border)] px-3 py-4 text-sm font-semibold text-[var(--text)]"
+                >
+                  📷 Add a photo
+                </button>
+              )}
+              <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
+                Your listing goes live right away. The photo itself
+                is held for the owner&rsquo;s approval — buyers see
+                a placeholder until it&rsquo;s approved.
+              </p>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                  Asking price (USD)
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  aria-label="Asking price in dollars"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-base text-[var(--text)]"
+                />
+              </label>
+            </div>
+            <div className="mt-3 border-t border-[var(--border)] pt-3">
+              <MarketSwitch
+                checked={allowOffers}
+                onChange={setAllowOffers}
+                label="Allow offers"
+                description="Off = fixed price only: Buy Now at your price is the only way to buy it. Most sellers leave it off."
+              />
+            </div>
+            {error ? (
+              <p role="alert" className="mt-2.5 text-sm text-red-400">
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={!ready || publish.isPending}
+              onClick={() => publish.mutate()}
+              className="mt-3 w-full rounded-full bg-[var(--accent)] px-4 py-3 text-base font-bold text-[var(--on-accent)] disabled:opacity-50"
+            >
+              {publish.isPending ? "Publishing…" : "Publish listing"}
+            </button>
+          </div>
+        ) : kind !== "comic" ? (
           items.isPending ? (
             <p className="py-8 text-center text-sm text-[var(--dim)]">
               Loading your items…
@@ -20834,7 +23983,7 @@ function SellSheet({
                     glyph="−"
                     disabled={qty <= 1}
                     onClick={() => setQty((q) => Math.max(1, q - 1))}
-                    circleClass="h-8 w-8 text-base"
+                    circleClass="h-7 w-7 text-sm"
                   />
                   <span className="w-8 text-center text-base font-semibold tabular-nums text-[var(--text)]">
                     {qty}
@@ -20847,22 +23996,50 @@ function SellSheet({
                       setQty((q) => Math.min(selected.qty, q + 1))
                     }
                     onLongPress={() => setQtyDialOpen((v) => !v)}
-                    circleClass="h-8 w-8 text-base"
+                    circleClass="h-7 w-7 text-sm"
                   />
                 </span>
               </div>
               </>
             ) : null}
             {selected?.unitValue != null || selectedComic ? (
-              <p className="mt-2.5 text-xs leading-relaxed text-[var(--dim)]">
-                Market value:{" "}
-                {fmtUSD(
-                  selected ? (selected.unitValue ?? 0) : selectedComic?.value ?? 0,
-                )}{" "}
-                — price above or below it as you like; buyers see how
-                your price compares.
-              </p>
+              <div className="mt-2.5">
+                <p className="text-xs leading-relaxed text-[var(--dim)]">
+                  Market value:{" "}
+                  {fmtUSD(
+                    selected ? (selected.unitValue ?? 0) : selectedComic?.value ?? 0,
+                  )}{" "}
+                  — price above or below it as you like; buyers see how
+                  your price compares.
+                </p>
+                {/* Live comparison while pricing (the approved
+                    sell screen): your typed price against the
+                    market, updating as you type. */}
+                {Number.parseFloat(price) > 0 ? (
+                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--dim)]">
+                    <span>
+                      Your price {fmtUSD(Number.parseFloat(price))}:
+                    </span>
+                    <MarketCompareChip
+                      asking={Number.parseFloat(price)}
+                      market={
+                        selected
+                          ? selected.unitValue
+                          : (selectedComic?.value ?? null)
+                      }
+                    />
+                  </p>
+                ) : null}
+              </div>
             ) : null}
+            <div className="mt-3 border-t border-[var(--border)] pt-3">
+              <MarketSwitch
+                checked={allowOffers}
+                onChange={setAllowOffers}
+                label="Allow offers"
+                description="Off = fixed price only: Buy Now at your price is the only way to buy it. Most sellers leave it off."
+              />
+            </div>
             {error ? (
               <p role="alert" className="mt-2.5 text-sm text-red-400">
                 {error}
@@ -20879,6 +24056,90 @@ function SellSheet({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** An accessory listing's photo state in Your Listings
+    (Anthony, Nov 4, 2026): the seller always sees their own
+    photo (in the row's art) plus its review state — pending
+    approval, approved, or not approved — and can upload a
+    replacement, which re-enters the owner's review queue as
+    pending. The listing stays live throughout. */
+function ListingPhotoManager({ listing }: { listing: MarketListing }) {
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const replace = useMutation({
+    mutationFn: (photoBase64: string) =>
+      api.replaceListingPhoto({ listingId: listing.id, photoBase64 }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        hapticConfirm();
+        setError(null);
+        void queryClient.invalidateQueries({ queryKey: ["myListings"] });
+        void queryClient.invalidateQueries({ queryKey: ["marketplace"] });
+      } else {
+        setError(res.error ?? "That photo didn't save.");
+      }
+    },
+    onError: () => setError("That photo didn't save — try again."),
+  });
+  const status = listing.photoStatus;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-[var(--bg)] px-3 py-2">
+      <span
+        className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+          status === "approved"
+            ? "bg-emerald-400/15 text-emerald-400"
+            : status === "rejected"
+              ? "bg-red-400/15 text-red-300"
+              : "bg-amber-400/15 text-amber-400"
+        }`}
+      >
+        {status === "approved"
+          ? "Photo approved"
+          : status === "rejected"
+            ? "Photo not approved"
+            : "Photo pending approval"}
+      </span>
+      <span className="min-w-0 flex-1 text-xs leading-snug text-[var(--dim)]">
+        {status === "approved"
+          ? "Your photo shows on the listing."
+          : status === "rejected"
+            ? "It isn't shown — upload a replacement and it goes back for approval."
+            : "Buyers see a placeholder until the owner approves it."}
+      </span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        aria-label={`Replace the photo for ${listing.name}`}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          void imageFileToJpegBase64(file)
+            .then((b64) => replace.mutate(b64))
+            .catch(() =>
+              setError("That photo couldn't be read — try another."),
+            );
+        }}
+      />
+      <button
+        type="button"
+        disabled={replace.isPending}
+        onClick={() => inputRef.current?.click()}
+        className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--text)] disabled:opacity-50"
+      >
+        {replace.isPending ? "Saving…" : "Replace photo"}
+      </button>
+      {error ? (
+        <p role="alert" className="w-full text-xs text-red-400">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -21068,6 +24329,8 @@ function DealSheet({
               comicId={deal.comicId}
               name={deal.itemName}
               finish={deal.finish}
+              photoUrl={deal.photoUrl}
+              photoStatus={deal.photoStatus}
             />
           </span>
           <div className="min-w-0">
@@ -21437,6 +24700,200 @@ function MarketplaceHeldPanel() {
   );
 }
 
+/** One seller's shop inside the Marketplace (Anthony's
+    approved design, Nov 4, 2026): every collector gets this
+    page automatically — their live listings, their Trust
+    Score, and their confirmed sales (verified events only).
+    Reached from any of their listings, from a browse tile's
+    seller line, or from the seller card on a listing. The
+    venue stays "Marketplace"; this page is "<name>'s Shop". */
+function ShopView({
+  sellerCode,
+  sellerUsername,
+  trust,
+  onBack,
+  onOpenListing,
+  onBuy,
+  buyPendingId,
+  onManageMine,
+}: {
+  sellerCode: string;
+  sellerUsername: string;
+  trust: number | null;
+  onBack: () => void;
+  onOpenListing: (listing: MarketListing) => void;
+  onBuy: (listing: MarketListing) => void;
+  buyPendingId: number | null;
+  /** Own shop only: jump to Your Listings to manage them. */
+  onManageMine: () => void;
+}) {
+  const shop = useQuery({
+    queryKey: ["sellerShop", sellerCode],
+    queryFn: () => api.getSellerShop({ sellerCode }),
+  });
+  const [kind, setKind] = useState<
+    "all" | "card" | "sealed" | "comic" | "other"
+  >(
+    "all",
+  );
+  const [under50, setUnder50] = useState(false);
+  const data = shop.data;
+  const username = data?.sellerUsername ?? sellerUsername;
+  const all = data?.listings ?? [];
+  const visible = all.filter(
+    (l) =>
+      (kind === "all" || l.kind === kind) &&
+      (!under50 || l.askingPrice <= 50),
+  );
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={onBack}
+        aria-label="Back to the Marketplace browse"
+        className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-sm font-semibold text-[var(--text)]"
+      >
+        ← Marketplace
+      </button>
+      <div className="mt-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 text-center">
+        <LetterAvatar
+          initial={username.charAt(0).toUpperCase() || "?"}
+          className="mx-auto h-16 w-16 text-2xl"
+        />
+        <h3 className="font-album mt-2.5 flex items-center justify-center gap-1.5 text-xl text-[var(--text)]">
+          <span>
+            {username}&rsquo;s Shop
+          </span>
+          <VerifiedBadge
+            collectorCode={sellerCode}
+            username={username}
+            className="h-5 w-5"
+          />
+          {data?.sellerIsTest ? (
+            <span className="align-middle rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium text-[var(--dim)]">
+              Test user
+            </span>
+          ) : null}
+        </h3>
+        <div className="mx-auto mt-3 grid max-w-xs grid-cols-3 gap-2 text-center">
+          <div>
+            <p className="text-base font-bold text-[var(--text)]">
+              {trust ?? "—"}
+            </p>
+            <p className="text-[11px] text-[var(--dim)]">Trust Score</p>
+          </div>
+          <div>
+            <p className="text-base font-bold text-[var(--text)]">
+              {data ? data.confirmedSales : "—"}
+            </p>
+            <p className="text-[11px] text-[var(--dim)]">
+              Confirmed sales
+            </p>
+          </div>
+          <div>
+            <p className="text-base font-bold text-[var(--text)]">
+              {data ? data.listingsLive : "—"}
+            </p>
+            <p className="text-[11px] text-[var(--dim)]">Listings live</p>
+          </div>
+        </div>
+        {data?.mine ? (
+          <button
+            type="button"
+            onClick={onManageMine}
+            className="mt-3 rounded-full border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--text)]"
+          >
+            Manage your listings
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-0.5">
+        {(
+          [
+            ["all", "All listings"],
+            ["card", "Lorcana"],
+            ["sealed", "Sealed"],
+            ["comic", "Comics"],
+            ["other", "Accessories"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={kind === value}
+            onClick={() => {
+              hapticTick();
+              setKind(value);
+            }}
+            className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold ${
+              kind === value
+                ? "bg-[var(--accent)] text-[var(--on-accent)]"
+                : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-pressed={under50}
+          onClick={() => {
+            hapticTick();
+            setUnder50((v) => !v);
+          }}
+          className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold ${
+            under50
+              ? "bg-[var(--accent)] text-[var(--on-accent)]"
+              : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+          }`}
+        >
+          Under $50
+        </button>
+      </div>
+
+      {shop.isPending ? (
+        <p className="py-10 text-center text-sm text-[var(--dim)]">
+          Loading the shop…
+        </p>
+      ) : all.length === 0 ? (
+        <p
+          className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
+          role="status"
+        >
+          {data?.mine
+            ? "Your shop is empty — when you list something from your collection, it shows up here for every collector to see."
+            : `@${username} has nothing listed right now. When they list something from their collection, it shows up here.`}
+        </p>
+      ) : visible.length === 0 ? (
+        <p
+          className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
+          role="status"
+        >
+          Nothing in this shop matches those filters.
+        </p>
+      ) : (
+        <ul className="mt-3 grid grid-cols-2 gap-3">
+          {visible.map((listing) => (
+            <ListingTile
+              key={listing.id}
+              listing={listing}
+              trust={trust}
+              onOpen={() => onOpenListing(listing)}
+              onBuy={() => onBuy(listing)}
+              buyPending={buyPendingId === listing.id}
+            />
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-center text-xs leading-relaxed text-[var(--dim)]">
+        Every price is final — tap Buy and it&rsquo;s yours. Offers
+        only where a seller switched them on.
+      </p>
+    </div>
+  );
+}
+
 /** The Marketplace area: Browse (search/filter/sort + Sell),
     Your Listings (manage), and the Inbox (claims, offers, and
     deals needing an answer, a confirmation, or feedback). The
@@ -21452,7 +24909,9 @@ function MarketplacePanel({
     "browse",
   );
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "card" | "sealed" | "comic">(
+  const [kind, setKind] = useState<
+    "all" | "card" | "sealed" | "comic" | "other"
+  >(
     "all",
   );
   const [group, setGroup] = useState("all");
@@ -21462,6 +24921,19 @@ function MarketplacePanel({
   const [selected, setSelected] = useState<MarketListing | null>(null);
   const [sellOpen, setSellOpen] = useState(false);
   const [openDealId, setOpenDealId] = useState<number | null>(null);
+  /** A seller's shop open inside the Marketplace (null =
+      the normal tabs show). */
+  const [shopSeller, setShopSeller] = useState<{
+    code: string;
+    username: string;
+  } | null>(null);
+  /** Browse "Under $50" chip (the approved mockup's filters). */
+  const [under50, setUnder50] = useState(false);
+  /** Result line for one-tap tile buys. */
+  const [tileMessage, setTileMessage] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>(
     {},
   );
@@ -21471,6 +24943,7 @@ function MarketplacePanel({
     void queryClient.invalidateQueries({ queryKey: ["marketplace"] });
     void queryClient.invalidateQueries({ queryKey: ["myListings"] });
     void queryClient.invalidateQueries({ queryKey: ["marketActivity"] });
+    void queryClient.invalidateQueries({ queryKey: ["sellerShop"] });
   };
   // First open: seed the test friend's listings exactly once
   // (server-guarded by a marker; a no-op afterwards).
@@ -21523,6 +24996,7 @@ function MarketplacePanel({
     mutationFn: (args: {
       listingId: number;
       askingPrice: number | null;
+      allowOffers: boolean | null;
       action: "none" | "remove" | "mark_sold" | "relist";
     }) => api.updateListing(args),
     onSuccess: (res) => {
@@ -21564,6 +25038,41 @@ function MarketplacePanel({
     },
     onError: () => setManageError("That didn't go through — try again."),
   });
+  /** One-tap Buy Now from a browse/shop tile: claims at the
+      asking price, exactly like the Buy Now on the listing
+      sheet — the seller is notified and the item reserves. */
+  const tileClaim = useMutation({
+    mutationFn: (listing: MarketListing) =>
+      api.placeClaim({ listingId: listing.id }),
+    onSuccess: (res, listing) => {
+      if (res.ok) {
+        hapticConfirm();
+        setTileMessage({
+          ok: true,
+          text: `Claimed! @${listing.sellerUsername} has been notified — ${listing.name} is reserved for you at ${fmtUSD(listing.askingPrice)} while they answer. Track it in the Inbox.`,
+        });
+        invalidateMarket();
+      } else {
+        setTileMessage({
+          ok: false,
+          text: res.error ?? "That claim didn't go through.",
+        });
+      }
+    },
+    onError: () =>
+      setTileMessage({
+        ok: false,
+        text: "That claim didn't go through — try again.",
+      }),
+  });
+  const openShop = (code: string, username: string) => {
+    hapticTick();
+    setSelected(null);
+    setShopSeller({ code, username });
+  };
+  const visibleBrowse = (browse.data?.listings ?? []).filter(
+    (l) => !under50 || l.askingPrice <= 50,
+  );
   const myPendingFor = (listingId: number) =>
     outgoing.find((o) => o.listingId === listingId);
   const firstAwaitingDeal = deals.find((d) => d.awaitingMyFeedback);
@@ -21643,8 +25152,9 @@ function MarketplacePanel({
             role="tab"
             aria-selected={tab === value}
             onClick={() => {
-              if (tab === value) return;
+              if (tab === value && !shopSeller) return;
               hapticTick();
+              setShopSeller(null);
               setTab(value);
             }}
             className={`rounded-full px-2 py-2 text-sm font-semibold ${
@@ -21664,7 +25174,30 @@ function MarketplacePanel({
         </p>
       ) : null}
 
-      {tab === "browse" ? (
+      {shopSeller ? (
+        <ShopView
+          sellerCode={shopSeller.code}
+          sellerUsername={shopSeller.username}
+          trust={trustFor(shopSeller.code)}
+          onBack={() => setShopSeller(null)}
+          onOpenListing={(listing) => {
+            hapticTick();
+            setSelected(listing);
+          }}
+          onBuy={(listing) => tileClaim.mutate(listing)}
+          buyPendingId={
+            tileClaim.isPending
+              ? (tileClaim.variables?.id ?? null)
+              : null
+          }
+          onManageMine={() => {
+            setShopSeller(null);
+            setTab("listings");
+          }}
+        />
+      ) : null}
+
+      {!shopSeller && tab === "browse" ? (
         <>
           <div className="relative mt-4">
             <svg
@@ -21695,6 +25228,7 @@ function MarketplacePanel({
                 ["card", "Cards"],
                 ["sealed", "Sealed"],
                 ["comic", "Comics"],
+                ["other", "Accessories"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -21716,6 +25250,21 @@ function MarketplacePanel({
                 {label}
               </button>
             ))}
+            <button
+              type="button"
+              aria-pressed={under50}
+              onClick={() => {
+                hapticTick();
+                setUnder50((v) => !v);
+              }}
+              className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold ${
+                under50
+                  ? "bg-[var(--accent)] text-[var(--on-accent)]"
+                  : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+              }`}
+            >
+              Under $50
+            </button>
           </div>
           <div className="mt-2 flex gap-2">
             <label className="min-w-0 flex-1">
@@ -21752,11 +25301,23 @@ function MarketplacePanel({
             </label>
           </div>
 
+          {tileMessage ? (
+            <p
+              role="status"
+              className={`mt-3 rounded-xl border p-3 text-sm leading-relaxed ${
+                tileMessage.ok
+                  ? "border-emerald-400/40 bg-emerald-400/10 text-[var(--text)]"
+                  : "border-red-400/40 bg-red-400/10 text-[var(--text)]"
+              }`}
+            >
+              {tileMessage.text}
+            </p>
+          ) : null}
           {browse.isPending ? (
             <p className="py-10 text-center text-sm text-[var(--dim)]">
               Loading listings…
             </p>
-          ) : (browse.data?.listings ?? []).length === 0 ? (
+          ) : visibleBrowse.length === 0 ? (
             <p
               className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
               role="status"
@@ -21767,7 +25328,7 @@ function MarketplacePanel({
             </p>
           ) : (
             <ul className="mt-3 grid grid-cols-2 gap-3">
-              {(browse.data?.listings ?? []).map((listing) => (
+              {visibleBrowse.map((listing) => (
                 <ListingTile
                   key={listing.id}
                   listing={listing}
@@ -21776,14 +25337,26 @@ function MarketplacePanel({
                     hapticTick();
                     setSelected(listing);
                   }}
+                  onBuy={() => tileClaim.mutate(listing)}
+                  buyPending={
+                    tileClaim.isPending &&
+                    tileClaim.variables?.id === listing.id
+                  }
+                  onOpenShop={() =>
+                    openShop(listing.sellerCode, listing.sellerUsername)
+                  }
                 />
               ))}
             </ul>
           )}
+          <p className="mt-3 text-center text-xs leading-relaxed text-[var(--dim)]">
+            Every price is final — tap Buy and it&rsquo;s yours.
+            Offers only where a seller switched them on.
+          </p>
         </>
       ) : null}
 
-      {tab === "listings" ? (
+      {!shopSeller && tab === "listings" ? (
         <>
           {mine.isPending ? (
             <p className="py-10 text-center text-sm text-[var(--dim)]">
@@ -21820,6 +25393,8 @@ function MarketplacePanel({
                           comicId={listing.comicId}
                           name={listing.name}
                           finish={listing.finish}
+                          photoUrl={listing.photoUrl}
+                          photoStatus={listing.photoStatus}
                         />
                       </span>
                       <div className="min-w-0 flex-1">
@@ -21858,6 +25433,9 @@ function MarketplacePanel({
                         </p>
                       </div>
                     </div>
+                    {listing.kind === "other" ? (
+                      <ListingPhotoManager listing={listing} />
+                    ) : null}
                     <div className="mt-2.5 flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-1.5 text-sm text-[var(--dim)]">
                         $
@@ -21886,6 +25464,7 @@ function MarketplacePanel({
                             manage.mutate({
                               listingId: listing.id,
                               askingPrice: Number.parseFloat(draft),
+                              allowOffers: null,
                               action: "none",
                             })
                           }
@@ -21895,6 +25474,21 @@ function MarketplacePanel({
                         </button>
                       ) : null}
                       {listing.status === "available" ? (
+                        <MarketSwitch
+                          checked={listing.allowOffers}
+                          disabled={manage.isPending}
+                          onChange={(next) =>
+                            manage.mutate({
+                              listingId: listing.id,
+                              askingPrice: null,
+                              allowOffers: next,
+                              action: "none",
+                            })
+                          }
+                          label="Allow offers"
+                        />
+                      ) : null}
+                      {listing.status === "available" ? (
                         <button
                           type="button"
                           disabled={manage.isPending}
@@ -21902,6 +25496,7 @@ function MarketplacePanel({
                             manage.mutate({
                               listingId: listing.id,
                               askingPrice: null,
+                              allowOffers: null,
                               action: "mark_sold",
                             })
                           }
@@ -21918,6 +25513,7 @@ function MarketplacePanel({
                             manage.mutate({
                               listingId: listing.id,
                               askingPrice: null,
+                              allowOffers: null,
                               action: "relist",
                             })
                           }
@@ -21933,6 +25529,7 @@ function MarketplacePanel({
                           manage.mutate({
                             listingId: listing.id,
                             askingPrice: null,
+                            allowOffers: null,
                             action: "remove",
                           })
                         }
@@ -21949,7 +25546,7 @@ function MarketplacePanel({
         </>
       ) : null}
 
-      {tab === "inbox" ? (
+      {!shopSeller && tab === "inbox" ? (
         <div className="mt-4 space-y-5">
           <div>
             <h3 className="font-album text-base text-[var(--text)]">
@@ -22112,6 +25709,8 @@ function MarketplacePanel({
                           comicId={deal.comicId}
                           name={deal.itemName}
                           finish={deal.finish}
+                          photoUrl={deal.photoUrl}
+                          photoStatus={deal.photoStatus}
                         />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -22165,6 +25764,7 @@ function MarketplacePanel({
             setSelected(null);
             setTab("inbox");
           }}
+          onOpenShop={(code, username) => openShop(code, username)}
         />
       ) : null}
       {sellOpen ? (
@@ -23793,23 +27393,11 @@ function BestMatchesStrip({ rows }: { rows: BestMatchRow[] }) {
                 aria-label={`Start a trade with ${r.name} — you can get ${fmtUSD(r.youCanGet)}, they can get ${fmtUSD(r.theyCanGet)}`}
                 className="flex w-full items-center gap-2 text-left"
               >
-                <span
-                  aria-hidden="true"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-white"
-                  style={
-                    r.jarvisStyle
-                      ? {
-                          background:
-                            "radial-gradient(circle at 32% 30%, #2c4a8f, #131c3f 68%)",
-                          border: "1.5px solid rgba(96,165,255,0.75)",
-                          boxShadow:
-                            "0 0 0 2px rgba(96,165,255,0.15), 0 0 12px rgba(79,140,255,0.5), inset 0 0 8px rgba(96,165,255,0.55)",
-                        }
-                      : { background: "var(--accent)" }
-                  }
-                >
-                  {r.initial}
-                </span>
+                <LetterAvatar
+                  initial={r.initial}
+                  jarvis={Boolean(r.jarvisStyle)}
+                  className="h-9 w-9 text-sm"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-extrabold leading-tight text-[#eef0fb]">
                     {r.name}
@@ -24081,22 +27669,22 @@ function TradesBrowseBoard({
         </span>
       </div>
       <div className="mt-3.5 flex flex-wrap gap-2">
-        <label className={chipCls(setFilter !== "all")}>
-          <span className="sr-only">Filter by set</span>
-          <select
-            value={setFilter}
-            onChange={(e) => setSetFilter(e.target.value)}
-            aria-label="Filter board by set"
-            className="max-w-36 bg-transparent font-extrabold outline-none"
-          >
-            <option value="all">All sets</option>
-            {sets.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* Themed dropdowns only (Anthony's absolute rule,
+            Nov 4, 2026): these two board filters were the
+            last native <select> elements in the app — they
+            now use the shared VxSelect like every other
+            dropdown. Options and behavior unchanged. */}
+        <VxSelect
+          value={setFilter}
+          onChange={setSetFilter}
+          ariaLabel="Filter board by set"
+          dense
+          className="max-w-44"
+          options={[
+            { value: "all", label: "All sets" },
+            ...sets.map((s) => ({ value: s, label: s })),
+          ]}
+        />
         <button
           type="button"
           aria-pressed={foilOnly}
@@ -24108,22 +27696,17 @@ function TradesBrowseBoard({
         >
           Foil
         </button>
-        <label className={chipCls(rarityFilter !== "all")}>
-          <span className="sr-only">Filter by rarity</span>
-          <select
-            value={rarityFilter}
-            onChange={(e) => setRarityFilter(e.target.value)}
-            aria-label="Filter board by rarity"
-            className="max-w-32 bg-transparent font-extrabold outline-none"
-          >
-            <option value="all">Rarity</option>
-            {rarities.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </label>
+        <VxSelect
+          value={rarityFilter}
+          onChange={setRarityFilter}
+          ariaLabel="Filter board by rarity"
+          dense
+          className="max-w-40"
+          options={[
+            { value: "all", label: "Rarity" },
+            ...rarities.map((r) => ({ value: r, label: r })),
+          ]}
+        />
         <button
           type="button"
           onClick={() => {
@@ -25745,9 +29328,7 @@ function SocialPanel({
   /** Inbox deep-link, forwarded to the Trades area. */
   focusDeal?: { kind: "cash" | "trade"; id: number; nonce: number } | null;
 }) {
-  const [area, setArea] = useState<
-    "friends" | "forums" | "trades" | "market"
-  >("friends");
+  const [area, setArea] = useState<"forums" | "trades" | "market">("trades");
   const socialIntro = useSectionIntro("social");
   // Unread order mail (Anthony, Nov 3, 2026): the Trades
   // entry carries the count so a reply inside an order is
@@ -25764,12 +29345,11 @@ function SocialPanel({
     setCheckoutPage(false);
     onConsumePendingArea?.();
   }, [pendingArea]);
-  // Jarvis's profile is a page inside Friends: opening it
-  // pushes a history entry like every other navigation step, and the
-  // sync below restores it (or closes it) from whatever entry Back
-  // lands on.
+  // Jarvis's profile opens in the swap area below the selector
+  // (Anthony, Nov 4, 2026): main-flow navigation, so it replaces
+  // the single app entry; the sync below restores it from the
+  // entry's state, and the on-screen back control closes it.
   const [friendOpen, setFriendOpen] = useState(false);
-  const friendPushedRef = useRef(false);
   // Trade and cash carts (Anthony's cart design, Nov 2, 2026,
   // late — supersedes per-card instant execution): the split
   // button's blue side adds a card to the trade cart, the green
@@ -25893,17 +29473,10 @@ function SocialPanel({
     | { status: "notfound" }
     | { status: "unreachable" }
   >({ status: "idle" });
-  // Live registry members, for the "On the server" list and the
-  // Jarvis entry's live badge (same query the Collector ID card
-  // uses — shared cache).
-  const registry = useQuery({
-    queryKey: ["registryMembers"],
-    queryFn: () => api.getRegistryMembers({}),
-    retry: 2,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
-  });
+  // The live registry query that used to feed the "On the
+  // server" list and the Friends card's Trust Score line is
+  // gone with them (Anthony, Nov 4, 2026 — the Friends area
+  // keeps only the friends themselves and adding a friend).
   const runFriendLookup = async (raw: string) => {
     const code = raw.trim();
     if (!code) return;
@@ -25964,72 +29537,40 @@ function SocialPanel({
           st.socialArea === "trades" ||
           st.socialArea === "market"
           ? st.socialArea
-          : "friends",
+          : "trades",
       );
       const open = st.socialFriend === "jarvis";
-      if (!open) friendPushedRef.current = false;
       setFriendOpen(open);
     };
     syncFromHistory();
     window.addEventListener("popstate", syncFromHistory);
     return () => window.removeEventListener("popstate", syncFromHistory);
   }, []);
+  // The friend profile opens in the swap area below the selector
+  // (Anthony, Nov 4, 2026): it is main-flow navigation, so it
+  // REPLACES the single app entry — no stacking. The on-screen
+  // back control (closeFriend) returns to the area underneath.
   const openFriend = () => {
     setFriendOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    try {
-      window.history.pushState(
-        { mcView: "social", socialArea: "friends", socialFriend: "jarvis" },
-        "",
-      );
-      friendPushedRef.current = true;
-    } catch {
-      friendPushedRef.current = false;
-    }
+    replaceNavState({
+      mcView: "social",
+      socialArea: area,
+      socialFriend: "jarvis",
+    });
   };
   const closeFriend = () => {
-    if (friendPushedRef.current) {
-      window.history.back();
-    } else {
-      setFriendOpen(false);
-    }
+    setFriendOpen(false);
   };
-  const pickArea = (key: "friends" | "forums" | "trades" | "market") => {
+  // Area tabs are main-flow navigation (three-back rule,
+  // Anthony, Nov 4, 2026): replace, never push.
+  const pickArea = (key: "forums" | "trades" | "market") => {
     if (key === area && !friendOpen) return;
     setFriendOpen(false);
     setArea(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    try {
-      window.history.pushState(
-        { mcView: "social", socialArea: key },
-        "",
-      );
-    } catch {
-      // History unavailable: the area still switched.
-    }
+    replaceNavState({ mcView: "social", socialArea: key });
   };
-  const boards: { name: string; blurb: string }[] = [
-    {
-      name: "General Discussion",
-      blurb: "Talk Lorcana, share pulls, and chat with other collectors",
-    },
-    {
-      name: "Deck Help & Strategy",
-      blurb: "Deck lists, ink combos, and advice for your next build",
-    },
-    {
-      name: "Trades & Want Lists",
-      blurb: "Line up trades and post the cards you're hunting for",
-    },
-    {
-      name: "Local Game Nights",
-      blurb: "Game nights, league play, and meetups at your local shops",
-    },
-    {
-      name: "Collection Showcases",
-      blurb: "Show off new pickups, completed sets, and binder pages",
-    },
-  ];
   return (
     <div className="mt-5 pb-2">
       {/* The intro as a bordered hideable window (Anthony, Nov 3,
@@ -26048,9 +29589,8 @@ function SocialPanel({
         <p className="mt-1.5 text-sm leading-relaxed text-[var(--dim)]">
           Spaces for connecting with other collectors — your friends
           list, boards to talk in, trade offers to line up swaps, and
-          the Marketplace for buying and selling. The Marketplace and
-          Forums are both coming soon — they&rsquo;re held back for
-          more refinement before they open.
+          the Marketplace for buying and selling. The Forums and the
+          Marketplace are both open.
         </p>
       </HideableIntroWindow>
 
@@ -26107,7 +29647,6 @@ function SocialPanel({
             <button
               type="button"
               onClick={() => {
-                pickArea("friends");
                 openFriend();
               }}
               className="mt-2 w-full rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-bold text-[var(--gold-soft)]"
@@ -26144,8 +29683,59 @@ function SocialPanel({
         ) : null}
       </div>
 
-      {/* Area tabs — each area is its own page; Friends is first and
-          is what Social opens on. */}
+      {/* Friends, PINNED (Social layout Idea A — Anthony,
+          Nov 4, 2026, FINAL decision after the B/C/D
+          alternatives, refined later the same day): this card
+          is the ONE friends spot in Social — it stays at the
+          top with the friend rail, and only Trades /
+          Marketplace / Forums swap in the space below via the
+          tab strip. There is no friends list below the
+          selector, and Social opens on Trades. Tapping a
+          friend in the rail opens their profile in the swap
+          area. There is no friend-request queue in Vault X —
+          collectors connect instantly by code above — so the
+          pinned card carries no requests banner rather than
+          an invented one. */}
+      <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
+        <div className="flex w-full items-baseline justify-between gap-2">
+          <span className="font-album text-lg text-[var(--text)]">
+            Friends
+          </span>
+        </div>
+        <ul className="mt-2.5 flex gap-3 overflow-x-auto pb-1">
+          <li className="w-16 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                openFriend();
+              }}
+              aria-label={`Open ${JARVIS_FRIEND.displayName}'s profile — your assistant, built into the app as a friend`}
+              className="flex w-full flex-col items-center gap-1.5"
+            >
+              <LetterAvatar
+                initial="J"
+                jarvis
+                className="aspect-square w-full text-2xl"
+              />
+              <span className="flex w-full items-center justify-center gap-1 text-center text-xs font-semibold text-[var(--text)]">
+                <span className="truncate">
+                  {JARVIS_FRIEND.displayName}
+                </span>
+                <VerifiedBadge
+                  collectorCode={JARVIS_FRIEND.collectorCode}
+                  username={JARVIS_FRIEND.displayName}
+                  className="h-3.5 w-3.5"
+                />
+              </span>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      {/* Area tabs — Trades / Marketplace / Forums swap in
+          below the pinned Friends card (Idea A); the full
+          Friends view is reached from the pinned card's
+          header. Each area is its own page. */}
       <div
         className="mt-4 flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
         role="group"
@@ -26153,7 +29743,6 @@ function SocialPanel({
       >
         {(
           [
-            ["friends", "Friends"],
             ["trades", "Trades"],
             ["market", "Marketplace"],
             ["forums", "Forums"],
@@ -26163,11 +29752,7 @@ function SocialPanel({
             key={key}
             type="button"
             aria-pressed={area === key}
-            aria-label={
-              key === "market" || key === "forums"
-                ? `${label}, coming soon`
-                : label
-            }
+            aria-label={label}
             onClick={() => pickArea(key)}
             className={`flex-1 rounded-full px-2 py-1.5 text-[13px] ${
               area === key
@@ -26176,12 +29761,6 @@ function SocialPanel({
             }`}
           >
             {label}
-            {key === "market" || key === "forums" ? (
-              <span
-                aria-hidden="true"
-                className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#ffd21f] align-middle"
-              />
-            ) : null}
             {key === "trades" && mailStatus.data && mailStatus.data.totalUnread > 0 ? (
               <span
                 aria-label={`${mailStatus.data.totalUnread} unread order messages`}
@@ -26207,84 +29786,26 @@ function SocialPanel({
         ))}
       </div>
 
-      {/* Forums page — a message-board style list of boards.
-          Held from release (Anthony, Nov 2, 2026, late): the exact
-          same treatment as the Marketplace — everything in the
-          section stays in place, under a translucent diagonal
-          yellow "Coming soon" overlay, and the overlay makes the
-          section not clickable. It still needs refinement before
-          anyone can use it. */}
-      {area === "forums" ? (
-      <section aria-label="Forums, coming soon" className="relative mt-6">
-        <p className="sr-only">
-          Forums are coming soon. The boards are here to see, but
-          the section is not open to use yet.
-        </p>
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-album text-xl text-[var(--text)]">Forums</h2>
-          <span className="text-xs font-medium uppercase tracking-wider text-[var(--dim)]">
-            Message boards
-          </span>
-        </div>
-        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
-          Board-style discussions, grouped by topic — like a Facebook
-          message board for Lorcana players.
-        </p>
-        <ul className="mt-3 divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
-          {boards.map((board) => (
-            <li key={board.name} className="flex items-start gap-3 py-3">
-              <span
-                aria-hidden="true"
-                className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--bg)] text-[var(--gold-soft)]"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.9"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-[18px] w-[18px]"
-                >
-                  <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1.1L3 20l1.1-5.3A8.5 8.5 0 1 1 21 11.5Z" />
-                </svg>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-[var(--text)]">
-                  {board.name}
-                </span>
-                <span className="mt-0.5 block text-xs leading-relaxed text-[var(--dim)]">
-                  {board.blurb}
-                </span>
-                <span className="mt-1 block text-xs text-[var(--dim)]">
-                  No threads yet
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-          Posting isn&rsquo;t switched on yet — the boards are laid out
-          and ready for when we wire up threads.
-        </p>
-        {/* Translucent diagonal stamp — it covers the section and
-            takes the clicks, so nothing underneath is tappable,
-            while the boards stay visible through it. */}
-        <div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-black/20">
-          <span className="bubbly-soon rotate-[18deg] whitespace-nowrap text-[42px] leading-none sm:text-6xl">
-            Coming soon
-          </span>
-        </div>
-      </section>
-      ) : null}
+      {/* Forums page — LIVE (Anthony, Nov 4, 2026): the held
+          board list and its Coming Soon overlay are gone.
+          Direction A ("Latest-first hybrid") is the real
+          Forums now: the latest-activity feed, category chip
+          rail, pinned threads, flat thread view with role
+          chips, verified checks, and the confirmed-trades
+          trust strip. The Marketplace overlay next door is
+          untouched — this lift is Forums only. */}
+      {area === "forums" ? <ForumsPanel /> : null}
 
-      {/* Friends page — the friends list, and Social's default page.
-          The single entry is Jarvis himself, built into the app as a
-          friend at Anthony's request: a full working example of how
-          a friend looks, what their profile shows, and how the two
-          of you view each other's collections. (Add a friend by code
-          moved up under the Social heading, Nov 3, 2026, late.) */}
-      {area === "friends" && friendOpen ? (
+      {/* A friend's profile, opened from the pinned Friends rail
+          (Anthony, Nov 4, 2026): it renders in the swap area in
+          place of the selected area, main-flow navigation with no
+          history stacking. The single entry is Jarvis himself,
+          built into the app as a friend at Anthony's request: a
+          full working example of how a friend looks, what their
+          profile shows, and how the two of you view each other's
+          collections. (Add a friend by code moved up under the
+          Social heading, Nov 3, 2026, late.) */}
+      {friendOpen ? (
         <JarvisFriendProfile
           onBack={closeFriend}
           onOpenCard={onOpenCard}
@@ -26292,129 +29813,6 @@ function SocialPanel({
           onCashItem={startCash}
           cartCounts={cartCounts}
         />
-      ) : null}
-      {area === "friends" && !friendOpen ? (
-      <section
-        aria-label="Friends"
-        className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
-      >
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-album text-xl text-[var(--text)]">Friends</h2>
-          <span className="text-xs font-medium uppercase tracking-wider text-[var(--dim)]">
-            Friends list
-          </span>
-        </div>
-        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
-          The collectors you connect with will live here — so you can
-          see their binders and line up trades in person.
-        </p>
-        {/* Your Trust Score summary (Anthony's verified-only design):
-            the full breakdown lives on the Collector ID profile; the
-            figures are honest zeros until connecting/trading go live. */}
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3">
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-[var(--text)]">
-              Your Trust Score
-            </span>
-            <span className="block text-xs leading-relaxed text-[var(--dim)]">
-              0 confirmed connections · 0 confirmed trades — it grows
-              only from verified events, never upvotes. Full breakdown
-              on your Collector ID, at the top of Home.
-            </span>
-          </span>
-          <span className="font-album shrink-0 text-2xl font-bold text-[var(--gold-soft)]">
-            0
-          </span>
-        </div>
-        <ul className="mt-3 grid grid-cols-4 gap-3">
-          <li>
-            <button
-              type="button"
-              onClick={openFriend}
-              aria-label={`Open ${JARVIS_FRIEND.displayName}'s profile — your assistant, built into the app as a friend`}
-              className="flex w-full flex-col items-center gap-1.5"
-            >
-              <span
-                aria-hidden="true"
-                className="flex aspect-square w-full items-center justify-center rounded-2xl border-2 border-[var(--accent)]/60 bg-[var(--bg)] font-album text-2xl font-bold text-[var(--gold-soft)]"
-              >
-                J
-              </span>
-              <span className="block w-full truncate text-center text-xs font-semibold text-[var(--text)]">
-                {JARVIS_FRIEND.displayName}
-              </span>
-            </button>
-          </li>
-        </ul>
-
-        {/* On the server — the LIVE member list of the Shadow
-            Vault registry (Supabase profiles table), read back from
-            the server itself: these usernames and codes live on
-            the central server, not just inside this app. Anthony's
-            own row is flagged "You"; Jarvis's row proves the test
-            friend ported over. */}
-        <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <h3 className="font-album text-base text-[var(--text)]">
-            On the server
-          </h3>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
-            Collectors registered in the Vault X registry — the
-            central server every copy of the app checks.
-          </p>
-          {registry.isPending ? (
-            <p className="mt-2.5 text-sm text-[var(--dim)]" role="status">
-              Checking the server…
-            </p>
-          ) : registry.data && registry.data.reachable ? (
-            registry.data.members.length > 0 ? (
-              <ul className="mt-2.5 divide-y divide-[var(--border)]">
-                {registry.data.members.map((m) => (
-                  <li
-                    key={m.collectorId}
-                    className="flex items-center gap-2.5 py-2"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--accent)]/50 bg-[var(--bg)] font-album text-xs font-bold text-[var(--gold-soft)]"
-                    >
-                      {(m.username.replace(/^@/, "").charAt(0) || "?").toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-[var(--text)]">
-                        {m.username.startsWith("@")
-                          ? m.username
-                          : `@${m.username}`}
-                      </span>
-                      <span className="block text-[11px] tabular-nums text-[var(--dim)]">
-                        {m.collectorId} · Trust Score {m.trustScore}
-                      </span>
-                    </span>
-                    {m.collectorId === registry.data.myCollectorCode ? (
-                      <span className="shrink-0 rounded-full bg-[var(--gold)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
-                        You
-                      </span>
-                    ) : m.collectorId === JARVIS_FRIEND.collectorCode ? (
-                      <span className="shrink-0 rounded-full border border-emerald-400/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
-                        On server
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2.5 text-sm text-[var(--dim)]" role="status">
-                The server registry is empty right now.
-              </p>
-            )
-          ) : (
-            <p className="mt-2.5 text-sm text-red-400" role="status">
-              Couldn&rsquo;t reach the server registry just now — the
-              list above your Collector ID keeps retrying.
-            </p>
-          )}
-        </div>
-
-      </section>
       ) : null}
 
       {/* Trades page — trade offers, TraYde-style. Friends share
@@ -26425,7 +29823,6 @@ function SocialPanel({
         MARKETPLACE_AVAILABLE ? (
           <MarketplacePanel
             onOpenJarvisProfile={() => {
-              pickArea("friends");
               openFriend();
             }}
           />
@@ -26597,6 +29994,7 @@ type MainView =
   | "pokemon"
   | "magic"
   | "starwars"
+  | "funko"
   | "settings";
 
 const MAIN_VIEWS: MainView[] = [
@@ -26604,11 +30002,18 @@ const MAIN_VIEWS: MainView[] = [
   "binder",
   "finances",
   "social",
+  // "sealed" is a real view again (Nov 4, 2026): the
+  // standalone Sealed page is restored as the profile My
+  // Collection Sealed row's destination, so Back and
+  // refresh must restore it like any other section. It
+  // stays OUT of the bottom menu — no Sealed tab.
+  "sealed",
   "comics",
   "lego",
   "pokemon",
   "magic",
   "starwars",
+  "funko",
   "settings",
 ];
 
@@ -26956,6 +30361,31 @@ export function App() {
       // saved choice.
     });
   };
+  // Language (Settings > Language): the same pattern as the
+  // theme — starts from the device mirror, the profile's
+  // saved choice wins when it arrives, picking applies
+  // app-wide at once and saves to the profile.
+  const [language, setLanguage] = useState<LangId>(() =>
+    initLanguageFromStorage(),
+  );
+  useEffect(() => {
+    const saved = profileTheme.data?.language;
+    if (isLangId(saved) && saved !== language) {
+      setLanguage(saved);
+      applyLanguage(saved);
+    }
+    // Only the arriving server value matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileTheme.data]);
+  const changeLanguage = (next: LangId) => {
+    hapticTick();
+    setLanguage(next);
+    applyLanguage(next);
+    void api.setLanguagePreference({ language: next }).catch(() => {
+      // Offline or server hiccup: the language still applies
+      // here and is mirrored on this device.
+    });
+  };
   // Grid density (two-across / four-across on set pages):
   // the profile's saved choice, arriving on the same fetch
   // as the theme, wins over the device mirror.
@@ -27013,6 +30443,10 @@ export function App() {
       // just starts on Home.
     }
   }, [view]);
+  // The current view, readable from the history listeners
+  // (registered once, so they cannot close over the state).
+  const viewRef = useRef(view);
+  viewRef.current = view;
   // Automatic update check on open (Anthony, Nov 2, 2026,
   // late): the app checks by itself when it opens — never
   // auto-updates; a newer build only lights the yellow
@@ -27043,28 +30477,39 @@ export function App() {
   // fetches and navigates, so the tap visibly takes the
   // apply step instead of looking like a dead-end close.
   const [updateApplying, setUpdateApplying] = useState(false);
+  // Window (three-back rule, Anthony, Nov 4, 2026): one history
+  // entry; layers when a window already holds the slot.
   const updateViewPushedRef = useRef(false);
+  const updateViewHeldRef = useRef(false);
   const openUpdateView = (mode: "test" | "real") => {
     setUpdateTestPhase("read");
     setUpdateApplying(false);
     setUpdateViewMode(mode);
-    try {
-      window.history.pushState({ lorcanaUpdateView: mode }, "");
-      updateViewPushedRef.current = true;
-    } catch {
-      updateViewPushedRef.current = false;
+    if (updateViewHeldRef.current) {
+      replaceNavState({ lorcanaUpdateView: mode });
+      return;
     }
+    updateViewPushedRef.current = pushWindowState(
+      {
+        lorcanaUpdateView: mode,
+      },
+      "lorcanaUpdateView",
+    );
+    updateViewHeldRef.current = true;
   };
   const closeUpdateView = () => {
     if (updateViewPushedRef.current) {
       window.history.back();
     } else {
+      updateViewHeldRef.current = false;
+      scrubWindowKeys(["lorcanaUpdateView"]);
       setUpdateViewMode(null);
     }
   };
   useEffect(() => {
     const onPopState = () => {
-      if (updateViewPushedRef.current) {
+      if (updateViewHeldRef.current) {
+        updateViewHeldRef.current = false;
         updateViewPushedRef.current = false;
         setUpdateViewMode(null);
       }
@@ -27075,18 +30520,15 @@ export function App() {
   // The tickets window (Anthony, Nov 3, 2026): tapping the
   // red envelope on Home opens the change-request ticket list
   // in THIS dedicated window — never the Settings page (his
-  // correction, twice over). Same history pattern as the
-  // update view: opening pushes one entry, Back closes it.
+  // correction, twice over). Window (three-back rule): one
+  // history entry; Back closes it.
   const [ticketsOpen, setTicketsOpen] = useState(false);
-  const ticketsPushedRef = useRef(false);
+  const ticketsWin = useWindowHistory("lorcanaTickets", setTicketsOpen);
   const openTicketsWindow = () => {
-    setTicketsOpen(true);
-    try {
-      window.history.pushState({ lorcanaTickets: true }, "");
-      ticketsPushedRef.current = true;
-    } catch {
-      ticketsPushedRef.current = false;
-    }
+    ticketsWin.open();
+  };
+  const closeTicketsWindow = () => {
+    ticketsWin.close();
   };
   // Trades landing hand-off (Anthony, Nov 3, 2026): the
   // pendingSocialArea state names the Social area a deep
@@ -27099,24 +30541,52 @@ export function App() {
   // The personal Inbox (Anthony, Nov 3, 2026, later): the
   // Home mail indicator opens THIS window — every purchase
   // order, trade offer, and (for the owner) change-request
-  // ticket in one mail-style list. Same history pattern as
-  // the tickets window: opening pushes one entry, Back
-  // closes it. Opening an item stacks its own view above
-  // the Inbox (the standalone mail view for orders, the
-  // tickets window for tickets) and closing that view
-  // returns here — the Inbox itself never routes through
-  // Social or Settings.
+  // ticket in one mail-style list. Window (three-back rule,
+  // Anthony, Nov 4, 2026): one history entry; Back closes it.
+  // Opening an item layers its view into the Inbox's entry
+  // (no stacking) and Back closes both together — the Inbox
+  // itself never routes through Social or Settings.
   const [inboxOpen, setInboxOpen] = useState(false);
+  const inboxWin = useWindowHistory("lorcanaInbox", setInboxOpen);
   // The one-time Welcome flow (Anthony, Nov 3, 2026): shown
   // when the profile still owes it (getWelcomeState), and
-  // re-openable any time from Settings > About this app
-  // (review mode — a plain close, nothing forced).
+  // re-openable any time from the Admin Hub's "View welcome
+  // page" button (review mode — a plain close, nothing
+  // forced; the entry moved out of Settings on Nov 4, 2026).
   const welcomeState = useQuery({
     queryKey: ["welcomeState"],
     queryFn: () => api.getWelcomeState({}),
   });
   const [welcomeReviewOpen, setWelcomeReviewOpen] = useState(false);
   const welcomeOwed = welcomeState.data?.needsWelcome ?? false;
+  // The welcome re-view entry lives in the Admin Hub now
+  // (Anthony, Nov 4, 2026 — moved out of Settings > About,
+  // owner-only): the hub dispatches this event and review
+  // mode opens, exactly as the old Settings button did.
+  // Back-gesture trap (same Nov 4 rule as the verified
+  // sheet): review mode is a window over the Admin Hub, so
+  // opening takes the window's one history entry (three-back
+  // rule: layers when a window already holds the slot) and
+  // Back closes the review first, never the Admin underneath.
+  // Only REVIEW mode gets an entry — the first-run welcome
+  // flow is the app's entry state and stays exactly as it was.
+  const welcomeReviewWin = useWindowHistory(
+    "lorcanaWelcomeReview",
+    setWelcomeReviewOpen,
+  );
+  const openWelcomeReview = () => {
+    welcomeReviewWin.open();
+  };
+  const closeWelcomeReview = () => {
+    welcomeReviewWin.close();
+  };
+  useEffect(() => {
+    const onViewWelcome = () => openWelcomeReview();
+    window.addEventListener("vaultx:view-welcome", onViewWelcome);
+    return () =>
+      window.removeEventListener("vaultx:view-welcome", onViewWelcome);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Artwork warm-up (Anthony, Nov 3, 2026 — the up-front rule):
   // once the first-run Welcome tour is complete, a background pass
   // downloads EVERY card's browsing artwork to the on-device cache
@@ -27136,7 +30606,28 @@ export function App() {
     if (welcomeState.data == null || welcomeState.data.needsWelcome)
       return;
     if (!artworkPlan.data) return;
-    startArtworkWarmup(artworkPlan.data);
+    // The intro download choice (Anthony, Nov 4, 2026):
+    // the bulk warm-up no longer starts on its own for a
+    // generation the user hasn't decided on — the intro
+    // gate offers the choice first, and an OPT OUT for this
+    // generation means the bulk job never runs for it
+    // (images cache as the user scrolls instead). A
+    // remembered "download" choice resumes the pass here,
+    // and a generation with nothing pending no-ops inside
+    // the warm-up itself. The fingerprint index below is a
+    // separate, bounded scanner-readiness build and is not
+    // part of the optional payload.
+    const artChoice = readArtDownloadChoice();
+    const decidedForGeneration =
+      artChoice != null &&
+      artChoice.version === artworkPlan.data.artworkVersion;
+    if (decidedForGeneration && artChoice.choice === "download") {
+      startArtworkWarmup(artworkPlan.data);
+    }
+    // Decided + opt-out: the bulk pass never runs for this
+    // generation (a true opt-out). Undecided: the intro gate
+    // owns the start — it calls startArtworkWarmup itself if
+    // the user picks Download on the intro screen.
     // Scanner fingerprint index (V4 reach pass, Nov 3, 2026 —
     // The Queen P3 #3 re-test): the index used to build ONLY
     // while the Scan panel was open, so a quick open-and-scan
@@ -27149,7 +30640,6 @@ export function App() {
     // been fingerprint-ready.
     ensureFpIndex(artworkPlan.data, getArtBlobForIndex);
   }, [welcomeState.data, artworkPlan.data]);
-  const inboxPushedRef = useRef(false);
   const [focusDeal] = useState<{
     kind: "cash" | "trade";
     id: number;
@@ -27159,47 +30649,11 @@ export function App() {
     null,
   );
   const openInbox = () => {
-    setInboxOpen(true);
-    try {
-      window.history.pushState({ lorcanaInbox: true }, "");
-      inboxPushedRef.current = true;
-    } catch {
-      inboxPushedRef.current = false;
-    }
+    inboxWin.open();
   };
   const closeInboxWindow = () => {
-    if (inboxPushedRef.current) {
-      window.history.back();
-    } else {
-      setInboxOpen(false);
-    }
+    inboxWin.close();
   };
-  useEffect(() => {
-    const onPopState = () => {
-      // Stacked windows (Anthony, Nov 3, 2026): the mail view
-      // and the tickets window can sit ABOVE the Inbox, so one
-      // popstate must close only the top one. The history
-      // state after the pop names the entry we landed on —
-      // the Inbox closes only when we've left its entry for
-      // good (not when a window above it closed back to it).
-      const s = window.history.state as {
-        lorcanaInbox?: boolean;
-        lorcanaMail?: boolean;
-        lorcanaTickets?: boolean;
-      } | null;
-      if (
-        inboxPushedRef.current &&
-        !s?.lorcanaInbox &&
-        !s?.lorcanaMail &&
-        !s?.lorcanaTickets
-      ) {
-        inboxPushedRef.current = false;
-        setInboxOpen(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   // (The Inbox no longer lands on Trades at all — messages
   //  open in the standalone mail view above the Inbox. The
   //  focusDeal state below stays null now; the Trades panel
@@ -27208,37 +30662,52 @@ export function App() {
   // his correction after the first Inbox shipped: opening a
   // message must NOT throw him into Social/Trades). A message
   // opens as its OWN page above the Inbox — Subject/From
-  // header, the order itself, its thread — with an X (or the
-  // phone's Back) returning him to the Inbox list, which
-  // stays open underneath the whole time.
+  // header, the order itself, its thread — with an X closing
+  // it in place. Three-back rule (Anthony, Nov 4, 2026): it
+  // layers into the Inbox's window entry instead of stacking,
+  // so the phone's Back closes the mail view and the Inbox
+  // together.
   const [mailView, setMailView] = useState<{
     kind: "cash" | "trade";
     id: number;
     nonce: number;
   } | null>(null);
   const mailViewPushedRef = useRef(false);
+  const mailViewHeldRef = useRef(false);
   const openInboxOrder = (kind: "cash" | "trade", refId: number) => {
     setMailView({ kind, id: refId, nonce: Date.now() });
-    try {
-      window.history.pushState({ lorcanaMail: true }, "");
-      mailViewPushedRef.current = true;
-    } catch {
-      mailViewPushedRef.current = false;
+    if (mailViewHeldRef.current) {
+      replaceNavState({
+        ...(readNavState() ?? {}),
+        lorcanaMail: true,
+      });
+      return;
     }
+    mailViewPushedRef.current = pushWindowState(
+      {
+        ...(readNavState() ?? {}),
+        lorcanaMail: true,
+      },
+      "lorcanaMail",
+    );
+    mailViewHeldRef.current = true;
   };
   const closeMailView = () => {
     if (mailViewPushedRef.current) {
       window.history.back();
     } else {
+      mailViewHeldRef.current = false;
+      scrubWindowKeys(["lorcanaMail"]);
       setMailView(null);
     }
   };
   useEffect(() => {
     const onPopState = () => {
-      const s = window.history.state as {
-        lorcanaMail?: boolean;
-      } | null;
-      if (mailViewPushedRef.current && !s?.lorcanaMail) {
+      if (
+        mailViewHeldRef.current &&
+        readNavState()?.lorcanaMail !== true
+      ) {
+        mailViewHeldRef.current = false;
         mailViewPushedRef.current = false;
         setMailView(null);
       }
@@ -27249,15 +30718,24 @@ export function App() {
   const openInboxTicket = (refId: number) => {
     setTicketFocusId(refId);
     // The Inbox stays open underneath; the tickets window
-    // stacks above it and its Back returns to the Inbox list.
+    // layers into the Inbox's window entry (three-back rule:
+    // no stacking) and Back closes both together.
     openTicketsWindow();
   };
-  const closeTicketsWindow = () => {
-    if (ticketsPushedRef.current) {
-      window.history.back();
-    } else {
-      setTicketsOpen(false);
-    }
+  // Shared deck mail (Anthony, Nov 4, 2026): a plain mail
+  // message (a deck list as text) opens as its own page above
+  // the Inbox, layered into the Inbox's window entry exactly
+  // like the order mail view — Back closes both together.
+  const [deckMailId, setDeckMailId] = useState<number | null>(null);
+  const deckMailWin = useWindowHistory("lorcanaDeckMail", (v) => {
+    if (!v) setDeckMailId(null);
+  });
+  const openInboxMail = (refId: number) => {
+    setDeckMailId(refId);
+    deckMailWin.open();
+  };
+  const closeDeckMail = () => {
+    deckMailWin.close();
   };
   // A ticket focus handed over from the Inbox is one-shot:
   // once the tickets window closes, forget it so a later
@@ -27267,19 +30745,6 @@ export function App() {
       setTicketFocusId(null);
     }
   }, [ticketsOpen, ticketFocusId]);
-  useEffect(() => {
-    const onPopState = () => {
-      const s = window.history.state as {
-        lorcanaTickets?: boolean;
-      } | null;
-      if (ticketsPushedRef.current && !s?.lorcanaTickets) {
-        ticketsPushedRef.current = false;
-        setTicketsOpen(false);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   const finishUpdateTest = useMutation({
     mutationFn: () => api.dismissUpdateTest({}),
     onSuccess: () => {
@@ -27334,6 +30799,7 @@ export function App() {
         lorcanaOwnProfile?: boolean;
         lorcanaCollectorId?: boolean;
         lorcanaLibrary?: boolean;
+        lorcanaSearch?: boolean;
       } | null;
       // A reload whose current entry carries ANY app state —
       // a section, a binder group, or an open sheet/profile —
@@ -27348,6 +30814,15 @@ export function App() {
           typeof st.lorcanaMissing === "string" ||
           st.lorcanaOwnProfile === true ||
           st.lorcanaCollectorId === true ||
+          // The Search tab's entry is an intact stack too
+          // (Anthony, Nov 4, 2026, ~12:08 PM re-report): Search
+          // was MISSED when the other pages got this treatment,
+          // so a refresh on Search normalized the entry to
+          // Home and Home painted first for a beat before the
+          // sessionStorage seed reopened Search. With the key
+          // named here, the entry survives untouched and the
+          // Search seed reads it directly — zero Home frames.
+          st.lorcanaSearch === true ||
           // The Library page's entry is an intact stack too
           // (Anthony, Nov 3, 2026, ~11:37 AM): without this,
           // a refresh on the Library normalized the entry to
@@ -27365,10 +30840,9 @@ export function App() {
             .lorcanaAdminCollectors === true)
       )
         return;
-      window.history.replaceState({ mcView: "home" }, "");
-      if (view !== "home") {
-        window.history.pushState({ mcView: view }, "");
-      }
+      // Three-back rule (Anthony, Nov 4, 2026): the app sits in
+      // ONE history entry — normalize by replacing, never pushing.
+      replaceNavState({ mcView: view });
     } catch {
       // History unavailable (e.g. sandboxed frame): navigation still
       // works via the on-screen controls, as before.
@@ -27402,6 +30876,13 @@ export function App() {
       // the plain refresh case.
     }
   }, [searchOpen]);
+  // Search restored by a refresh (Nov 4, 2026, ~12:08 PM):
+  // when the overlay is seeded open at mount, it must be
+  // FULLY painted from the very first frame — no entrance
+  // fade (the 180ms opacity ramp let Home bleed through)
+  // and no entrance pop. Fresh opens from the tab animate
+  // as before; goSearch clears this flag.
+  const searchRestoredRef = useRef(searchOpen);
   // Tab changes are INSTANT cuts (Anthony, Nov 3, 2026,
   // ~4:44 PM): he tried the swipe-between-tabs navigation
   // and the slide/crossfade page transition that came with
@@ -27491,39 +30972,34 @@ export function App() {
   const sealedSheetPushedRef = useRef(
     typeof readHistoryState()?.lorcanaSealed === "string",
   );
+  const sealedSheetHeldRef = useRef(sealedSheetPushedRef.current);
   const openSealedItem = (name: string) => {
     if (sealedSheetName === name) return;
     hapticTick();
     setSealedSheetName(name);
-    try {
-      // Merge the underlying entry's state (the useHistorySheet
-      // pattern): pages layered over this sheet — the Price
-      // alerts management page — push their own merged entry on
-      // top, and Back has to unwind one layer at a time, so this
-      // sheet's entry must carry the whole stack beneath it.
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
-      const next: Record<string, unknown> = {
-        ...(cur ?? {}),
-        lorcanaSealed: name,
-      };
-      delete next.lorcanaSearch;
-      if (sealedSheetPushedRef.current) {
-        window.history.replaceState(next, "");
-      } else {
-        window.history.pushState(next, "");
-        sealedSheetPushedRef.current = true;
-      }
-    } catch {
-      sealedSheetPushedRef.current = false;
+    // Window (three-back rule, Anthony, Nov 4, 2026): one entry;
+    // layers into the open window's entry when one already holds
+    // the slot instead of stacking. The entry carries the whole
+    // stack beneath it (the useHistorySheet pattern), so a refresh
+    // restores everything in place.
+    const next: Record<string, unknown> = {
+      ...(readNavState() ?? {}),
+      lorcanaSealed: name,
+    };
+    delete next.lorcanaSearch;
+    if (sealedSheetHeldRef.current) {
+      replaceNavState(next);
+    } else {
+      sealedSheetPushedRef.current = pushWindowState(next, "lorcanaSealed");
+      sealedSheetHeldRef.current = true;
     }
   };
   const closeSealedSheet = () => {
     if (sealedSheetPushedRef.current) {
       window.history.back();
     } else {
+      sealedSheetHeldRef.current = false;
+      scrubWindowKeys(["lorcanaSealed"]);
       setSealedSheetName(null);
     }
   };
@@ -27534,10 +31010,10 @@ export function App() {
       // layered over it (e.g. Price alerts) still carries
       // lorcanaSealed and must leave the sheet open.
       if (
-        sealedSheetPushedRef.current &&
-        typeof (window.history.state as { lorcanaSealed?: unknown } | null)
-          ?.lorcanaSealed !== "string"
+        sealedSheetHeldRef.current &&
+        typeof readNavState()?.lorcanaSealed !== "string"
       ) {
+        sealedSheetHeldRef.current = false;
         sealedSheetPushedRef.current = false;
         setSealedSheetName(null);
       }
@@ -27560,24 +31036,31 @@ export function App() {
   const missingPushedRef = useRef(
     typeof readHistoryState()?.lorcanaMissing === "string",
   );
+  const missingHeldRef = useRef(missingPushedRef.current);
   const openMissingSheet = (key: string) => {
     if (missingSheetKey === key) return;
     setMissingSheetKey(key);
-    try {
-      if (missingPushedRef.current) {
-        window.history.replaceState({ lorcanaMissing: key }, "");
-      } else {
-        window.history.pushState({ lorcanaMissing: key }, "");
-        missingPushedRef.current = true;
-      }
-    } catch {
-      missingPushedRef.current = false;
+    // Window (three-back rule, Anthony, Nov 4, 2026): one
+    // entry; layers into the open window's entry when one
+    // already holds the slot instead of stacking.
+    if (missingHeldRef.current) {
+      replaceNavState({ lorcanaMissing: key });
+    } else {
+      missingPushedRef.current = pushWindowState(
+        {
+          lorcanaMissing: key,
+        },
+        "lorcanaMissing",
+      );
+      missingHeldRef.current = true;
     }
   };
   const closeMissingSheet = () => {
     if (missingPushedRef.current) {
       window.history.back();
     } else {
+      scrubWindowKeys(["lorcanaMissing"]);
+      missingHeldRef.current = false;
       setMissingSheetKey(null);
     }
   };
@@ -27588,45 +31071,54 @@ export function App() {
   // search with name + collector-number honing).
   const [sectionQuery, setSectionQuery] = useState("");
   const scanPushedRef = useRef(false);
+  const scanHeldRef = useRef(false);
   const openScan = (fromSearch = false) => {
     if (scanOpen) return;
     setScanOpen(true);
-    try {
-      if (fromSearch && searchPushedRef.current) {
-        // Hand the search overlay's history entry to the scanner.
-        window.history.replaceState({ lorcanaScan: true }, "");
-        searchPushedRef.current = false;
-        scanPushedRef.current = true;
-      } else if (!scanPushedRef.current) {
-        window.history.pushState({ lorcanaScan: true }, "");
-        scanPushedRef.current = true;
-      }
-    } catch {
-      scanPushedRef.current = false;
+    if (fromSearch && searchPushedRef.current) {
+      // Hand the search overlay's history entry to the scanner.
+      replaceNavState({ lorcanaScan: true });
+      searchPushedRef.current = false;
+      searchHeldRef.current = false;
+      scanPushedRef.current = true;
+      scanHeldRef.current = true;
+    } else if (!scanHeldRef.current) {
+      // Window (three-back rule, Anthony, Nov 4, 2026): one
+      // entry; layers when a window already holds the slot.
+      scanPushedRef.current = pushWindowState(
+        {
+          ...(readNavState() ?? {}),
+          lorcanaScan: true,
+        },
+        "lorcanaScan",
+      );
+      scanHeldRef.current = true;
     }
   };
   const closeScan = () => {
     if (scanPushedRef.current) {
       window.history.back();
     } else {
+      scrubWindowKeys(["lorcanaScan"]);
+      scanHeldRef.current = false;
       setScanOpen(false);
     }
   };
   useEffect(() => {
     const onPopState = () => {
       if (
-        missingPushedRef.current &&
-        !(window.history.state as { lorcanaMissing?: string } | null)
-          ?.lorcanaMissing
+        missingHeldRef.current &&
+        readNavState()?.lorcanaMissing == null
       ) {
+        missingHeldRef.current = false;
         missingPushedRef.current = false;
         setMissingSheetKey(null);
       }
       if (
-        scanPushedRef.current &&
-        !(window.history.state as { lorcanaScan?: boolean } | null)
-          ?.lorcanaScan
+        scanHeldRef.current &&
+        readNavState()?.lorcanaScan !== true
       ) {
+        scanHeldRef.current = false;
         scanPushedRef.current = false;
         setScanOpen(false);
       }
@@ -27689,14 +31181,6 @@ export function App() {
     const st = readHistoryState();
     return typeof st?.mcBinder === "string" ? st.mcBinder : null;
   });
-  // True while a binder section entry ({ mcView: "binder", mcBinder })
-  // is the current history entry — kept in sync by pickGroup and the
-  // central popstate listener, so the "← All sets" button knows
-  // whether it can step back through history (consuming the entry
-  // exactly once) or should just flip state locally.
-  const binderGroupPushedRef = useRef(
-    typeof readHistoryState()?.mcBinder === "string",
-  );
   const [filter, setFilter] = useState<"all" | "owned" | "missing">("all");
   // Seeded from a surviving card-sheet entry the same way, so a
   // refresh on an open card reopens that card.
@@ -27754,7 +31238,6 @@ export function App() {
         groups.find((g) => g.key === "set:1")?.key ?? groups[0]?.key ?? null,
       );
       setShowPicker(true);
-      binderGroupPushedRef.current = false;
     }
   }, [groups, groupKey]);
 
@@ -27827,15 +31310,11 @@ export function App() {
     setShowPicker(false);
     setGroupKey(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    // Drilling into a section is a navigation step too: push one
-    // history entry, so Back returns to the set-selection grid
-    // instead of leaving the app.
-    try {
-      window.history.pushState({ mcView: "binder", mcBinder: key }, "");
-      binderGroupPushedRef.current = true;
-    } catch {
-      binderGroupPushedRef.current = false;
-    }
+    // Drilling into a section is main-flow navigation
+    // (three-back rule, Anthony, Nov 4, 2026): replace the
+    // single app entry — the device Back exits the app, and
+    // the "← All sets" control returns to the grid in place.
+    replaceNavState({ mcView: "binder", mcBinder: key });
   };
 
   // Section navigation for the bottom bar and Home's entries: flip
@@ -27864,10 +31343,10 @@ export function App() {
     // Leaving Search via the bottom menu (Anthony, Nov 2, 2026):
     // the menu floats above the search blur, so tapping any tab —
     // including the one for the view already underneath — closes
-    // the overlay and lands on that tab. The overlay's pushed
-    // history entry is handed to the destination (replaceState
-    // instead of a push) so Back never lands on a dead search
-    // entry afterwards.
+    // the overlay and lands on that tab. Three-back rule
+    // (Anthony, Nov 4, 2026): tab switches REPLACE the single app
+    // entry, never push — so Back from the destination exits the
+    // app instead of landing on a dead search entry.
     if (next === view) {
       if (searchOpen) {
         closeSearch();
@@ -27875,33 +31354,16 @@ export function App() {
       return;
     }
     hapticTick();
-    const handOffSearch = searchOpen && searchPushedRef.current;
     if (searchOpen) {
       setSearchOpen(false);
       searchPushedRef.current = false;
+      searchHeldRef.current = false;
     }
     setView(next);
-    try {
-      if (next === "binder" && !showPicker && groupKey) {
-        if (handOffSearch) {
-          window.history.replaceState(
-            { mcView: "binder", mcBinder: groupKey },
-            "",
-          );
-        } else {
-          window.history.pushState(
-            { mcView: "binder", mcBinder: groupKey },
-            "",
-          );
-        }
-        binderGroupPushedRef.current = true;
-      } else if (handOffSearch) {
-        window.history.replaceState({ mcView: next }, "");
-      } else {
-        window.history.pushState({ mcView: next }, "");
-      }
-    } catch {
-      // History unavailable: the view still switched.
+    if (next === "binder" && !showPicker && groupKey) {
+      replaceNavState({ mcView: "binder", mcBinder: groupKey });
+    } else {
+      replaceNavState({ mcView: next });
     }
   };
 
@@ -27919,12 +31381,104 @@ export function App() {
     pickGroup(key);
   };
 
+  // Opening a section FROM the profile (Anthony, Nov 4,
+  // 2026, live back bug + row routing): the profile's My
+  // Collection rows — a chapter, Comics, Sealed, and the
+  // Lorcana row's chapters grid — each open their OWN
+  // collection page (never the Library; the Library keeps
+  // its single door, the shelf picture). Unlike the
+  // bottom-bar navigate() these use, they must NOT spend
+  // the profile stack or push through it blindly: the old
+  // path pushed the section's entry over the profile's,
+  // unmounted the profile, and left the profile's entry
+  // as a dead step — Back from Comics needed TWO presses
+  // (the first landed on the orphaned profile entry,
+  // which nothing was listening to) and then landed on
+  // Home with the profile gone. Three-back rule (Anthony,
+  // Nov 4, 2026): these openers REPLACE the single app entry —
+  // opening a section is main-flow navigation, never a push.
+  // The device Back from a section exits the app; the
+  // section's own on-screen back returns within the app.
+  const openBinderGroupFromProfile = (key: string) => {
+    hapticTick();
+    if (key === "comics") {
+      setView("comics");
+      replaceNavState({ mcView: "comics" });
+      return;
+    }
+    setView("binder");
+    setShowPicker(false);
+    setGroupKey(key);
+    replaceNavState({ mcView: "binder", mcBinder: key });
+  };
+  // Library Funko / Legos spines (Anthony, Nov 4, 2026): the
+  // profile's Library dispatches this event with the game and
+  // section key; opening replaces the single app entry like the
+  // other profile-originated section opens (three-back rule).
+  // GamePanel reads the section key from sessionStorage on
+  // mount and opens that line/theme directly.
+  useEffect(() => {
+    const onOpenGameSection = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{ game?: string; sectionKey?: string }>
+      ).detail;
+      const game =
+        detail?.game === "lego"
+          ? "lego"
+          : detail?.game === "funko"
+            ? "funko"
+            : null;
+      if (!game || !detail?.sectionKey) return;
+      hapticTick();
+      try {
+        window.sessionStorage.setItem(
+          `vaultx-game-open-section:${game}`,
+          detail.sectionKey,
+        );
+      } catch {
+        // Storage unavailable: the game's section list still
+        // opens; only the deep link into the section is lost.
+      }
+      setView(game);
+      replaceNavState({ mcView: game });
+    };
+    window.addEventListener(
+      "vaultx:open-game-section",
+      onOpenGameSection,
+    );
+    return () =>
+      window.removeEventListener(
+        "vaultx:open-game-section",
+        onOpenGameSection,
+      );
+  }, []);
+  /** The Lorcana row of My Collection: the chapters/sets
+      grid — the same destination as Home's Lorcana tile —
+      NOT the Library (Anthony, Nov 4, 2026). */
+  const openBinderHomeFromProfile = () => {
+    hapticTick();
+    setView("binder");
+    setShowPicker(true);
+    replaceNavState({ mcView: "binder" });
+  };
+  /** The Sealed row of My Collection: the standalone
+      Sealed page (restored as this row's destination
+      only — no Sealed tab returns to the bottom menu). */
+  const openSealedSectionFromProfile = () => {
+    hapticTick();
+    setView("sealed");
+    replaceNavState({ mcView: "sealed" });
+  };
+
   // Central popstate listener for section navigation: when Back
   // lands on an entry carrying mcView, restore the section (and, for
   // the binder, the set-selection grid vs. the open section) from
   // that entry. Entries without mcView belong to the overlays and
   // sheets, whose own popstate traps handle them — ignore those pops
-  // here so the two systems never fight.
+  // here so the two systems never fight. (Three-back rule, Anthony,
+  // Nov 4, 2026: main-flow navigation replaces the single app entry,
+  // so a Back here normally exits the app; this listener only
+  // answers pops that land on a surviving app entry.)
   useEffect(() => {
     const onPopState = () => {
       const st = window.history.state as {
@@ -27937,11 +31491,9 @@ export function App() {
       }
       if (st.mcView === "binder") {
         if (typeof st.mcBinder === "string") {
-          binderGroupPushedRef.current = true;
           setGroupKey(st.mcBinder);
           setShowPicker(false);
         } else {
-          binderGroupPushedRef.current = false;
           setShowPicker(true);
         }
       }
@@ -27956,15 +31508,18 @@ export function App() {
   // must not snap back to the binder list). The overlay focuses its
   // field on open; closing it returns to the same view, untouched.
   //
-  // Opening the overlay pushes one history entry, the same trap the
-  // card sheet uses: the device/browser Back button (or back gesture)
-  // then closes the overlay and lands back on the view underneath
-  // (Home, if that's where he was) instead of exiting the app.
-  // Closing from the UI (backdrop, ✕, Escape) goes through
-  // history.back() so the pushed entry is consumed exactly once.
+  // Opening the overlay takes the window's one history entry
+  // (three-back rule, Anthony, Nov 4, 2026), the same trap the
+  // card sheet uses: the device/browser Back button (or back
+  // gesture) then closes the overlay and lands back on the view
+  // underneath (Home, if that's where he was) instead of exiting
+  // the app. Closing from the UI (backdrop, ✕, Escape) goes
+  // through history.back() when this open did the push, so the
+  // entry is consumed exactly once.
   const searchPushedRef = useRef(
     readHistoryState()?.lorcanaSearch === true,
   );
+  const searchHeldRef = useRef(searchPushedRef.current);
   const goSearch = () => {
     // The Search tab stays reachable above the blur while the
     // overlay is open (see the nav's z-index below); tapping it
@@ -27974,30 +31529,34 @@ export function App() {
       return;
     }
     hapticTick();
+    searchRestoredRef.current = false;
     setSearchOpen(true);
-    try {
-      window.history.pushState({ lorcanaSearch: true }, "");
-      searchPushedRef.current = true;
-    } catch {
-      // History unavailable (e.g. sandboxed frame): the overlay still
-      // opens and closes via its own controls.
-      searchPushedRef.current = false;
-    }
+    if (searchHeldRef.current) return;
+    searchPushedRef.current = pushWindowState(
+      {
+        ...(readNavState() ?? {}),
+        lorcanaSearch: true,
+      },
+      "lorcanaSearch",
+    );
+    searchHeldRef.current = true;
   };
   const closeSearch = () => {
     if (searchPushedRef.current) {
       window.history.back();
     } else {
+      scrubWindowKeys(["lorcanaSearch"]);
+      searchHeldRef.current = false;
       setSearchOpen(false);
     }
   };
   useEffect(() => {
     const onPopState = () => {
       if (
-        searchPushedRef.current &&
-        !(window.history.state as { lorcanaSearch?: boolean } | null)
-          ?.lorcanaSearch
+        searchHeldRef.current &&
+        readNavState()?.lorcanaSearch !== true
       ) {
+        searchHeldRef.current = false;
         searchPushedRef.current = false;
         setSearchOpen(false);
       }
@@ -28013,17 +31572,16 @@ export function App() {
   // time the Search tab was entered.)
 
   // Tapping a result closes the overlay and opens that card right
-  // where he is — no jump to the binder list first. The overlay's
-  // history entry is handed to the card sheet (openCard replaceStates
-  // it into the card's entry), so Back from the card lands on the
-  // view underneath exactly as if the card had been opened directly.
+  // where he is — no jump to the binder list first. The search
+  // window gives up its history slot and the card sheet layers
+  // into the same entry (three-back rule: no stacking), so Back
+  // from the card closes it and lands on the view underneath
+  // exactly as if the card had been opened directly.
   const pickSearchResult = (result: SearchResult) => {
     setSearchOpen(false);
     setSearchText("");
-    if (searchPushedRef.current) {
-      searchPushedRef.current = false;
-      sheetPushedRef.current = true;
-    }
+    searchPushedRef.current = false;
+    searchHeldRef.current = false;
     openCard(result.cardId);
   };
 
@@ -28038,42 +31596,35 @@ export function App() {
   const sheetPushedRef = useRef(
     typeof readHistoryState()?.lorcanaCard === "number",
   );
+  const sheetHeldRef = useRef(sheetPushedRef.current);
   const openCard = (id: number) => {
     if (selectedId === id) return;
     hapticTick();
     setSelectedId(id);
-    try {
-      // Merge the underlying entry's state (the useHistorySheet
-      // pattern): pages layered over this sheet — the Price
-      // alerts management page — push their own merged entry on
-      // top, and Back has to unwind one layer at a time, so this
-      // sheet's entry must carry the whole stack beneath it. A
-      // handed-off search entry does not keep its search key.
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
-      const next: Record<string, unknown> = {
-        ...(cur ?? {}),
-        lorcanaCard: id,
-      };
-      delete next.lorcanaSearch;
-      if (sheetPushedRef.current) {
-        window.history.replaceState(next, "");
-      } else {
-        window.history.pushState(next, "");
-        sheetPushedRef.current = true;
-      }
-    } catch {
-      // History unavailable (e.g. sandboxed frame): the sheet still
-      // opens and closes via its own buttons.
-      sheetPushedRef.current = false;
+    // Window (three-back rule, Anthony, Nov 4, 2026): one entry;
+    // layers into the open window's entry when one already holds
+    // the slot instead of stacking. Merge the underlying entry's
+    // state (the useHistorySheet pattern) so a refresh restores
+    // the whole stack in place. A handed-off search entry does
+    // not keep its search key.
+    const next: Record<string, unknown> = {
+      ...(readNavState() ?? {}),
+      lorcanaCard: id,
+    };
+    delete next.lorcanaSearch;
+    if (sheetHeldRef.current) {
+      replaceNavState(next);
+    } else {
+      sheetPushedRef.current = pushWindowState(next, "lorcanaCard");
+      sheetHeldRef.current = true;
     }
   };
   const closeCard = () => {
     if (sheetPushedRef.current) {
       window.history.back();
     } else {
+      sheetHeldRef.current = false;
+      scrubWindowKeys(["lorcanaCard"]);
       setSelectedId(null);
     }
   };
@@ -28084,10 +31635,10 @@ export function App() {
       // layered over it (e.g. Price alerts) still carries
       // lorcanaCard and must leave the sheet open.
       if (
-        sheetPushedRef.current &&
-        typeof (window.history.state as { lorcanaCard?: unknown } | null)
-          ?.lorcanaCard !== "number"
+        sheetHeldRef.current &&
+        typeof readNavState()?.lorcanaCard !== "number"
       ) {
+        sheetHeldRef.current = false;
         sheetPushedRef.current = false;
         setSelectedId(null);
       }
@@ -28162,10 +31713,16 @@ export function App() {
             onOpenPokemon={() => navigate("pokemon")}
             onOpenMagic={() => navigate("magic")}
             onOpenStarwars={() => navigate("starwars")}
+            onOpenFunko={() => navigate("funko")}
             onOpenCard={(id) => openCard(id)}
             onOpenSealed={(name) => openSealedItem(name)}
             onOpenBinderGroup={openBinderGroup}
             onOpenSealedSection={() => navigate("sealed")}
+            onOpenBinderGroupFromProfile={openBinderGroupFromProfile}
+            onOpenBinderHomeFromProfile={openBinderHomeFromProfile}
+            onOpenSealedSectionFromProfile={
+              openSealedSectionFromProfile
+            }
             onOpenPortfolio={() => navigate("finances")}
             updateAvailable={availableUpdate != null}
             onOpenUpdate={() => openUpdateView("real")}
@@ -28183,6 +31740,8 @@ export function App() {
           <GamePanel game="magic" onScan={() => openScan()} />
         ) : view === "starwars" ? (
           <GamePanel game="starwars" onScan={() => openScan()} />
+        ) : view === "funko" ? (
+          <GamePanel game="funko" onScan={() => openScan()} />
         ) : view === "social" ? (
           <SocialPanel
             onOpenCard={openCard}
@@ -28194,7 +31753,8 @@ export function App() {
           <SettingsPanel
             theme={theme}
             onThemeChange={changeTheme}
-            onShowWelcome={() => setWelcomeReviewOpen(true)}
+            language={language}
+            onLanguageChange={changeLanguage}
           />
         ) : view === "finances" ? (
           finance.isPending ? (
@@ -28219,6 +31779,8 @@ export function App() {
               </button>
             </p>
           )
+        ) : view === "sealed" ? (
+          <SealedPanel onOpenSealed={openSealedItem} />
         ) : (
           <>
         {/* Search + Scan row (Anthony, Nov 3, 2026,
@@ -28262,15 +31824,11 @@ export function App() {
             <button
               type="button"
               onClick={() => {
-                // Step back through history when the section was
-                // opened with a push (the popstate listener restores
-                // the grid); otherwise just flip state locally.
-                if (binderGroupPushedRef.current) {
-                  window.history.back();
-                } else {
-                  setShowPicker(true);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }
+                // Three-back rule (Anthony, Nov 4, 2026): sections
+                // replace the single app entry, so this always
+                // flips state locally — the device Back exits.
+                setShowPicker(true);
+                window.scrollTo({ top: 0, behavior: "smooth" });
               }}
               aria-label="Back to set selection"
               className="rounded-full border border-[var(--accent)]/50 px-3.5 py-1.5 text-sm font-medium text-[var(--gold-soft)]"
@@ -28481,8 +32039,15 @@ export function App() {
                           {boxName}
                         </span>
                         <span className="block text-xs text-[var(--dim)]">
-                          Owned ×{box.qty} · {fmtUSD(box.unitValue)} each
-                          — tap to open and add your unopened box
+                          <span
+                            className={
+                              box.qty === 0 ? "zero-owned" : undefined
+                            }
+                          >
+                            Owned ×{box.qty}
+                          </span>{" "}
+                          · {fmtUSD(box.unitValue)} each — tap to open and
+                          add your unopened box
                         </span>
                       </span>
                       <span
@@ -28668,6 +32233,7 @@ export function App() {
             <InboxList
               onOpenOrder={openInboxOrder}
               onOpenTicket={openInboxTicket}
+              onOpenMail={openInboxMail}
             />
           </div>
         </div>
@@ -28681,12 +32247,23 @@ export function App() {
           onOpenCard={openCard}
         />
       ) : null}
+      {deckMailId != null ? (
+        <DeckMailView id={deckMailId} onClose={closeDeckMail} />
+      ) : null}
       {welcomeOwed || welcomeReviewOpen ? (
         <WelcomeFlow
           review={!welcomeOwed}
-          onClose={() => setWelcomeReviewOpen(false)}
+          onClose={closeWelcomeReview}
         />
       ) : null}
+      {/* The verified-badge explainer (Anthony, Nov 4, 2026):
+          one shared sheet for every badge tap in the app,
+          opened by the vaultx:verified-explainer event the
+          badge component dispatches. */}
+      <VerifiedExplainerSheet />
+      <IntroDownloadGate
+        welcomeDone={welcomeState.data != null && !welcomeOwed}
+      />
       {ticketsOpen ? (
         <div
           className="app-shell fixed inset-0 z-[90] overflow-y-auto"
@@ -28888,9 +32465,9 @@ export function App() {
           (Anthony, Nov 2, 2026). Otherwise it keeps its normal
           layer under the sheets and overlays. */}
       <nav
-        aria-label="Main navigation"
+        aria-label={translate(language, "nav.main")}
         className={`pointer-events-none fixed inset-x-0 bottom-0 px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))] ${
-          searchOpen ? "z-[60]" : "z-40"
+          searchOpen ? "z-[67]" : "z-40"
         }`}
       >
         <div
@@ -28900,7 +32477,7 @@ export function App() {
             [
               {
                 key: "home",
-                label: "Home",
+                label: translate(language, "nav.home"),
                 // While Search is open, Search owns the highlight —
                 // the tab underneath never lights up alongside it
                 // (Anthony, Nov 2, 2026: closing the on-screen
@@ -28920,7 +32497,7 @@ export function App() {
               },
               {
                 key: "search",
-                label: "Search",
+                label: translate(language, "nav.search"),
                 active: searchOpen,
                 onClick: goSearch,
                 icon: (
@@ -28932,7 +32509,7 @@ export function App() {
               },
               {
                 key: "social",
-                label: "Social",
+                label: translate(language, "nav.social"),
                 active: view === "social" && !searchOpen,
                 onClick: () => navigate("social"),
                 icon: (
@@ -28946,7 +32523,7 @@ export function App() {
               },
               {
                 key: "portfolio",
-                label: "Portfolio",
+                label: translate(language, "nav.portfolio"),
                 active: view === "finances" && !searchOpen,
                 onClick: () => navigate("finances"),
                 icon: (
@@ -28964,7 +32541,7 @@ export function App() {
                 // card collections', so About / version / Check for
                 // Update is reachable from anywhere in the app.
                 key: "settings",
-                label: "Settings",
+                label: translate(language, "nav.settings"),
                 active: view === "settings" && !searchOpen,
                 onClick: () => navigate("settings"),
                 icon: (
@@ -29045,7 +32622,9 @@ export function App() {
       {searchOpen ? (
         <div
           ref={searchOverlayRef}
-          className="app-shell fixed inset-0 z-50 overflow-y-auto"
+          className={`app-shell fixed inset-0 z-[66] overflow-y-auto ${
+            searchRestoredRef.current ? "" : "search-fade"
+          }`}
           role="dialog"
           aria-modal="true"
           aria-label="Search your collection"
@@ -29069,7 +32648,7 @@ export function App() {
               room. */}
           <div
             className={`${
-              searchKbUp ? "" : "search-pop "
+              searchKbUp || searchRestoredRef.current ? "" : "search-pop "
             }mx-auto flex min-h-full w-full max-w-lg flex-col px-4 ${
               searchKbUp ? "pb-3" : "pb-6"
             }`}

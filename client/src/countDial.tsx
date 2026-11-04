@@ -49,6 +49,11 @@ useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { hapticConfirm } from "./haptics";
+import {
+  pushWindowState,
+  readNavState,
+  scrubWindowKeys,
+} from "./historyNav";
 
 export function SidewaysCountDial({
   label,
@@ -75,10 +80,14 @@ export function SidewaysCountDial({
   closeRef.current = onClose;
 
   // Back-button dismiss (see BACK-BUTTON DISMISS above):
-  // pushedRef tracks the history entry this dial pushed;
-  // dismiss() is the close path every programmatic dismissal
-  // uses, so the entry is always consumed exactly once.
+  // pushedRef tracks whether this dial did the push; heldRef
+  // tracks whether its key is live in the top entry (three-back
+  // rule: the dial layers into the open window's entry when one
+  // already holds the slot). dismiss() is the close path every
+  // programmatic dismissal uses, so the entry is always
+  // consumed exactly once.
   const pushedRef = useRef(false);
+  const heldRef = useRef(false);
   const dismissRef = useRef<() => void>(() => {});
   dismissRef.current = () => {
     if (pushedRef.current) {
@@ -91,22 +100,22 @@ export function SidewaysCountDial({
         pushedRef.current = false;
       }
     }
+    heldRef.current = false;
+    scrubWindowKeys(["lorcanaCountDial"]);
     closeRef.current();
   };
   useEffect(() => {
-    try {
-      window.history.pushState({ lorcanaCountDial: true }, "");
-      pushedRef.current = true;
-    } catch {
-      pushedRef.current = false;
-    }
+    pushedRef.current = pushWindowState(
+      { lorcanaCountDial: true },
+      "lorcanaCountDial",
+    );
+    heldRef.current = true;
     const onPopState = () => {
       if (
-        pushedRef.current &&
-        !(
-          window.history.state as { lorcanaCountDial?: boolean } | null
-        )?.lorcanaCountDial
+        heldRef.current &&
+        readNavState()?.lorcanaCountDial !== true
       ) {
+        heldRef.current = false;
         pushedRef.current = false;
         closeRef.current();
       }
@@ -206,14 +215,14 @@ export function SidewaysCountDial({
               onPick(n);
               dismissRef.current();
             }}
-            className={`flex items-center justify-center rounded-full font-semibold tabular-nums ${
+            className={`flex items-center justify-center rounded-full tabular-nums ${
               compact
                 ? "h-8 min-w-0 flex-1 text-[13px]"
                 : "h-9 w-9 shrink-0 text-sm"
             } ${
               n === current
-                ? "bg-[var(--accent)] text-[var(--on-accent)]"
-                : "text-[var(--text)]"
+                ? "bg-[var(--gold)] font-bold text-black shadow-[0_0_14px_color-mix(in_srgb,var(--accent)_45%,transparent)]"
+                : "border border-[var(--border)] bg-[var(--surface)] font-semibold text-[var(--text)]"
             }`}
           >
             {n}
@@ -223,7 +232,7 @@ export function SidewaysCountDial({
           type="button"
           onClick={() => dismissRef.current()}
           aria-label="Close the count dial"
-          className={`flex items-center justify-center rounded-full leading-none text-[var(--dim)] ${
+          className={`flex items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] leading-none text-[var(--dim)] ${
             compact
               ? "h-8 min-w-0 flex-1 text-sm"
               : "h-9 w-9 shrink-0 text-base"
@@ -246,7 +255,7 @@ export function SidewaysCountDial({
           ? createPortal(
               <div
                 ref={panelRef}
-                className="fixed z-[80] rounded-[26px] border border-[var(--border)] bg-[var(--surface)] p-2 shadow-[0_18px_44px_rgba(0,0,0,0.6)]"
+                className="count-dial-panel fixed z-[80] rounded-[26px] p-2"
                 style={{
                   bottom: pos.bottom,
                   left: pos.left,
@@ -263,7 +272,7 @@ export function SidewaysCountDial({
   }
 
   return (
-    <div ref={panelRef} className="mb-2.5">
+    <div ref={panelRef} className="count-dial-panel mb-2.5 rounded-[26px] p-2">
       {row(false)}
     </div>
   );

@@ -365,6 +365,62 @@
       "when": 1793776548574,
       "tag": "0052_add_grid_cols_preference",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1793810494295,
+      "tag": "0053_add_language_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1793812237677,
+      "tag": "0054_marketplace_allow_offers_and_settlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1793813839251,
+      "tag": "0055_add_watchlist_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1793816619234,
+      "tag": "0056_verified_badges_and_invite_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1793816619234,
+      "tag": "0057_forums_and_accessory_listings",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1793818548450,
+      "tag": "0058_lego_sealed_qty_watchlist_and_alerts_game_comic_targets_library_comic_display",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1793824292574,
+      "tag": "0059_add_ticket_photo_blob_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1793824292574,
+      "tag": "0060_add_mail_messages_table",
+      "breakpoints": true
     }
   ]
 }

@@ -139,7 +139,8 @@ function BarStepperButton({
     >
       <span
         aria-hidden="true"
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-lg leading-none text-[var(--text)]"
+        data-dir={glyph === "+" ? "plus" : "minus"}
+        className="stepper-ring flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none"
       >
         {glyph}
       </span>
@@ -355,7 +356,11 @@ export function OwnedLocationBar({
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--dim)]">
               Copies owned
             </span>
-            <span className="block text-sm font-medium leading-snug text-[var(--text)]">
+            <span
+              className={`block text-sm font-medium leading-snug text-[var(--text)] ${
+                copiesQty === 0 ? "zero-owned" : ""
+              }`}
+            >
               {copiesQty} {copiesQty === 1 ? "copy" : "copies"}
             </span>
           </span>
@@ -367,7 +372,11 @@ export function OwnedLocationBar({
                 onClick={onCopiesMinus}
                 glyph="−"
               />
-              <span className="min-w-6 text-center text-base font-semibold leading-none tabular-nums text-[var(--text)]">
+              <span
+                className={`min-w-6 text-center text-base font-semibold leading-none tabular-nums text-[var(--text)] ${
+                  copiesQty === 0 ? "zero-owned" : ""
+                }`}
+              >
                 {copiesQty}
               </span>
               <BarStepperButton

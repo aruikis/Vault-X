@@ -93,10 +93,43 @@ export function readStoredTheme(): ThemeId {
   return DEFAULT_THEME;
 }
 
+/** The document theme-color (the color the shell/browser paints
+    around the app, including the band behind the header):
+    always the active theme's own background, on every page, so
+    switching tabs or themes never flips the color at the top
+    (Anthony, Nov 4, 2026 — he pinpointed the flip himself). */
+/** Each theme's --bg exactly as theme.css paints it (the
+    picker's preview swatch for Rainbow reads a touch darker
+    than its painted background, so the frame color uses this
+    table, not the swatches). */
+const THEME_BG: Record<ThemeId, string> = {
+  vault: "#060913",
+  light: "#edf0f8",
+  midnight: "#0b0516",
+  crimson: "#090505",
+  contrast: "#000000",
+  rainbow: "#0b0f1e",
+};
+
+export function syncThemeColorMeta(theme: ThemeId): void {
+  const bg = THEME_BG[theme];
+  if (!bg) return;
+  let meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "theme-color";
+    document.head.appendChild(meta);
+  }
+  meta.content = bg;
+}
+
 /** Apply a theme right now: flip the data-theme attribute the CSS
     variables key off, and mirror the choice on this device. */
 export function applyTheme(theme: ThemeId): void {
   document.documentElement.dataset.theme = theme;
+  syncThemeColorMeta(theme);
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {

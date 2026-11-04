@@ -34,13 +34,18 @@ useQueryClient,
 import { api, type ApiResponse } from "./api";
 import { useCachedArt } from "./artCache";
 import { hapticConfirm, hapticTick } from "./haptics";
+import {
+  pushWindowState,
+  readNavState,
+  scrubWindowKeys,
+} from "./historyNav";
 import { VxSelect } from "./vxSelect";
 
 type PriceAlert = ApiResponse<typeof api, "getPriceAlerts">["alerts"][number];
 
 export type PriceAlertTargetKind = "card" | "sealed" | "comic";
 
-function fmtUSD(n: number, digits = 2): string {
+export function fmtUSD(n: number, digits = 2): string {
   return `$${n.toLocaleString("en-US", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -68,45 +73,44 @@ function historyStateHasAlertsPage(): boolean {
   }
 }
 
-/** The management page's history layer: open pushes one merged
-    entry, close steps back through history (consuming the entry
-    exactly once), and a device/browser Back that lands on an
-    entry without the key closes only this page. Seeded from the
-    surviving entry so a refresh reopens the page in place. */
+/** The management page's history layer (three-back rule,
+    Anthony, Nov 4, 2026): open takes the window's one entry
+    (layers when a window already holds the slot), close steps
+    back through history when this open did the push (consuming
+    the entry exactly once), and a device/browser Back that
+    lands on an entry without the key closes only this page.
+    Seeded from the surviving entry so a refresh reopens the
+    page in place. */
 function usePriceAlertsPage() {
   const [open, setOpen] = useState<boolean>(() =>
     historyStateHasAlertsPage(),
   );
   const pushedRef = useRef(historyStateHasAlertsPage());
+  const heldRef = useRef(pushedRef.current);
   const openPage = () => {
     if (open) return;
     hapticTick();
     setOpen(true);
-    try {
-      if (pushedRef.current) return;
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
-      window.history.pushState(
-        { ...(cur ?? {}), [HISTORY_KEY]: true },
-        "",
-      );
-      pushedRef.current = true;
-    } catch {
-      pushedRef.current = false;
-    }
+    if (heldRef.current) return;
+    pushedRef.current = pushWindowState(
+      { ...(readNavState() ?? {}), [HISTORY_KEY]: true },
+      HISTORY_KEY,
+    );
+    heldRef.current = true;
   };
   const closePage = () => {
     if (pushedRef.current) {
       window.history.back();
     } else {
+      heldRef.current = false;
+      scrubWindowKeys([HISTORY_KEY]);
       setOpen(false);
     }
   };
   useEffect(() => {
     const onPopState = () => {
-      if (pushedRef.current && !historyStateHasAlertsPage()) {
+      if (heldRef.current && !historyStateHasAlertsPage()) {
+        heldRef.current = false;
         pushedRef.current = false;
         setOpen(false);
       }
@@ -179,6 +183,20 @@ function AlertThumb({
     ) : (
       <span className="flex h-14 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] px-0.5 text-center text-[8px] font-semibold uppercase tracking-wide text-[var(--dim)]">
         Comic
+      </span>
+    );
+  }
+  if (alert.targetKind === "game") {
+    return alert.imageUrl ? (
+      <img
+        src={alert.imageUrl}
+        alt=""
+        loading="lazy"
+        className="h-14 w-10 shrink-0 rounded-md object-cover"
+      />
+    ) : (
+      <span className="flex h-14 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] px-0.5 text-center text-[8px] font-semibold uppercase tracking-wide text-[var(--dim)]">
+        Item
       </span>
     );
   }
@@ -489,6 +507,81 @@ function PriceAlertsPage({
         )}
       </div>
     </div>
+  );
+}
+
+/** The alerts list itself — every alert with Edit/Delete in
+    place, triggered first — shared by the management page above
+    and Portfolio's Alerts area (Nov 4, 2026: Portfolio is the
+    unified management home; both surfaces read and write the
+    same getPriceAlerts data). Includes its own loading, error,
+    and honest empty states. */
+export function PriceAlertsList({
+  sealedPhotoFor,
+  comicCoverFor,
+}: {
+  sealedPhotoFor?: (name: string) => string | undefined;
+  comicCoverFor?: (id: string) => string | undefined;
+}) {
+  const alerts = useQuery({
+    queryKey: ["priceAlerts"],
+    queryFn: () => api.getPriceAlerts({}),
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+  });
+  const all = alerts.data?.alerts ?? [];
+  const sorted = [...all].sort((a, b) => {
+    if (a.triggered !== b.triggered) return a.triggered ? -1 : 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+  if (alerts.isPending) {
+    return (
+      <p className="py-8 text-center text-sm text-[var(--dim)]">
+        Loading your alerts…
+      </p>
+    );
+  }
+  if (alerts.isError) {
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
+        <p className="text-sm text-red-400">
+          Your alerts couldn&rsquo;t load.
+        </p>
+        <button
+          type="button"
+          onClick={() => void alerts.refetch()}
+          className="mt-3 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-bold text-black"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (all.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center">
+        <p className="text-sm font-medium text-[var(--text)]">
+          No price alerts yet
+        </p>
+        <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--dim)]">
+          Open any card, sealed product, or comic and set an alert
+          from the Price alerts box on its page — every alert you
+          set will be listed here.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {sorted.map((a) => (
+        <AlertRow
+          key={a.id}
+          alert={a}
+          sealedPhotoFor={sealedPhotoFor}
+          comicCoverFor={comicCoverFor}
+        />
+      ))}
+    </ul>
   );
 }
 

@@ -33,7 +33,7 @@ z,
 type ActionsModule,
 type Ctx,
 } from "@hatch/space-sdk";
-import { and, asc, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "./schema";
 import { catalog } from "./data/catalog";
@@ -46,9 +46,9 @@ import { sealedHistory } from "./data/sealedHistory";
 import { catalogPrices, PRICE_SNAPSHOT_DATE } from "./data/catalogPrices";
 import { promoPrices } from "./data/promoPrices";
 import {
-  ebaySoldPrices,
-  EBAY_SOLD_WINDOW_END,
-  EBAY_SOLD_WINDOW_LABEL,
+ebaySoldPrices,
+EBAY_SOLD_WINDOW_END,
+EBAY_SOLD_WINDOW_LABEL,
 } from "./data/ebaySoldPrices";
 import {
 VILLAGE_AGGRO_DECK_NAME,
@@ -130,7 +130,7 @@ const PAGE_SIZE = 12; // 4 across x 3 down, like his Vault X binder pages
     nobody keeps stale art. Sealed / comic / set-logo artwork is
     bundled with the app build itself (content-hashed files), so
     an app update already replaces those bytes directly. */
-const ARTWORK_VERSION = "art-v2";
+const ARTWORK_VERSION = "art-v3";
 
 /** Sealed items with Anthony's quantity overrides applied (the
     sealed_qty table; adjusted via the plus/minus controls on the
@@ -273,10 +273,11 @@ const cardLite = z.object({
   /** Pocket display label, e.g. "Regular", "Cold Foil", "Promo Foil". */
   pocketLabel: z.string(),
   /** Assembled-from-pieces artwork for a Full Puzzle Art
-      entry that has no published assembled image: the piece
-      cards' ids in reading order and the grid columns (2 or
-      3), so the client can join the set's own piece scans
-      into the completed artwork. Null everywhere else. */
+      entry: the piece cards' ids in reading order and the
+      grid columns (2 or 3), so the client can join the set's
+      own piece scans into the completed artwork — the main
+      rendering where no assembled photo exists, and the
+      fallback wherever a photo does. Null everywhere else. */
   composite: z
     .object({ cols: z.number(), pieceIds: z.array(z.number()) })
     .nullable(),
@@ -389,9 +390,13 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
 /** Full Puzzle Art assembly (Anthony, Nov 4, 2026): a set's
     Full entry whose assembled photo exists in a legitimate
     source keeps that photo. Where NO assembled image exists
-    anywhere (Hyperia City — its "Set of 9" product has no
-    image on TCGplayer's CDN) the entry is assembled from
-    the set's own piece scans, joined in reading order.
+    anywhere the entry is assembled from the set's own piece
+    scans, joined in reading order. (Hyperia City originally
+    sat in this fallback because its "Set of 9" product was
+    believed imageless; that was wrong — product 723665 does
+    carry the assembled photo — so Hyperia now uses the photo
+    like every other set, and the composite remains only as
+    the render fallback if a photo fetch ever fails.)
     Only true puzzle sets qualify, and only with a complete
     imaged piece set (9 for a 3x3, 4 for a 2x2): lore-card
     sets are excluded because their pictures live on the
@@ -411,7 +416,14 @@ const FULL_PUZZLE_COMPOSITES = ((): Map<
   }
   for (const [setCode, entries] of bySet) {
     const full = entries.find((e) => e.uid === `puzzle:${setCode}:full`);
-    if (!full || full.image) continue;
+    if (!full) continue;
+    // The composite is computed even when the Full entry HAS a
+    // photo: it is the render fallback for the day the photo
+    // fetch fails, so the entry can never sit on a name plate
+    // while its own pieces carry the artwork (Nov 4, 2026 —
+    // this fallback went missing for Hyperia the moment its
+    // genuine Set of 9 photo was attached, because the spec
+    // used to skip imaged entries entirely).
     const pieces = entries
       .filter((e) => e.type === "Puzzle" && e.image != null)
       .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
@@ -426,7 +438,11 @@ function compositeForRow(
   row: typeof schema.cards.$inferSelect,
   siblings: (typeof schema.cards.$inferSelect)[],
 ): { cols: number; pieceIds: number[] } | null {
-  if (row.imageUrl != null) return null;
+  // Sent alongside the photo when both exist: the client
+  // prefers the entry's own art and falls back to this
+  // assembled-from-pieces rendering when the art is missing
+  // or fails to load, so a Full Puzzle Art entry never sits
+  // on "Loading art" while its pieces are imaged.
   const spec = FULL_PUZZLE_COMPOSITES.get(row.uid);
   if (!spec) return null;
   const idByUid = new Map(siblings.map((r) => [r.uid, r.id]));
@@ -1255,6 +1271,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     bannerBlobKey: null as string | null,
     bio: null as string | null,
     theme: null as string | null,
+    language: null as string | null,
     gridCols: null as number | null,
     tradeMode: null as string | null,
     tradeAvailability: null as string | null,
@@ -1274,6 +1291,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     registeredAt: null as string | null,
     hiddenCollections: null as string | null,
     collectionOrder: null as string | null,
+    libraryComicDisplay: null as string | null,
     usernameChangeUsed: 0,
     updatedAt: new Date().toISOString(),
   };
@@ -1304,6 +1322,9 @@ const collectorIdResponse = z.object({
   /** The theme picked in Settings, or null when never picked (the
       default Vault Dark applies). */
   theme: z.string().nullable(),
+  /** The UI language picked in Settings ("en" | "es" | "de" |
+      "fr" | "ja"), or null when never picked (English applies). */
+  language: z.string().nullable(),
   /** Whether the one-time TEST of the Home "Update available"
       indicator has already been tapped away. */
   updateTestSeen: z.boolean(),
@@ -1316,6 +1337,12 @@ const collectorIdResponse = z.object({
   /** Set-page grid density (2 or 4 across), or null when never
       picked (the default of 2 applies). */
   gridCols: z.number().nullable(),
+  /** This user's own Vault X invite code (Anthony, Nov 4,
+      2026 — invite lineage): carried by the Share Vault X
+      invite they send; a newcomer's registration resolves it
+      back to this collector server-side. Distinct from the
+      Collector ID. */
+  inviteCode: z.string(),
 });
 
 /** Central collector registry — the Vault X Supabase project
@@ -1606,6 +1633,7 @@ function adminMetricLabel(
     "deals.tradesTotal": "Trades",
     "deals.cashPurchases": "Cash purchases",
     "deals.listingsActive": "Marketplace listings",
+    "marketplace.pendingPhotos": "Photos waiting for approval",
     "tickets.status": "Change tickets",
     "system.storedRows": "Stored rows (all collectors)",
     "own.items": "Your items",
@@ -2366,7 +2394,7 @@ async function buildSettlementPlan(
     a later trigger replays the same plan. */
 async function applySettlementPlan(
   ctx: Ctx,
-  kind: "trade" | "cash",
+  kind: "trade" | "cash" | "marketplace",
   dealId: number,
   plan: SettlementPlan,
 ): Promise<boolean> {
@@ -2394,10 +2422,15 @@ async function applySettlementPlan(
           .update(schema.tradeOffers)
           .set({ settledAt: now, updatedAt: now })
           .where(eq(schema.tradeOffers.id, dealId))
-      : db
-          .update(schema.cashPurchases)
-          .set({ settledAt: now, updatedAt: now })
-          .where(eq(schema.cashPurchases.id, dealId));
+      : kind === "cash"
+        ? db
+            .update(schema.cashPurchases)
+            .set({ settledAt: now, updatedAt: now })
+            .where(eq(schema.cashPurchases.id, dealId))
+        : db
+            .update(schema.marketplaceOffers)
+            .set({ settledAt: now, updatedAt: now })
+            .where(eq(schema.marketplaceOffers.id, dealId));
   const stmts: unknown[] = [...cardUpdates, stamp];
   await db.batch(
     stmts as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
@@ -2474,6 +2507,20 @@ async function settleTradeIfReady(
         .where(eq(schema.tradeOffers.id, trade.id));
     }
     await applySettlementPlan(ctx, "trade", trade.id, plan);
+    // Verified badge (Anthony, Nov 4, 2026): a trade that
+    // BOTH sides confirmed and BOTH sides rated is the one
+    // moment the badge can change hands — conferred here,
+    // server-side only, when the counterparty was already
+    // verified (see maybeConferVerifiedBadges).
+    if (bothRated && trade.completedAt) {
+      await maybeConferVerifiedBadges(ctx, {
+        kind: "trade",
+        refId: trade.id,
+        aCode: trade.proposerCode,
+        bCode: trade.partnerCode,
+        completedAt: trade.completedAt,
+      });
+    }
   } catch {
     // Settlement retries on the next trigger; a hiccup here
     // must never break the read or feedback that called it.
@@ -2538,9 +2585,533 @@ async function settleCashIfReady(
         .where(eq(schema.cashPurchases.id, purchase.id));
     }
     await applySettlementPlan(ctx, "cash", purchase.id, plan);
+    // Verified badge: same rule as trades — both sides
+    // confirmed and both rated, counterparty already
+    // verified (see maybeConferVerifiedBadges).
+    if (bothRated && purchase.completedAt) {
+      await maybeConferVerifiedBadges(ctx, {
+        kind: "cash",
+        refId: purchase.id,
+        aCode: purchase.buyerCode,
+        bCode: purchase.sellerCode,
+        completedAt: purchase.completedAt,
+      });
+    }
   } catch {
     // Same retry-on-next-trigger rule as trades.
   }
+}
+
+/** The Marketplace twin of settleCashIfReady (Anthony's
+    approved Marketplace design, Nov 4, 2026): when a
+    marketplace deal is FULLY complete — both sides confirmed
+    AND both sides' feedback in, or the 7-day neutral close —
+    the bought copies settle seller -> buyer automatically,
+    through the same plan machinery trades and cash purchases
+    use. Card listings only: the settlement system moves
+    binder printings; sealed and comic listings carry no
+    binder card row to move (their deals complete and feed
+    Trust exactly as before). */
+async function settleMarketplaceIfReady(
+  ctx: Ctx,
+  offer: typeof schema.marketplaceOffers.$inferSelect,
+  listing: typeof schema.marketplaceListings.$inferSelect,
+): Promise<void> {
+  try {
+    if (
+      offer.status !== "accepted" ||
+      !offer.completedAt ||
+      offer.settledAt
+    )
+      return;
+    if (listing.kind !== "card" || listing.cardId == null) {
+      // Non-card listings never move binder inventory (sealed
+      // and comics settle outside this path; accessory
+      // listings are free-standing by design — Anthony,
+      // Nov 4, 2026). A both-sides-confirmed, both-rated
+      // completion still counts for the verified-badge chain,
+      // exactly like a card deal.
+      const db0 = ctx.db<typeof schema>();
+      const fbs0 = await db0
+        .select()
+        .from(schema.marketplaceFeedback)
+        .where(eq(schema.marketplaceFeedback.offerId, offer.id));
+      const bothRated0 =
+        fbs0.some((f) => f.fromCode === offer.buyerCode) &&
+        fbs0.some((f) => f.fromCode === listing.sellerCode);
+      if (bothRated0 && offer.completedAt) {
+        await maybeConferVerifiedBadges(ctx, {
+          kind: "marketplace",
+          refId: offer.id,
+          aCode: offer.buyerCode,
+          bCode: listing.sellerCode,
+          completedAt: offer.completedAt,
+        });
+      }
+      return;
+    }
+    const profile = await ensureCollectorProfile(ctx);
+    const me = profile.collectorCode;
+    if (offer.buyerCode !== me && listing.sellerCode !== me) return;
+    const db = ctx.db<typeof schema>();
+    const fbs = await db
+      .select()
+      .from(schema.marketplaceFeedback)
+      .where(eq(schema.marketplaceFeedback.offerId, offer.id));
+    const bothRated =
+      fbs.some((f) => f.fromCode === offer.buyerCode) &&
+      fbs.some((f) => f.fromCode === listing.sellerCode);
+    const neutralClosed =
+      Date.now() - Date.parse(offer.completedAt) > FEEDBACK_WINDOW_MS;
+    if (!bothRated && !neutralClosed) return;
+    let plan: SettlementPlan | null = null;
+    if (offer.settlementJson) {
+      try {
+        plan = JSON.parse(offer.settlementJson) as SettlementPlan;
+      } catch {
+        plan = null;
+      }
+    }
+    if (!plan) {
+      const line: SettlementItem[] = [
+        {
+          cardId: listing.cardId,
+          finish: listing.finish,
+          qty: listing.qty,
+        },
+      ];
+      const iAmBuyer = offer.buyerCode === me;
+      plan = await buildSettlementPlan(ctx, {
+        source: `Marketplace sale #${offer.id}`,
+        myGive: iAmBuyer ? [] : line,
+        myGet: iAmBuyer ? line : [],
+        otherCode: iAmBuyer ? listing.sellerCode : offer.buyerCode,
+        theirGive: iAmBuyer ? line : [],
+        theirGet: iAmBuyer ? [] : line,
+      });
+      if (!plan) return;
+      await db
+        .update(schema.marketplaceOffers)
+        .set({
+          settlementJson: JSON.stringify(plan),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.marketplaceOffers.id, offer.id));
+    }
+    await applySettlementPlan(ctx, "marketplace", offer.id, plan);
+    // Verified badge: same rule as trades — both sides
+    // confirmed and both rated, counterparty already
+    // verified (see maybeConferVerifiedBadges).
+    if (bothRated && offer.completedAt) {
+      await maybeConferVerifiedBadges(ctx, {
+        kind: "marketplace",
+        refId: offer.id,
+        aCode: offer.buyerCode,
+        bCode: listing.sellerCode,
+        completedAt: offer.completedAt,
+      });
+    }
+  } catch {
+    // Same retry-on-next-trigger rule as trades and cash.
+  }
+}
+
+/* ------------------------------------------------------------------
+   Verified badge (Anthony, Nov 4, 2026 — his design; spec at
+   research_notes/verified-badge-spec-20261104/spec.md).
+
+   The badge means exactly one thing: identity confirmed on
+   the Vault X network. It is NEVER "safe to pay" — the
+   in-person QR handshake at deal completion stays the safety
+   step. It is earned ONLY two ways:
+   (a) a completed trade/cash/marketplace deal where BOTH
+       sides confirmed AND both sides left feedback, and the
+       OTHER side was already verified at that time — the
+       chain flows downhill from the owner as root, so two
+       fresh sockpuppet accounts trading with each other earn
+       nothing, and a given pair of accounts can confer only
+       once, ever;
+   (b) the owner's own manual grant from Admin (proof
+       honestly reads "Verified by the owner").
+   An invite NEVER confers it: vouched_by lineage is an
+   Admin-only audit trail and is not read anywhere in this
+   module. Revocation (owner, on a substantiated report) is
+   recorded, stays visible, and a revoked badge does not
+   silently re-earn itself through new trades — restoration
+   is the owner's grant. Forum roles (when Forums launches)
+   read this same ledger server-side: holding any forum role
+   requires status "verified", and a revocation suspends the
+   role with the badge.
+   ------------------------------------------------------------------ */
+
+const VERIFIED_ROOT_CODE = OWNER_COLLECTOR_CODE;
+const VERIFIED_ROOT_USERNAME = "ARuikis";
+/** A trade-earned granter must have real standing: their own
+    registry account at least this old at conferral time.
+    Root, built-in, and owner-granted badges carry standing
+    by construction. */
+const VERIFIED_STANDING_MS = 7 * 24 * 60 * 60 * 1000;
+
+type BadgeRow = typeof schema.verifiedBadges.$inferSelect;
+
+/** Seed the two launch-verified accounts exactly once
+    (Anthony's direct instruction): the owner as root of the
+    chain and Jarvis as the built-in friend. Insert-if-absent
+    only — a later revocation or owner edit is never
+    overwritten by this seed. */
+async function ensureVerifiedRoots(ctx: Ctx): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const now = new Date().toISOString();
+  const roots: {
+    code: string;
+    username: string;
+    basis: "root" | "builtin";
+    label: string;
+  }[] = [
+    {
+      code: VERIFIED_ROOT_CODE,
+      username: VERIFIED_ROOT_USERNAME,
+      basis: "root",
+      label: "Owner of Vault X — root of the verification chain",
+    },
+    {
+      code: JARVIS_REGISTRY_PROFILE.collector_id,
+      username: JARVIS_REGISTRY_PROFILE.username,
+      basis: "builtin",
+      label: "Built-in friend account, verified at launch",
+    },
+  ];
+  for (const root of roots) {
+    const existing = await db
+      .select({ code: schema.verifiedBadges.collectorCode })
+      .from(schema.verifiedBadges)
+      .where(eq(schema.verifiedBadges.collectorCode, root.code))
+      .limit(1);
+    if (existing.length === 0) {
+      await db.insert(schema.verifiedBadges).values({
+        collectorCode: root.code,
+        username: root.username,
+        status: "verified",
+        basis: root.basis,
+        proofJson: JSON.stringify({ label: root.label }),
+        grantedAt: now,
+        revokedAt: null,
+        revokedBy: null,
+        updatedAt: now,
+      });
+    }
+  }
+}
+
+async function badgeRowFor(
+  ctx: Ctx,
+  code: string,
+): Promise<BadgeRow | null> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.verifiedBadges)
+    .where(eq(schema.verifiedBadges.collectorCode, code))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Registry join instant for one collector, or null when the
+    registry can't tell us (unreachable / not registered). */
+async function registryJoinedAt(
+  code: string,
+): Promise<string | null> {
+  const list = await supabaseRest(
+    "profiles?select=collector_id,username,trust_score,created_at&order=created_at.asc",
+  );
+  if (!list.ok) return null;
+  const row = asRegistryRows(list.json).find(
+    (r) => r.collector_id === code,
+  );
+  return row?.created_at ?? null;
+}
+
+/** Confer the badge on both directions of one fully completed
+    deal, where earned. Called ONLY from the settlement paths
+    once both sides' feedback is in (never on the 7-day
+    neutral close: an unrated side resolved nothing). Every
+    failure is swallowed — badge bookkeeping must never break
+    a settlement that already landed. */
+async function maybeConferVerifiedBadges(
+  ctx: Ctx,
+  deal: {
+    kind: "trade" | "cash" | "marketplace";
+    refId: number;
+    aCode: string;
+    bCode: string;
+    completedAt: string;
+  },
+): Promise<void> {
+  try {
+    await ensureVerifiedRoots(ctx);
+    const db = ctx.db<typeof schema>();
+    const directions: { earner: string; granter: string }[] = [
+      { earner: deal.aCode, granter: deal.bCode },
+      { earner: deal.bCode, granter: deal.aCode },
+    ];
+    for (const { earner, granter } of directions) {
+      if (earner === granter) continue;
+      const granterRow = await badgeRowFor(ctx, granter);
+      if (!granterRow || granterRow.status !== "verified") continue;
+      // An earner who already holds (or once held and lost)
+      // the badge is not re-conferred by a trade: a first
+      // grant happens once, and a revoked badge is restored
+      // only by the owner's own grant.
+      const earnerRow = await badgeRowFor(ctx, earner);
+      if (earnerRow) continue;
+      // The pair rule: this pair can confer only once, ever.
+      const prior = await db
+        .select({ id: schema.badgeConferrals.id })
+        .from(schema.badgeConferrals)
+        .where(
+          and(
+            eq(schema.badgeConferrals.earnerCode, earner),
+            eq(schema.badgeConferrals.granterCode, granter),
+          ),
+        )
+        .limit(1);
+      if (prior.length > 0) continue;
+      // Standing: a trade-earned granter must not be a fresh
+      // account — their registry account must be at least a
+      // week old at conferral. Root / built-in / owner
+      // grants carry standing by construction.
+      if (granterRow.basis === "trade") {
+        const joined = await registryJoinedAt(granter);
+        if (
+          !joined ||
+          Date.parse(deal.completedAt) - Date.parse(joined) <
+            VERIFIED_STANDING_MS
+        )
+          continue;
+      }
+      // Proof names the counterparty honestly: registry
+      // username when the registry knows it, the badge
+      // ledger's own record otherwise.
+      const granterName =
+        (await registryUsername(granter)) ?? granterRow.username;
+      const earnerName =
+        (await registryUsername(earner)) ?? earner;
+      const now = new Date().toISOString();
+      await db.insert(schema.badgeConferrals).values({
+        earnerCode: earner,
+        granterCode: granter,
+        kind: deal.kind,
+        refId: deal.refId,
+        createdAt: now,
+      });
+      await db.insert(schema.verifiedBadges).values({
+        collectorCode: earner,
+        username: earnerName,
+        status: "verified",
+        basis: "trade",
+        proofJson: JSON.stringify({
+          kind: deal.kind,
+          refId: deal.refId,
+          withCode: granter,
+          withUsername: granterName,
+          completedAt: deal.completedAt,
+        }),
+        grantedAt: now,
+        revokedAt: null,
+        revokedBy: null,
+        updatedAt: now,
+      });
+    }
+  } catch {
+    // Best-effort by design (see the module note above).
+  }
+}
+
+async function registryUsername(
+  code: string,
+): Promise<string | null> {
+  const list = await supabaseRest(
+    "profiles?select=collector_id,username,trust_score,created_at&order=created_at.asc",
+  );
+  if (!list.ok) return null;
+  const row = asRegistryRows(list.json).find(
+    (r) => r.collector_id === code,
+  );
+  return row?.username ?? null;
+}
+
+/* ------------------------------------------------------------------
+   Invite lineage (Anthony, Nov 4, 2026): every user's Share
+   Vault X invite carries their OWN invite code — a value
+   derived deterministically from their Collector ID, so it
+   is distinct from the Collector ID in form and value, is
+   the same on every device, and can be resolved back to the
+   inviting collector by any Vault X server against the
+   registry roster. A newcomer never types a NAME in — the
+   code from the invite is what gets presented, so
+   attribution can't be faked or used to frame someone.
+   The record is OWNER-ONLY audit data (Admin), kept for
+   abuse tracing; it never grants, implies, or feeds the
+   verified badge above.
+   ------------------------------------------------------------------ */
+
+const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/** The invite code for one collector: "VX-" + 6 characters
+    derived from their Collector ID (FNV-1a over the code, so
+    it is stable forever and resolvable roster-wide). */
+function inviteCodeForCollector(collectorCode: string): string {
+  let hash = 0x811c9dc5;
+  const seed = `vaultx-invite:${collectorCode}`;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  let out = "";
+  let h = hash >>> 0;
+  for (let i = 0; i < 6; i++) {
+    out += INVITE_ALPHABET.charAt(h % INVITE_ALPHABET.length);
+    // Keep h unsigned every round: a signed h makes the modulo
+    // negative and the lookup undefined (the VX-…undefined bug).
+    h = ((Math.imul(h ^ (h >>> 13), 0x01000193) >>> 0) ^ (i + 1)) >>> 0;
+  }
+  return `VX-${out}`;
+}
+
+/** Resolve a presented invite code against the live registry
+    roster: returns the inviting collector, or null when the
+    code matches nobody (recorded honestly as no voucher on
+    file — registration is never blocked by it). */
+async function resolveInviteCode(
+  presented: string,
+): Promise<{ collectorId: string; username: string } | null> {
+  const clean = presented.trim().toUpperCase().replace(/\s+/g, "");
+  if (!/^VX-[A-Z0-9]{6}$/.test(clean)) return null;
+  const list = await supabaseRest(
+    "profiles?select=collector_id,username,trust_score,created_at&order=created_at.asc",
+  );
+  if (!list.ok) return null;
+  const rows = asRegistryRows(list.json);
+  const hit = rows.find(
+    (r) => inviteCodeForCollector(r.collector_id) === clean,
+  );
+  return hit
+    ? { collectorId: hit.collector_id, username: hit.username }
+    : null;
+}
+
+/** ---- Forums (Anthony, Nov 4, 2026 — Direction A, LIVE) ----
+    Roles are forum-scoped and hang off the verified-badge
+    ledger by Anthony's hard rule: NO forum role without a
+    currently verified badge. The owner's Owner role is
+    inherent. A granted role is EFFECTIVE only while its row
+    is unsuspended AND the holder's badge is verified; a
+    badge revocation suspends the row (see
+    revokeVerifiedBadge), and only an owner re-grant clears
+    the suspension. Invite lineage plays NO part here (the
+    guardrail: vouched-by never feeds verification or
+    roles). */
+type ForumRole = "owner" | "admin" | "moderator";
+
+async function forumRoleFor(
+  ctx: Ctx,
+  code: string,
+): Promise<ForumRole | null> {
+  if (code === OWNER_COLLECTOR_CODE) return "owner";
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.forumRoles)
+    .where(eq(schema.forumRoles.collectorCode, code))
+    .limit(1);
+  const row = rows[0];
+  if (!row || row.suspended === 1) return null;
+  const badge = await badgeRowFor(ctx, code);
+  if (!badge || badge.status !== "verified") return null;
+  return row.role === "admin" ? "admin" : "moderator";
+}
+
+/** Confirmed trades behind an author's forum trust strip:
+    deals in THIS app's ledgers where the collector was a
+    party and both sides confirmed completion. */
+async function forumConfirmedTrades(ctx: Ctx, code: string): Promise<number> {
+  const db = ctx.db<typeof schema>();
+  const [trades, cash, offers, listings] = await Promise.all([
+    db.select().from(schema.tradeOffers),
+    db.select().from(schema.cashPurchases),
+    db.select().from(schema.marketplaceOffers),
+    db.select().from(schema.marketplaceListings),
+  ]);
+  const listingSeller = new Map(listings.map((l) => [l.id, l.sellerCode]));
+  let n = 0;
+  for (const t of trades)
+    if (t.completedAt && (t.proposerCode === code || t.partnerCode === code))
+      n++;
+  for (const c of cash)
+    if (c.completedAt && (c.buyerCode === code || c.sellerCode === code)) n++;
+  for (const o of offers)
+    if (
+      o.completedAt &&
+      (o.buyerCode === code || listingSeller.get(o.listingId) === code)
+    )
+      n++;
+  return n;
+}
+
+const FORUM_CATEGORIES = [
+  "announcements",
+  "general",
+  "showoffs",
+  "decktalk",
+  "grading",
+  "trading",
+  "help",
+] as const;
+
+const forumThreadView = z.object({
+  id: z.number(),
+  category: z.string(),
+  title: z.string(),
+  authorCode: z.string(),
+  authorUsername: z.string(),
+  authorRole: z.enum(["owner", "admin", "moderator"]).nullable(),
+  authorVerified: z.boolean(),
+  pinned: z.boolean(),
+  locked: z.boolean(),
+  replyCount: z.number(),
+  createdAt: z.number(),
+  lastActivityAt: z.number(),
+  lastPostBy: z.string().nullable(),
+  unread: z.boolean(),
+  mine: z.boolean(),
+});
+
+const forumPostView = z.object({
+  id: z.number(),
+  authorCode: z.string(),
+  authorUsername: z.string(),
+  authorRole: z.enum(["owner", "admin", "moderator"]).nullable(),
+  authorVerified: z.boolean(),
+  confirmedTrades: z.number(),
+  body: z.string(),
+  createdAt: z.number(),
+  mine: z.boolean(),
+});
+
+/** Who is posting: Anthony himself, or the built-in test
+    friend when he explicitly drives Jarvis's side (the same
+    labeled test path the deal flows use). */
+async function forumActor(
+  ctx: Ctx,
+  asTestFriend: boolean,
+): Promise<{ code: string; username: string }> {
+  const profile = await ensureCollectorProfile(ctx);
+  if (asTestFriend)
+    return {
+      code: JARVIS_REGISTRY_PROFILE.collector_id,
+      username: JARVIS_REGISTRY_PROFILE.username,
+    };
+  return { code: profile.collectorCode, username: profile.username };
 }
 
 const cloudSyncResponse = z.object({
@@ -2780,7 +3351,7 @@ const marketplaceListing = z.object({
   sellerUsername: z.string(),
   /** Built-in test profiles are labeled, never dressed up. */
   sellerIsTest: z.boolean(),
-  kind: z.enum(["card", "sealed", "comic"]),
+  kind: z.enum(["card", "sealed", "comic", "other"]),
   cardId: z.number().nullable(),
   sealedName: z.string().nullable(),
   comicId: z.string().nullable(),
@@ -2791,9 +3362,26 @@ const marketplaceListing = z.object({
   condition: z.string(),
   qty: z.number(),
   askingPrice: z.number(),
+  /** The seller's per-listing "Allow offers" switch. False =
+      fixed price only: Buy Now is the only way to buy it. */
+  allowOffers: z.boolean(),
   /** Current market value per unit (cards/sealed resolved live;
-      comics carry their logged value). */
+      comics carry their logged value). ALWAYS null on
+      accessory listings — there is no tracked market for
+      accessories, so no comparison is ever shown for them. */
   marketValue: z.number().nullable(),
+  /** Accessory listings only: the seller's description and
+      preset category; null on catalog listings. */
+  description: z.string().nullable(),
+  category: z.string().nullable(),
+  /** The seller's photo URL — resolved ONLY when the photo is
+      approved, or when the viewer is the seller. Null while a
+      photo is pending/rejected (the client renders the
+      "Photo pending approval" placeholder instead). */
+  photoUrl: z.string().nullable(),
+  photoStatus: z
+    .enum(["pending", "approved", "rejected"])
+    .nullable(),
   status: z.enum(["available", "pending", "sold", "removed"]),
   createdAt: z.string(),
   mine: z.boolean(),
@@ -2814,6 +3402,23 @@ const marketplaceBrowseResponse = z.object({
   gate: marketplaceGate,
 });
 
+/** One seller's shop inside the Marketplace (Anthony's
+    approved design, Nov 4, 2026): the seller's live listings
+    plus their verified track record — confirmed sales count
+    only ever counts deals both sides confirmed complete.
+    Trust Score itself is read from the registry client-side,
+    the same source the rest of the Marketplace uses. */
+const marketplaceShopResponse = z.object({
+  sellerCode: z.string(),
+  sellerUsername: z.string(),
+  sellerIsTest: z.boolean(),
+  mine: z.boolean(),
+  confirmedSales: z.number(),
+  listingsLive: z.number(),
+  listings: z.array(marketplaceListing),
+  gate: marketplaceGate,
+});
+
 const marketMutationResponse = z.object({
   ok: z.boolean(),
   error: z.string().nullable(),
@@ -2826,7 +3431,7 @@ const marketplaceOfferView = z.object({
   offerId: z.number(),
   listingId: z.number(),
   itemName: z.string(),
-  kind: z.enum(["card", "sealed", "comic"]),
+  kind: z.enum(["card", "sealed", "comic", "other"]),
   cardId: z.number().nullable(),
   sealedName: z.string().nullable(),
   comicId: z.string().nullable(),
@@ -2850,7 +3455,7 @@ const marketplaceDeal = z.object({
   offerId: z.number(),
   listingId: z.number(),
   itemName: z.string(),
-  kind: z.enum(["card", "sealed", "comic"]),
+  kind: z.enum(["card", "sealed", "comic", "other"]),
   cardId: z.number().nullable(),
   sealedName: z.string().nullable(),
   comicId: z.string().nullable(),
@@ -2876,6 +3481,12 @@ const marketplaceDeal = z.object({
   /** Both ratings are in, or the neutral close ended it. */
   feedbackClosed: z.boolean(),
   createdAt: z.string(),
+  /** Accessory deals: the seller's photo (same visibility
+      rule as listings — approved, or mine as the seller). */
+  photoUrl: z.string().nullable(),
+  photoStatus: z
+    .enum(["pending", "approved", "rejected"])
+    .nullable(),
 });
 
 const marketplaceActivityResponse = z.object({
@@ -3016,7 +3627,7 @@ function toListingView(
     sellerCode: row.sellerCode,
     sellerUsername: row.sellerUsername,
     sellerIsTest: TEST_COLLECTOR_CODES.has(row.sellerCode),
-    kind: row.kind as "card" | "sealed" | "comic",
+    kind: row.kind as "card" | "sealed" | "comic" | "other",
     cardId: row.cardId,
     sealedName: row.sealedName,
     comicId: row.comicId,
@@ -3027,12 +3638,59 @@ function toListingView(
     condition: row.condition,
     qty: row.qty,
     askingPrice: row.askingPrice,
-    marketValue,
+    allowOffers: row.allowOffers === 1,
+    marketValue: row.kind === "other" ? null : marketValue,
+    description: row.description ?? null,
+    category: row.category ?? null,
+    photoUrl: null,
+    photoStatus: (row.photoStatus as
+      | "pending"
+      | "approved"
+      | "rejected"
+      | null) ?? null,
     status: row.status as "available" | "pending" | "sold" | "removed",
     createdAt: row.createdAt,
     mine: row.sellerCode === myCode,
     pendingOffers: pendingByListing.get(row.id) ?? 0,
   };
+}
+
+/** Resolves listing views WITH their photo URLs (accessory
+    listings): a photo resolves only when it is approved, or
+    when the viewer is the seller (their own listings show
+    their photo plus its review state). Everyone else gets
+    photoUrl null and renders the themed placeholder — the
+    listing itself is live from the moment it is posted
+    (Anthony's corrected photo-gate flow, Nov 4, 2026). */
+async function listingViewsWithPhotos(
+  ctx: Ctx,
+  rows: ListingRow[],
+  myCode: string,
+  view: Awaited<ReturnType<typeof listingViewContext>>,
+): Promise<z.infer<typeof marketplaceListing>[]> {
+  return Promise.all(
+    rows.map(async (r) => {
+      const v = toListingView(
+        r,
+        myCode,
+        view.cardById,
+        view.sealedUnitByName,
+        view.pendingByListing,
+      );
+      if (
+        r.kind === "other" &&
+        r.photoBlobKey &&
+        (r.photoStatus === "approved" || r.sellerCode === myCode)
+      ) {
+        try {
+          v.photoUrl = await ctx.blobs.getUrl(r.photoBlobKey);
+        } catch {
+          v.photoUrl = null;
+        }
+      }
+      return v;
+    }),
+  );
 }
 
 async function listingViewContext(ctx: Ctx) {
@@ -3603,6 +4261,7 @@ const COLLECTION_TILE_KEYS = [
   "lego",
   "comics",
   "starwars",
+  "funko",
 ] as const;
 
 function parseHiddenCollections(json: string | null): string[] {
@@ -4147,7 +4806,7 @@ const profileSummaryResponse = z.object({
     USD prices; Star Wars' official API publishes no prices,
     so its rows honestly carry none). */
 
-type GameKey = "pokemon" | "magic" | "starwars";
+type GameKey = "pokemon" | "magic" | "starwars" | "funko" | "lego";
 
 type GameRow = {
   game: string;
@@ -4203,6 +4862,7 @@ type ImportState = {
   page?: number;
   totalPages?: number;
   sectionSorts?: Record<string, number>;
+  sectionCounts?: Record<string, number>;
 };
 
 async function readImportMeta(ctx: Ctx, game: GameKey) {
@@ -4550,6 +5210,321 @@ async function importStarwarsChunk(
   };
 }
 
+
+/* Funko Pop! (Anthony, Nov 4, 2026): the catalog source is
+   the open-source funko-pop-data dataset (MIT) — scraped
+   from Pop Price Guide / HobbyDB, the collector-tracked
+   catalog — one entry per collectible figure, variants
+   (Chase, exclusives) as their own entries with their own
+   handles. Each entry carries a title, a photo link, and a
+   series list: the Pop! line (Pop! Heroes, Pop! Movies,
+   Pop! Animation…) becomes the section, and the remaining
+   series tags (retailer/convention exclusives, Chase) ride
+   as the variant info. Known gaps, stated honestly: the
+   dataset's last update is January 3, 2021, so figures
+   released after that are NOT in it yet, and the source
+   carries no per-line figure numbers and no prices — rows
+   honestly carry neither. The file is one ~7.4 MB JSON
+   array, so a chunk call slices the next entries off the
+   saved cursor; the download resumes exactly where it
+   stopped, like the game catalogs. */
+const FUNKO_SOURCE_URL =
+  "https://raw.githubusercontent.com/kennymkchan/funko-pop-data/master/funko_pop.json";
+
+/** The dataset carries a few HTML-encoded names straight
+    from its scrape ("Black &amp; White"); decode the common
+    entities so figures display exactly as named. */
+function funkoText(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function funkoHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
+
+async function importFunkoChunk(
+  ctx: Ctx,
+  state: ImportState,
+): Promise<{ state: ImportState; setsTotal: number; setsDone: number; complete: boolean }> {
+  // Unlike the paged card-game APIs, this source is ONE
+  // static file, so a call processes everything remaining
+  // from the saved cursor (the fetch + parse happen once
+  // per call either way, and the row inserts batch). The
+  // resumable contract is unchanged: the cursor persists
+  // with the progress, inserts never overwrite, and a call
+  // that dies mid-pass simply resumes on the next one.
+  const CHUNK = 25000;
+  const res = await fetch(FUNKO_SOURCE_URL, {
+    headers: { "user-agent": "VaultX catalog import" },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error("funko source unreachable");
+  const data = asArr((await res.json()) as unknown);
+  const total = data.length;
+  const totalChunks = Math.max(1, Math.ceil(total / CHUNK));
+  state.totalPages = totalChunks;
+  state.sectionSorts = state.sectionSorts ?? {};
+  state.sectionCounts = state.sectionCounts ?? {};
+  const start = state.cursor ?? 0;
+  const slice = data.slice(start, start + CHUNK);
+  const rows: GameRow[] = [];
+  for (const eRaw of slice) {
+    const e = asRec(eRaw);
+    const rawTitle = asStr(e.title);
+    const handle = asStr(e.handle);
+    if (!rawTitle || !handle) continue;
+    const title = funkoText(rawTitle);
+    const series = asArr(e.series)
+      .map((s) => (typeof s === "string" ? funkoText(s) : ""))
+      .filter((s) => s.length > 0);
+    // The section is the figure's Pop! line. Entries whose
+    // series list carries no Pop! line at all (only an
+    // exclusive/franchise tag) land in the one honest
+    // "Funko Pop!" bucket — never in a section named after
+    // a retailer tag — and every tag still rides on the
+    // row as variant info below.
+    const line =
+      series.find((s) => s.startsWith("Pop!")) ?? "Funko Pop!";
+    if (state.sectionSorts[line] == null) {
+      state.sectionSorts[line] = Object.keys(state.sectionSorts).length;
+    }
+    const slot = state.sectionCounts[line] ?? 0;
+    state.sectionCounts[line] = slot + 1;
+    const extras = series.filter((s) => s !== line);
+    const image = asStr(e.imageName) ?? asStr(e.image);
+    rows.push({
+      game: "funko",
+      uid: `funko:${handle}:${funkoHash(`${title}|${series.join(",")}|${image ?? ""}`)}`,
+      sectionKey: line,
+      sectionName: line,
+      sectionSort: state.sectionSorts[line] ?? 0,
+      slotSort: slot,
+      number: null,
+      printed: "",
+      name: title,
+      rarity: null,
+      finish: extras.length > 0 ? extras.join(", ").slice(0, 160) : null,
+      imageUrl: image,
+      price: null,
+    });
+  }
+  await insertGameRows(ctx, rows);
+  const end = start + slice.length;
+  state.cursor = end;
+  const chunksDone = Math.min(totalChunks, Math.ceil(end / CHUNK));
+  return {
+    state,
+    setsTotal: totalChunks,
+    setsDone: chunksDone,
+    complete: end >= total,
+  };
+}
+
+/** Lego (Anthony, Nov 4, 2026, ~12:10 PM): the FULL Lego
+    catalog, imported the same resumable way as the game
+    catalogs. Source: Rebrickable's official bulk downloads
+    (sets.csv.gz + themes.csv.gz — the standard open Lego
+    catalog data, mirrored by BrickLink tooling). One row per
+    set: set number, name, theme, year, piece count, and the
+    set image Rebrickable hosts. Themes roll up to their ROOT
+    theme (a set filed under "Ultimate Collector Series"
+    shelves under Star Wars, the way collectors browse), with
+    the leaf theme kept on the row's facts line. Known honest
+    gaps: Rebrickable publishes no prices (rows carry none)
+    and its bulk files carry no per-set minifigure counts
+    (the Minifigures area stays an honest empty state until a
+    source for those lands). */
+const LEGO_SETS_URL =
+  "https://cdn.rebrickable.com/media/downloads/sets.csv.gz";
+const LEGO_THEMES_URL =
+  "https://cdn.rebrickable.com/media/downloads/themes.csv.gz";
+
+async function fetchGzipText(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { "user-agent": "VaultX catalog import" },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
+  const buf = await res.arrayBuffer();
+  const stream = new Blob([buf])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).text();
+}
+
+/** Minimal quoted-CSV parser (Rebrickable names carry
+    commas inside quotes). */
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i);
+    if (quoted) {
+      if (ch === '"') {
+        if (text.charAt(i + 1) === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+    } else if (ch !== "\r") {
+      field += ch;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function importLegoChunk(
+  ctx: Ctx,
+  state: ImportState,
+): Promise<{ state: ImportState; setsTotal: number; setsDone: number; complete: boolean }> {
+  // Like Funko, the source is static files: each call
+  // re-reads them, rebuilds the same deterministic sorted
+  // set list, and inserts the next slice off the saved
+  // cursor — inserts never overwrite, so a died call simply
+  // resumes.
+  const CHUNK = 3000;
+  const [themesText, setsText] = await Promise.all([
+    fetchGzipText(LEGO_THEMES_URL),
+    fetchGzipText(LEGO_SETS_URL),
+  ]);
+  const themeById = new Map<
+    string,
+    { name: string; parentId: string | null }
+  >();
+  for (const r of parseCsvRows(themesText).slice(1)) {
+    const id = r[0];
+    const name = r[1];
+    if (!id || !name) continue;
+    themeById.set(id, { name, parentId: r[2] ? r[2] : null });
+  }
+  const rootCache = new Map<string, { id: string; name: string }>();
+  const rootThemeOf = (id: string): { id: string; name: string } => {
+    const hit = rootCache.get(id);
+    if (hit) return hit;
+    let cur = themeById.get(id);
+    let curId = id;
+    const seen = new Set<string>();
+    while (cur?.parentId && themeById.has(cur.parentId) && !seen.has(curId)) {
+      seen.add(curId);
+      curId = cur.parentId;
+      cur = themeById.get(curId);
+    }
+    const root = { id: curId, name: cur?.name ?? `Theme ${id}` };
+    rootCache.set(id, root);
+    return root;
+  };
+  type LegoSet = {
+    setNum: string;
+    name: string;
+    year: number | null;
+    rootId: string;
+    rootName: string;
+    leafName: string;
+    parts: number | null;
+    img: string | null;
+  };
+  const sets: LegoSet[] = [];
+  for (const r of parseCsvRows(setsText).slice(1)) {
+    const setNum = r[0];
+    const name = r[1];
+    const themeId = r[3];
+    if (!setNum || !name || !themeId) continue;
+    const root = rootThemeOf(themeId);
+    const yearRaw = parseInt(r[2] ?? "", 10);
+    const partsRaw = parseInt(r[4] ?? "", 10);
+    sets.push({
+      setNum,
+      name,
+      year: Number.isFinite(yearRaw) ? yearRaw : null,
+      rootId: root.id,
+      rootName: root.name,
+      leafName: themeById.get(themeId)?.name ?? root.name,
+      parts: Number.isFinite(partsRaw) && partsRaw > 0 ? partsRaw : null,
+      img: r[5] ? r[5] : null,
+    });
+  }
+  sets.sort((a, b) => {
+    const t = a.rootName.localeCompare(b.rootName);
+    if (t !== 0) return t;
+    const y = (a.year ?? 9999) - (b.year ?? 9999);
+    if (y !== 0) return y;
+    return a.setNum.localeCompare(b.setNum, undefined, { numeric: true });
+  });
+  const total = sets.length;
+  const totalChunks = Math.max(1, Math.ceil(total / CHUNK));
+  state.totalPages = totalChunks;
+  const sectionSorts = (state.sectionSorts ??= {});
+  const sectionCounts = (state.sectionCounts ??= {});
+  const start = state.cursor ?? 0;
+  const slice = sets.slice(start, start + CHUNK);
+  const rows: GameRow[] = slice.map((s) => {
+    if (sectionSorts[s.rootName] == null) {
+      sectionSorts[s.rootName] = Object.keys(sectionSorts).length;
+    }
+    const slot = sectionCounts[s.rootName] ?? 0;
+    sectionCounts[s.rootName] = slot + 1;
+    const facts: string[] = [];
+    if (s.year != null) facts.push(String(s.year));
+    if (s.parts != null) {
+      facts.push(`${s.parts.toLocaleString("en-US")} pieces`);
+    }
+    if (s.leafName !== s.rootName) facts.push(s.leafName);
+    return {
+      game: "lego",
+      uid: `lego:${s.setNum}`,
+      sectionKey: s.rootId,
+      sectionName: s.rootName,
+      sectionSort: sectionSorts[s.rootName] ?? 0,
+      slotSort: slot,
+      number: s.setNum,
+      printed: s.setNum,
+      name: s.name,
+      rarity: facts.length > 0 ? facts.join(" · ") : null,
+      finish: null,
+      imageUrl: s.img,
+      price: null,
+    };
+  });
+  await insertGameRows(ctx, rows);
+  const end = start + slice.length;
+  state.cursor = end;
+  const chunksDone = Math.min(totalChunks, Math.ceil(end / CHUNK));
+  return {
+    state,
+    setsTotal: totalChunks,
+    setsDone: chunksDone,
+    complete: end >= total,
+  };
+}
 
 export const Actions = {
   seedBinder: defineAction({
@@ -5320,7 +6295,7 @@ export const Actions = {
       items: z.array(
         z.object({
           key: z.string(),
-          kind: z.enum(["cash", "trade", "ticket"]),
+          kind: z.enum(["cash", "trade", "ticket", "mail"]),
           refId: z.number(),
           subject: z.string(),
           fromUsername: z.string(),
@@ -5408,7 +6383,7 @@ export const Actions = {
       };
       type InboxItem = {
         key: string;
-        kind: "cash" | "trade" | "ticket";
+        kind: "cash" | "trade" | "ticket" | "mail";
         refId: number;
         subject: string;
         fromUsername: string;
@@ -5489,6 +6464,27 @@ export const Actions = {
           });
         }
       }
+      // Plain mail (Anthony, Nov 4, 2026 — shared deck
+      // lists): messages addressed to me, newest activity is
+      // the send itself; unread until opened once.
+      const mailRows = await db
+        .select()
+        .from(schema.mailMessages)
+        .where(eq(schema.mailMessages.toCode, me));
+      for (const m of mailRows) {
+        items.push({
+          key: `mail:${m.id}`,
+          kind: "mail",
+          refId: m.id,
+          subject: m.subject,
+          fromUsername: m.fromUsername,
+          date: m.createdAt,
+          preview: m.body.split("\n").slice(0, 3).join(" · ").slice(0, 140),
+          status: "shared",
+          unreadCount: m.readAt ? 0 : 1,
+          unread: !m.readAt,
+        });
+      }
       // Per-user Inbox deletions (Anthony, Nov 3, 2026): an
       // item the viewer deleted stays out of THEIR Inbox
       // until newer activity lands after the deletion — the
@@ -5521,7 +6517,7 @@ export const Actions = {
     description:
       "Deletes one item from the signed-in collector's own Inbox (Anthony, Nov 3, 2026): per-user, like deleting an email — the underlying purchase order, trade, or ticket is not cancelled or altered, and the other party keeps their copy. If the other side later posts a new message in that thread, the item reappears in this Inbox with it. Only a party to the order (or the owner, for tickets) can delete it.",
     request: z.object({
-      kind: z.enum(["cash", "trade", "ticket"]),
+      kind: z.enum(["cash", "trade", "ticket", "mail"]),
       refId: z.number().int().positive(),
     }),
     response: z.object({
@@ -5547,6 +6543,14 @@ export const Actions = {
           .from(schema.tradeOffers)
           .where(eq(schema.tradeOffers.id, args.refId));
         if (!row || (row.proposerCode !== me && row.partnerCode !== me)) {
+          return { ok: false, error: "That message isn't in your Inbox." };
+        }
+      } else if (args.kind === "mail") {
+        const [row] = await db
+          .select()
+          .from(schema.mailMessages)
+          .where(eq(schema.mailMessages.id, args.refId));
+        if (!row || (row.toCode !== me && row.fromCode !== me)) {
           return { ok: false, error: "That message isn't in your Inbox." };
         }
       } else {
@@ -6599,6 +7603,7 @@ export const Actions = {
           cardId: z.number().nullable(),
           sealedName: z.string().nullable(),
           comicId: z.string().nullable(),
+          gameCardId: z.number().nullable(),
           label: z.string(),
           /** Clean item name for the management page row (the
               card's full name, the sealed product's name, or the
@@ -6612,6 +7617,10 @@ export const Actions = {
           threshold: z.number(),
           currentValue: z.number().nullable(),
           triggered: z.boolean(),
+          /** The game item's catalog photo for the management
+              page thumbnail (game-kind alerts only; null for
+              every other kind). */
+          imageUrl: z.string().nullable(),
         }),
       ),
       /** True once the example price-alert banner's explanation
@@ -6632,12 +7641,31 @@ export const Actions = {
       const comicById = new Map(
         COMIC_ALERT_CATALOG.map((c) => [c.id, c]),
       );
+      const gameAlertIds = alertRows
+        .filter((a) => a.targetKind === "game" && a.gameCardId != null)
+        .map((a) => a.gameCardId as number);
+      const gameAlertRows =
+        gameAlertIds.length > 0
+          ? await db
+              .select()
+              .from(schema.gameCards)
+              .where(inArray(schema.gameCards.id, gameAlertIds))
+          : [];
+      const gameAlertById = new Map(gameAlertRows.map((r) => [r.id, r]));
+      const GAME_ALERT_LABELS: Record<string, string> = {
+        pokemon: "Pokémon",
+        magic: "Magic: The Gathering",
+        starwars: "Star Wars Unlimited",
+        funko: "Funko Pop!",
+        lego: "Legos",
+      };
       return {
         exampleDismissed: profile.exampleAlertDismissed > 0,
         alerts: alertRows.map((a) => {
           let currentValue: number | null = null;
           let displayName = a.label;
           let subtitle = "";
+          let imageUrl: string | null = null;
           if (a.targetKind === "card" && a.cardId != null) {
             const card = cardById.get(a.cardId);
             currentValue = card?.marketValue ?? null;
@@ -6664,6 +7692,14 @@ export const Actions = {
             } else {
               subtitle = "Graded comic";
             }
+          } else if (a.targetKind === "game" && a.gameCardId != null) {
+            const g = gameAlertById.get(a.gameCardId);
+            if (g) {
+              currentValue = g.price;
+              displayName = g.name;
+              subtitle = `${GAME_ALERT_LABELS[g.game] ?? g.game} · ${g.sectionName}`;
+              imageUrl = g.imageUrl;
+            }
           }
           const triggered =
             currentValue != null &&
@@ -6676,6 +7712,7 @@ export const Actions = {
             cardId: a.cardId,
             sealedName: a.sealedName,
             comicId: a.comicId ?? null,
+            gameCardId: a.gameCardId ?? null,
             label: a.label,
             displayName,
             subtitle,
@@ -6683,6 +7720,7 @@ export const Actions = {
             threshold: a.threshold,
             currentValue,
             triggered,
+            imageUrl,
           };
         }),
       };
@@ -6711,12 +7749,13 @@ export const Actions = {
 
   setPriceAlert: defineAction({
     description:
-      "Sets a price alert on one card, sealed item, or graded comic from its detail view: Home shows the alert in translucent red when the item's unit value crosses the threshold.",
+      "Sets a price alert on one card, sealed item, graded comic, or game-catalog item from its detail view: Home shows the alert in translucent red when the item's unit value crosses the threshold. Game-catalog items can only be alerted when their catalog row carries a tracked price — the server refuses untracked items with a plain explanation instead of storing a dead alert.",
     request: z.object({
-      targetKind: z.enum(["card", "sealed", "comic"]),
+      targetKind: z.enum(["card", "sealed", "comic", "game"]),
       cardId: z.number().int().positive().nullable(),
       sealedName: z.string().min(1).nullable(),
       comicId: z.string().min(1).nullable().optional(),
+      gameCardId: z.number().int().positive().nullable().optional(),
       direction: z.enum(["below", "above"]),
       threshold: z.number().positive().max(100000),
     }),
@@ -6739,6 +7778,21 @@ export const Actions = {
         const base = allSealedItems.find((i) => i.name === args.sealedName);
         if (!base) throw new Error(`Unknown sealed item: ${args.sealedName}`);
         label = base.name;
+      } else if (args.targetKind === "game") {
+        if (args.gameCardId == null) throw new Error("gameCardId is required");
+        const rows = await db
+          .select()
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.id, args.gameCardId))
+          .limit(1);
+        const row = rows[0];
+        if (!row) throw new Error("Catalog item not found");
+        if (row.price == null) {
+          throw new Error(
+            "Pricing isn't tracked for this item yet, so it can't be alerted. You can still add it to your Watchlist.",
+          );
+        }
+        label = `${row.name} (${row.sectionName})`;
       } else {
         if (!args.comicId) throw new Error("comicId is required");
         const comic = COMIC_ALERT_CATALOG.find((c) => c.id === args.comicId);
@@ -6752,6 +7806,7 @@ export const Actions = {
           cardId: args.targetKind === "card" ? args.cardId : null,
           sealedName: args.targetKind === "sealed" ? args.sealedName : null,
           comicId: args.targetKind === "comic" ? (args.comicId ?? null) : null,
+          gameCardId: args.targetKind === "game" ? (args.gameCardId ?? null) : null,
           label,
           direction: args.direction,
           threshold: args.threshold,
@@ -6800,6 +7855,460 @@ export const Actions = {
         .where(eq(schema.priceAlerts.id, args.id));
       ctx.invalidateQueries();
       return { ok: true };
+    },
+  }),
+
+  getWatchlist: defineAction({
+    description:
+      "Lists the user's Portfolio watchlist — any cataloged item they are watching (Lorcana cards, sealed products, game-catalog items from Pokémon/Magic/Star Wars/Funko/Lego, graded comics), owned or not — each with its canonical current price where a price is tracked (the same value the alerts and detail pages use), its day change from the tracked price history, a short trend series for the quote-row sparkline, and how many copies they own. Items with no tracked price source carry a null price and the client says so plainly.",
+    request: z.object({}),
+    response: z.object({
+      items: z.array(
+        z.object({
+          id: z.number(),
+          targetKind: z.string(),
+          cardId: z.number().nullable(),
+          sealedName: z.string().nullable(),
+          gameCardId: z.number().nullable(),
+          comicId: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          displayName: z.string(),
+          subtitle: z.string(),
+          price: z.number().nullable(),
+          dayChangePct: z.number().nullable(),
+          trend: z.array(z.number()),
+          ownedQty: z.number(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.watchlistItems)
+        .orderBy(asc(schema.watchlistItems.id));
+      const cardRows = await db.select().from(schema.cards);
+      const cardById = new Map(cardRows.map((r) => [r.id, r]));
+      const sealed = await effectiveSealed(ctx);
+      const sealedByName = new Map(sealed.items.map((i) => [i.name, i]));
+      const gameIds = rows
+        .filter((w) => w.targetKind === "game" && w.gameCardId != null)
+        .map((w) => w.gameCardId as number);
+      const gameRows =
+        gameIds.length > 0
+          ? await db
+              .select()
+              .from(schema.gameCards)
+              .where(inArray(schema.gameCards.id, gameIds))
+          : [];
+      const gameById = new Map(gameRows.map((r) => [r.id, r]));
+      const GAME_LABELS: Record<string, string> = {
+        pokemon: "Pokémon",
+        magic: "Magic: The Gathering",
+        starwars: "Star Wars Unlimited",
+        funko: "Funko Pop!",
+        lego: "Legos",
+      };
+      const items = [];
+      for (const w of rows) {
+        if (w.targetKind === "card" && w.cardId != null) {
+          const card = cardById.get(w.cardId);
+          if (!card) continue;
+          const histRows = await db
+            .select()
+            .from(schema.cardPriceHistory)
+            .where(eq(schema.cardPriceHistory.uid, card.uid))
+            .orderBy(asc(schema.cardPriceHistory.id));
+          const dated =
+            histRows.length > 0
+              ? histRows.map((h) => ({ date: h.date, value: h.unitValue }))
+              : (cardHistory[card.uid] ?? []).map((pt) => ({
+                  date: pt.date,
+                  value: pt.value,
+                }));
+          const points = dated.map((p) => p.value);
+          // Day change = the latest point vs the most recent
+          // point from an EARLIER date (the history can hold
+          // two same-day points — first export / latest — and
+          // comparing those would fake a 0% day).
+          const lastPt = dated[dated.length - 1];
+          const prevPt = lastPt
+            ? [...dated]
+                .reverse()
+                .find((p) => p.date < lastPt.date)
+            : undefined;
+          items.push({
+            id: w.id,
+            targetKind: "card",
+            cardId: card.id,
+            sealedName: null,
+            gameCardId: null,
+            comicId: null,
+            imageUrl: null,
+            displayName: card.fullName,
+            subtitle: `${card.groupName} #${card.printed}`,
+            price: card.marketValue,
+            dayChangePct:
+              lastPt != null && prevPt != null && prevPt.value > 0
+                ? Math.round(
+                    ((lastPt.value - prevPt.value) / prevPt.value) * 1000,
+                  ) / 10
+                : null,
+            trend: points.slice(-14),
+            ownedQty: card.ownedQty,
+          });
+        } else if (w.targetKind === "sealed" && w.sealedName) {
+          const item = sealedByName.get(w.sealedName);
+          const histRows = await db
+            .select()
+            .from(schema.sealedPriceHistory)
+            .where(eq(schema.sealedPriceHistory.name, w.sealedName))
+            .orderBy(asc(schema.sealedPriceHistory.id));
+          const points = histRows.map((h) => h.unitValue);
+          const lastRow = histRows[histRows.length - 1];
+          const prevRow = lastRow
+            ? [...histRows].reverse().find((h) => h.date < lastRow.date)
+            : undefined;
+          items.push({
+            id: w.id,
+            targetKind: "sealed",
+            cardId: null,
+            sealedName: w.sealedName,
+            gameCardId: null,
+            comicId: null,
+            imageUrl: null,
+            displayName: w.sealedName,
+            subtitle: item ? `${item.setName} · Sealed` : "Sealed",
+            price: item?.unitValue ?? null,
+            dayChangePct:
+              lastRow != null && prevRow != null && prevRow.unitValue > 0
+                ? Math.round(
+                    ((lastRow.unitValue - prevRow.unitValue) /
+                      prevRow.unitValue) *
+                      1000,
+                  ) / 10
+                : null,
+            trend: points.slice(-14),
+            ownedQty: item?.qty ?? 0,
+          });
+        } else if (w.targetKind === "game" && w.gameCardId != null) {
+          // Any other catalog (migration 0058): Pokémon /
+          // Magic rows carry a tracked price where their
+          // source publishes one; Star Wars, Funko, and Lego
+          // rows carry none today, so price stays null and
+          // the client says plainly that pricing isn't
+          // tracked for the item yet. No day-change history
+          // exists for game rows, so the trend stays empty
+          // rather than inventing one.
+          const g = gameById.get(w.gameCardId);
+          if (!g) continue;
+          items.push({
+            id: w.id,
+            targetKind: "game",
+            cardId: null,
+            sealedName: null,
+            gameCardId: g.id,
+            comicId: null,
+            imageUrl: g.imageUrl,
+            displayName: g.name,
+            subtitle: `${GAME_LABELS[g.game] ?? g.game} · ${g.sectionName}`,
+            price: g.price,
+            dayChangePct: null,
+            trend: [],
+            ownedQty: g.ownedQty + g.ownedSealedQty,
+          });
+        } else if (w.targetKind === "comic" && w.comicId) {
+          const comic = COMIC_ALERT_CATALOG.find((c) => c.id === w.comicId);
+          if (!comic) continue;
+          items.push({
+            id: w.id,
+            targetKind: "comic",
+            cardId: null,
+            sealedName: null,
+            gameCardId: null,
+            comicId: comic.id,
+            imageUrl: null,
+            displayName: comic.title,
+            subtitle: `${comic.publisher} · Graded comic`,
+            price: comic.value,
+            dayChangePct: null,
+            trend: [],
+            ownedQty: 1,
+          });
+        }
+      }
+      return { items };
+    },
+  }),
+
+  addToWatchlist: defineAction({
+    description:
+      "Adds one cataloged item to the user's Portfolio watchlist (from the Watch action on its detail view): a Lorcana card, a sealed product, a game-catalog item (Pokémon/Magic/Star Wars/Funko/Lego), or a graded comic. Watching never requires a tracked price — items without one are watched with pricing untracked. Adding the same item twice keeps a single entry.",
+    request: z.object({
+      targetKind: z.enum(["card", "sealed", "game", "comic"]),
+      cardId: z.number().int().positive().nullable(),
+      sealedName: z.string().min(1).nullable(),
+      gameCardId: z.number().int().positive().nullable().optional(),
+      comicId: z.string().min(1).nullable().optional(),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const existing = await db.select().from(schema.watchlistItems);
+      const dupe = existing.some((w) => {
+        switch (args.targetKind) {
+          case "card":
+            return w.targetKind === "card" && w.cardId === args.cardId;
+          case "sealed":
+            return w.targetKind === "sealed" && w.sealedName === args.sealedName;
+          case "game":
+            return w.targetKind === "game" && w.gameCardId === args.gameCardId;
+          case "comic":
+            return w.targetKind === "comic" && w.comicId === args.comicId;
+        }
+      });
+      if (!dupe) {
+        await db.insert(schema.watchlistItems).values({
+          targetKind: args.targetKind,
+          cardId: args.targetKind === "card" ? args.cardId : null,
+          sealedName: args.targetKind === "sealed" ? args.sealedName : null,
+          gameCardId: args.targetKind === "game" ? (args.gameCardId ?? null) : null,
+          comicId: args.targetKind === "comic" ? (args.comicId ?? null) : null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+
+  removeFromWatchlist: defineAction({
+    description: "Removes one entry from the user's Portfolio watchlist by its watchlist id.",
+    request: z.object({ id: z.number().int().positive() }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      await db
+        .delete(schema.watchlistItems)
+        .where(eq(schema.watchlistItems.id, args.id));
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+
+  getLibraryComicDisplay: defineAction({
+    description:
+      "The comic ids on display on the user's Library slab wall (max 5). When the user has never chosen, ids is null and the client shows Anthony's standing default: his two signed comics (Aliens #1 and Batman #136).",
+    request: z.object({}),
+    response: z.object({ ids: z.array(z.string()).nullable() }),
+    async handler(ctx) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (!profile.libraryComicDisplay) return { ids: null };
+      try {
+        const parsed = JSON.parse(profile.libraryComicDisplay) as unknown;
+        return {
+          ids: Array.isArray(parsed)
+            ? parsed.filter((x): x is string => typeof x === "string").slice(0, 5)
+            : null,
+        };
+      } catch {
+        return { ids: null };
+      }
+    },
+  }),
+
+  setLibraryComicDisplay: defineAction({
+    description:
+      "Sets which of the user's graded comics are on display on their Library slab wall — up to five comic ids from their own comics; an empty list is a valid, empty wall.",
+    request: z.object({
+      ids: z.array(z.string().min(1).max(60)).max(5),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const valid = new Set(COMIC_ALERT_CATALOG.map((c) => c.id));
+      const ids = [...new Set(args.ids)].filter((id) => valid.has(id));
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          libraryComicDisplay: JSON.stringify(ids),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, profile.id));
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+
+  getResearchCard: defineAction({
+    description:
+      "Returns the Portfolio Research homework for one binder card: its canonical current price and TCGplayer id, the full tracked price history, the recorded eBay sold figure with its sale window when one exists (TCGplayer is price source #1, eBay sold #2), the user's position (copies owned, total paid, average paid, gain/loss), every other printing of the same card with its price and owned count, and its set-completion context (pockets owned vs total and the cost to finish the set).",
+    request: z.object({ cardId: z.number().int().positive() }),
+    response: z.object({
+      cardId: z.number(),
+      fullName: z.string(),
+      groupName: z.string(),
+      printed: z.string(),
+      price: z.number().nullable(),
+      tcgplayerId: z.string().nullable(),
+      ebay: z
+        .object({
+          usd: z.number(),
+          lastSoldMonth: z.string(),
+          windowLabel: z.string(),
+          stale: z.boolean(),
+        })
+        .nullable(),
+      priceHistory: z.array(
+        z.object({
+          date: z.string(),
+          label: z.string(),
+          value: z.number(),
+          source: z.string(),
+        }),
+      ),
+      position: z.object({
+        ownedQty: z.number(),
+        paidTotal: z.number(),
+        avgPaid: z.number().nullable(),
+        valueTotal: z.number(),
+        net: z.number(),
+      }),
+      printings: z.array(
+        z.object({
+          id: z.number(),
+          fullName: z.string(),
+          printed: z.string(),
+          groupName: z.string(),
+          price: z.number().nullable(),
+          ownedQty: z.number(),
+        }),
+      ),
+      setContext: z
+        .object({
+          groupName: z.string(),
+          ownedPockets: z.number(),
+          totalPockets: z.number(),
+          costToComplete: z.number(),
+          unpricedMissing: z.number(),
+        })
+        .nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.cards)
+        .where(eq(schema.cards.id, args.cardId))
+        .limit(1);
+      const row = rows[0];
+      if (!row) throw new Error("Card not found");
+      const histRows = await db
+        .select()
+        .from(schema.cardPriceHistory)
+        .where(eq(schema.cardPriceHistory.uid, row.uid))
+        .orderBy(asc(schema.cardPriceHistory.id));
+      const priceHistory = (
+        histRows.length > 0
+          ? histRows.map((h) => ({
+              date: h.date,
+              label: h.label,
+              value: h.unitValue,
+              source: h.source,
+            }))
+          : (cardHistory[row.uid] ?? []).map((pt) => ({
+              date: pt.date,
+              label: pt.label,
+              value: pt.value,
+              source: "export",
+            }))
+      );
+      const money = cardMoney(row);
+      const ebaySnap = ebaySoldPrices[row.id];
+      const ebay = ebaySnap
+        ? {
+            usd: ebaySnap.usd,
+            lastSoldMonth: ebaySnap.lastSoldMonth,
+            windowLabel: EBAY_SOLD_WINDOW_LABEL,
+            stale:
+              (Date.now() - Date.parse(EBAY_SOLD_WINDOW_END)) / 86_400_000 >
+              90,
+          }
+        : null;
+      const allRows = await db.select().from(schema.cards);
+      // Printings = the same card printed elsewhere. Puzzle /
+      // lore inserts all share generic names ("Puzzle Piece"),
+      // so they are excluded — they are not printings of each
+      // other.
+      const printings = (
+        row.groupKey.startsWith("puzzle:")
+          ? []
+          : allRows.filter(
+              (r) =>
+                r.fullName === row.fullName &&
+                r.id !== row.id &&
+                !r.groupKey.startsWith("puzzle:"),
+            )
+      )
+        .map((r) => ({
+          id: r.id,
+          fullName: r.fullName,
+          printed: r.printed,
+          groupName: r.groupName,
+          price: r.marketValue,
+          ownedQty: r.ownedQty,
+        }))
+        .sort(
+          (a, b) =>
+            a.groupName.localeCompare(b.groupName) ||
+            a.printed.localeCompare(b.printed),
+        );
+      let setContext = null;
+      if (row.groupKey.startsWith("set:")) {
+        const siblings = allRows.filter((r) => r.groupKey === row.groupKey);
+        let ownedPockets = 0;
+        let totalPockets = 0;
+        for (const s of siblings) {
+          for (const p of pocketsOf(s)) {
+            totalPockets += 1;
+            if (p.qty > 0) ownedPockets += 1;
+          }
+        }
+        const missing = missingPocketsOf(siblings);
+        setContext = {
+          groupName: row.groupName,
+          ownedPockets,
+          totalPockets,
+          costToComplete:
+            Math.round(
+              missing.reduce((sum, m) => sum + (m.price ?? 0), 0) * 100,
+            ) / 100,
+          unpricedMissing: missing.filter((m) => m.price == null).length,
+        };
+      }
+      return {
+        cardId: row.id,
+        fullName: row.fullName,
+        groupName: row.groupName,
+        printed: row.printed,
+        price: row.marketValue,
+        tcgplayerId: tcgIdOf(row),
+        ebay,
+        priceHistory,
+        position: {
+          ownedQty: row.ownedQty,
+          paidTotal: Math.round(money.paid * 100) / 100,
+          avgPaid:
+            row.ownedQty > 0
+              ? Math.round((money.paid / row.ownedQty) * 100) / 100
+              : null,
+          valueTotal: Math.round(money.value * 100) / 100,
+          net: Math.round((money.value - money.paid) * 100) / 100,
+        },
+        printings,
+        setContext,
+      };
     },
   }),
 
@@ -7873,10 +9382,12 @@ export const Actions = {
           : null,
         bio: profile.bio ?? null,
         theme: profile.theme ?? null,
+        language: profile.language ?? null,
         updateTestSeen: profile.updateTestSeen > 0,
         shareCollection: (profile.shareCollection ?? 1) > 0,
         usernameChangeUsed: (profile.usernameChangeUsed ?? 0) > 0,
         gridCols: profile.gridCols ?? null,
+        inviteCode: inviteCodeForCollector(profile.collectorCode),
       };
     },
   }),
@@ -8027,6 +9538,31 @@ export const Actions = {
         .where(eq(schema.collectorProfile.id, 1));
       ctx.invalidateQueries();
       return { ok: true, theme: args.theme };
+    },
+  }),
+
+  setLanguagePreference: defineAction({
+    description:
+      "Saves the UI language the user picked in Settings (English, Spanish, German, French, or Japanese) on their collector profile, so the choice persists for them across devices. Presentation only — catalog names and user content are never translated.",
+    request: z.object({
+      language: z.enum(["en", "es", "de", "fr", "ja"]),
+    }),
+    response: z.object({ ok: z.literal(true), language: z.string() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; language: string }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          language: args.language,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, 1));
+      ctx.invalidateQueries();
+      return { ok: true, language: args.language };
     },
   }),
 
@@ -8258,6 +9794,1046 @@ export const Actions = {
           (r) => r.collector_id === JARVIS_REGISTRY_PROFILE.collector_id,
         ),
         registrySyncedAt: profile.registrySyncedAt ?? null,
+      };
+    },
+  }),
+
+  getVerifiedBadges: defineAction({
+    description:
+      "Every verified badge on record (Anthony, Nov 4, 2026): collector code, username, status (verified / revoked), basis (root / builtin / owner / trade), and when granted — the shared data behind the check badge beside usernames everywhere. The two launch-verified accounts (the owner as root, Jarvis as the built-in friend) are seeded on first read.",
+    request: z.object({}),
+    response: z.object({
+      badges: z.array(
+        z.object({
+          collectorCode: z.string(),
+          username: z.string(),
+          status: z.string(),
+          basis: z.string(),
+          grantedAt: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      await ensureVerifiedRoots(ctx);
+      const db = ctx.db<typeof schema>();
+      const rows = await db.select().from(schema.verifiedBadges);
+      return {
+        badges: rows.map((r) => ({
+          collectorCode: r.collectorCode,
+          username: r.username,
+          status: r.status,
+          basis: r.basis,
+          grantedAt: r.grantedAt,
+        })),
+      };
+    },
+  }),
+
+  getVerifiedProof: defineAction({
+    description:
+      "The transparency record behind one collector's verified badge (Anthony, Nov 4, 2026): the honest basis — root of the chain, built-in friend, verified by the owner (with date), or the confirmed trade that earned it (with whom and when) — plus revocation state when the badge was revoked. Powers the badge explainer sheet.",
+    request: z.object({ collectorCode: z.string().trim().min(1).max(60) }),
+    response: z.object({
+      found: z.boolean(),
+      collectorCode: z.string(),
+      username: z.string().nullable(),
+      status: z.string().nullable(),
+      basis: z.string().nullable(),
+      grantedAt: z.string().nullable(),
+      proofLabel: z.string().nullable(),
+      proofTrade: z
+        .object({
+          kind: z.string(),
+          refId: z.number(),
+          withUsername: z.string(),
+          withCode: z.string(),
+          completedAt: z.string(),
+        })
+        .nullable(),
+      revokedAt: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      await ensureVerifiedRoots(ctx);
+      const row = await badgeRowFor(ctx, args.collectorCode);
+      if (!row) {
+        return {
+          found: false,
+          collectorCode: args.collectorCode,
+          username: null,
+          status: null,
+          basis: null,
+          grantedAt: null,
+          proofLabel: null,
+          proofTrade: null,
+          revokedAt: null,
+        };
+      }
+      let proofLabel: string | null = null;
+      let proofTrade: {
+        kind: string;
+        refId: number;
+        withUsername: string;
+        withCode: string;
+        completedAt: string;
+      } | null = null;
+      try {
+        const proof = JSON.parse(row.proofJson ?? "{}") as {
+          label?: string;
+          kind?: string;
+          refId?: number;
+          withUsername?: string;
+          withCode?: string;
+          completedAt?: string;
+        };
+        if (row.basis === "owner") {
+          proofLabel = "Verified by the owner";
+        } else if (
+          row.basis === "trade" &&
+          proof.kind &&
+          proof.withUsername &&
+          proof.completedAt
+        ) {
+          proofTrade = {
+            kind: proof.kind,
+            refId: proof.refId ?? 0,
+            withUsername: proof.withUsername,
+            withCode: proof.withCode ?? "",
+            completedAt: proof.completedAt,
+          };
+        } else if (proof.label) {
+          proofLabel = proof.label;
+        }
+      } catch {
+        proofLabel = null;
+      }
+      return {
+        found: true,
+        collectorCode: row.collectorCode,
+        username: row.username,
+        status: row.status,
+        basis: row.basis,
+        grantedAt: row.grantedAt,
+        proofLabel,
+        proofTrade,
+        revokedAt: row.revokedAt ?? null,
+      };
+    },
+  }),
+
+  grantVerifiedBadge: defineAction({
+    description:
+      "OWNER-ONLY manual verified-badge grant (Anthony, Nov 4, 2026 — the owner override): Anthony alone can verify a collector without a confirmed trade, from Admin's Registered Users list. Recorded server-side with the honest basis 'Verified by the owner' plus the date — never dressed up as a trade. A manually verified collector is fully verified: their confirmed trades can confer the badge onward, and they qualify for forum roles.",
+    request: z.object({
+      collectorCode: z.string().trim().min(1).max(60),
+      username: z.string().trim().min(1).max(40),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE) {
+        return {
+          ok: false,
+          error: "Only the owner can grant the verified badge.",
+        };
+      }
+      await ensureVerifiedRoots(ctx);
+      const db = ctx.db<typeof schema>();
+      const now = new Date().toISOString();
+      const existing = await badgeRowFor(ctx, args.collectorCode);
+      const values = {
+        collectorCode: args.collectorCode,
+        username: args.username,
+        status: "verified" as const,
+        basis: "owner" as const,
+        proofJson: JSON.stringify({ byUsername: profile.username }),
+        grantedAt: now,
+        revokedAt: null,
+        revokedBy: null,
+        updatedAt: now,
+      };
+      if (existing) {
+        await db
+          .update(schema.verifiedBadges)
+          .set({
+            ...values,
+            // Re-granting after a revocation starts a fresh
+            // grant date; refreshing a live badge keeps the
+            // original one.
+            grantedAt:
+              existing.status === "revoked" ? now : existing.grantedAt,
+          })
+          .where(
+            eq(schema.verifiedBadges.collectorCode, args.collectorCode),
+          );
+      } else {
+        await db.insert(schema.verifiedBadges).values(values);
+      }
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  revokeVerifiedBadge: defineAction({
+    description:
+      "OWNER-ONLY verified-badge revocation (Anthony, Nov 4, 2026): on a substantiated report the owner can revoke a collector's badge; the revocation is recorded server-side and stays visible on their proof, and any forum role they hold is suspended with it (forum roles require a currently verified badge). The owner's own root badge cannot be revoked here.",
+    request: z.object({
+      collectorCode: z.string().trim().min(1).max(60),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE) {
+        return {
+          ok: false,
+          error: "Only the owner can revoke the verified badge.",
+        };
+      }
+      if (args.collectorCode === OWNER_COLLECTOR_CODE) {
+        return {
+          ok: false,
+          error: "The owner's root badge can't be revoked.",
+        };
+      }
+      const row = await badgeRowFor(ctx, args.collectorCode);
+      if (!row || row.status !== "verified") {
+        return { ok: false, error: "That collector isn't verified." };
+      }
+      const db = ctx.db<typeof schema>();
+      const now = new Date().toISOString();
+      await db
+        .update(schema.verifiedBadges)
+        .set({
+          status: "revoked",
+          revokedAt: now,
+          revokedBy: profile.username,
+          updatedAt: now,
+        })
+        .where(
+          eq(schema.verifiedBadges.collectorCode, args.collectorCode),
+        );
+      // Forum roles hang off the badge (Anthony's hard rule):
+      // revoking the badge SUSPENDS any forum role the holder
+      // has. It returns only when the badge is restored AND
+      // the owner re-grants the role (grantForumRole clears
+      // the suspension).
+      await db
+        .update(schema.forumRoles)
+        .set({ suspended: 1 })
+        .where(eq(schema.forumRoles.collectorCode, args.collectorCode));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  getAdminUserTrust: defineAction({
+    description:
+      "OWNER-ONLY Admin data (Anthony, Nov 4, 2026): for every registered collector, their verified-badge record and their invite lineage — who vouched them in (username, Collector ID, date) and everyone they have vouched in. Lineage is abuse-tracing audit data shown ONLY here in Admin, never on a public profile. Members who joined before invite codes existed and were invited by the owner are attributed to the owner and labeled as a backfill; root accounts (owner, Jarvis) show no voucher; anyone else unprovable shows no voucher on file.",
+    request: z.object({}),
+    response: z.object({
+      isOwner: z.boolean(),
+      users: z.array(
+        z.object({
+          collectorCode: z.string(),
+          badgeStatus: z.string().nullable(),
+          badgeBasis: z.string().nullable(),
+          vouchedBy: z
+            .object({
+              username: z.string(),
+              collectorCode: z.string(),
+              at: z.string(),
+              source: z.string(),
+            })
+            .nullable(),
+          vouchedIn: z.array(
+            z.object({
+              username: z.string(),
+              collectorCode: z.string(),
+              at: z.string(),
+              source: z.string(),
+            }),
+          ),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE) {
+        return { isOwner: false, users: [] };
+      }
+      await ensureVerifiedRoots(ctx);
+      const db = ctx.db<typeof schema>();
+      const badgeRows = await db.select().from(schema.verifiedBadges);
+      const badgeByCode = new Map(
+        badgeRows.map((r) => [r.collectorCode, r]),
+      );
+      const lineage = await db.select().from(schema.inviteLineage);
+      const list = await supabaseRest(
+        "profiles?select=collector_id,username,trust_score,created_at&order=created_at.asc",
+      );
+      const roster = list.ok ? asRegistryRows(list.json) : [];
+      const rosterCodes = new Set(roster.map((r) => r.collector_id));
+      // Backfill (Anthony's direction): the existing testers
+      // were invited by Anthony himself. Any roster member who
+      // is neither a root account nor already carrying a
+      // witnessed lineage row is attributed to the owner and
+      // labeled "backfill" — honest about how we know.
+      const witnessed = new Set(
+        lineage.map((l) => l.newCollectorCode),
+      );
+      const ownerRow = roster.find(
+        (r) => r.collector_id === OWNER_COLLECTOR_CODE,
+      );
+      const users = roster.map((r) => {
+        const badge = badgeByCode.get(r.collector_id) ?? null;
+        let vouchedBy: {
+          username: string;
+          collectorCode: string;
+          at: string;
+          source: string;
+        } | null = null;
+        const own = lineage.find(
+          (l) => l.newCollectorCode === r.collector_id,
+        );
+        if (own) {
+          vouchedBy = {
+            username: own.vouchedByUsername,
+            collectorCode: own.vouchedByCode,
+            at: own.createdAt,
+            source: own.source,
+          };
+        } else if (
+          r.collector_id !== OWNER_COLLECTOR_CODE &&
+          r.collector_id !== JARVIS_REGISTRY_PROFILE.collector_id &&
+          ownerRow
+        ) {
+          vouchedBy = {
+            username: ownerRow.username,
+            collectorCode: OWNER_COLLECTOR_CODE,
+            at: r.created_at,
+            source: "backfill",
+          };
+        }
+        const vouchedIn = lineage
+          .filter((l) => l.vouchedByCode === r.collector_id)
+          .map((l) => ({
+            username: l.newUsername,
+            collectorCode: l.newCollectorCode,
+            at: l.createdAt,
+            source: l.source,
+          }));
+        // Backfilled members count toward the owner's
+        // vouched-in list, so a pre-code swarm is visible too.
+        if (r.collector_id === OWNER_COLLECTOR_CODE) {
+          for (const m of roster) {
+            if (
+              m.collector_id === OWNER_COLLECTOR_CODE ||
+              m.collector_id === JARVIS_REGISTRY_PROFILE.collector_id ||
+              witnessed.has(m.collector_id)
+            )
+              continue;
+            vouchedIn.push({
+              username: m.username,
+              collectorCode: m.collector_id,
+              at: m.created_at,
+              source: "backfill",
+            });
+          }
+        }
+        void rosterCodes;
+        return {
+          collectorCode: r.collector_id,
+          badgeStatus: badge?.status ?? null,
+          badgeBasis: badge?.basis ?? null,
+          vouchedBy,
+          vouchedIn,
+        };
+      });
+      // Collectors in the local ledger who are no longer on
+      // the roster still get a row, so nothing witnessed is
+      // hidden from the owner.
+      for (const l of lineage) {
+        if (!users.some((u) => u.collectorCode === l.newCollectorCode)) {
+          const badge = badgeByCode.get(l.newCollectorCode) ?? null;
+          users.push({
+            collectorCode: l.newCollectorCode,
+            badgeStatus: badge?.status ?? null,
+            badgeBasis: badge?.basis ?? null,
+            vouchedBy: {
+              username: l.vouchedByUsername,
+              collectorCode: l.vouchedByCode,
+              at: l.createdAt,
+              source: l.source,
+            },
+            vouchedIn: [],
+          });
+        }
+      }
+      return { isOwner: true, users };
+    },
+  }),
+
+  getForumHome: defineAction({
+    description:
+      "Forums home (Direction A — Latest-first hybrid, LIVE): thread rows newest-activity first across all categories or within one, with reply counts, author role chips (forum-scoped, badge-gated), verified flags, the reader's unread state, and the pinned threads (at most two) listed separately. Sorts: latest activity, newest threads, top this week (most replies in 7 days). Search matches titles and authors. No view counts exist by design.",
+    request: z.object({
+      category: z.string().max(24),
+      sort: z.enum(["latest", "new", "top"]),
+      search: z.string().max(80),
+      asTestFriend: z.boolean(),
+    }),
+    response: z.object({
+      threads: z.array(forumThreadView),
+      pinned: z.array(forumThreadView),
+      myRole: z.enum(["owner", "admin", "moderator"]).nullable(),
+      myCode: z.string(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{
+      threads: z.infer<typeof forumThreadView>[];
+      pinned: z.infer<typeof forumThreadView>[];
+      myRole: ForumRole | null;
+      myCode: string;
+    }> {
+      const me = await forumActor(ctx, args.asTestFriend);
+      await ensureVerifiedRoots(ctx);
+      const db = ctx.db<typeof schema>();
+      const [threads, posts, reads, badges] = await Promise.all([
+        db.select().from(schema.forumThreads),
+        db.select().from(schema.forumPosts),
+        db.select().from(schema.forumThreadReads),
+        db.select().from(schema.verifiedBadges),
+      ]);
+      const badgeOk = new Set(
+        badges.filter((b) => b.status === "verified").map((b) => b.collectorCode),
+      );
+      const livePosts = posts.filter((p) => p.deleted === 0);
+      const repliesByThread = new Map<number, typeof livePosts>();
+      for (const p of livePosts) {
+        const list = repliesByThread.get(p.threadId) ?? [];
+        list.push(p);
+        repliesByThread.set(p.threadId, list);
+      }
+      const readByThread = new Map(
+        reads
+          .filter((r) => r.readerCode === me.code)
+          .map((r) => [r.threadId, r.lastReadAt]),
+      );
+      const roleCache = new Map<string, ForumRole | null>();
+      const roleOf = async (code: string) => {
+        if (!roleCache.has(code))
+          roleCache.set(code, await forumRoleFor(ctx, code));
+        return roleCache.get(code) ?? null;
+      };
+      const toView = async (
+        t: typeof threads[number],
+      ): Promise<z.infer<typeof forumThreadView>> => {
+        const replies = (repliesByThread.get(t.id) ?? []).sort(
+          (a, b) => a.createdAt - b.createdAt,
+        );
+        const last = replies[replies.length - 1];
+        const readAt = readByThread.get(t.id);
+        return {
+          id: t.id,
+          category: t.category,
+          title: t.title,
+          authorCode: t.authorCode,
+          authorUsername: t.authorUsername,
+          authorRole: await roleOf(t.authorCode),
+          authorVerified: badgeOk.has(t.authorCode),
+          pinned: t.pinned === 1,
+          locked: t.locked === 1,
+          replyCount: Math.max(0, replies.length - 1),
+          createdAt: t.createdAt,
+          lastActivityAt: t.lastActivityAt,
+          lastPostBy: last ? last.authorUsername : t.authorUsername,
+          unread:
+            t.authorCode !== me.code &&
+            (readAt == null || t.lastActivityAt > readAt),
+          mine: t.authorCode === me.code,
+        };
+      };
+      const searching = args.search.trim().toLowerCase();
+      let rows = threads.slice();
+      if (args.category !== "all")
+        rows = rows.filter((t) => t.category === args.category);
+      if (searching)
+        rows = rows.filter(
+          (t) =>
+            t.title.toLowerCase().includes(searching) ||
+            t.authorUsername.toLowerCase().includes(searching),
+        );
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const weekReplies = (t: typeof threads[number]) =>
+        (repliesByThread.get(t.id) ?? []).filter(
+          (p) => p.createdAt > weekAgo,
+        ).length;
+      if (args.sort === "new")
+        rows.sort((a, b) => b.createdAt - a.createdAt);
+      else if (args.sort === "top")
+        rows.sort(
+          (a, b) =>
+            weekReplies(b) - weekReplies(a) ||
+            b.lastActivityAt - a.lastActivityAt,
+        );
+      else rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+      const pinnedRows =
+        args.category === "all" && !searching
+          ? threads.filter((t) => t.pinned === 1)
+          : [];
+      const pinnedIds = new Set(pinnedRows.map((t) => t.id));
+      return {
+        threads: await Promise.all(
+          rows.filter((t) => !pinnedIds.has(t.id)).map(toView),
+        ),
+        pinned: await Promise.all(pinnedRows.map(toView)),
+        myRole: await roleOf(me.code),
+        myCode: me.code,
+      };
+    },
+  }),
+
+  getForumThread: defineAction({
+    description:
+      "One forum thread with its flat post list: each post carries its author's forum role chip, verified flag, and confirmed-trades count for the trust strip. Reading a thread records the reader's read marker (their unread state clears).",
+    request: z.object({
+      threadId: z.number(),
+      asTestFriend: z.boolean(),
+    }),
+    response: z.object({
+      thread: forumThreadView.nullable(),
+      posts: z.array(forumPostView),
+      myRole: z.enum(["owner", "admin", "moderator"]).nullable(),
+      myCode: z.string(),
+    }),
+    async handler(ctx, args) {
+      const me = await forumActor(ctx, args.asTestFriend);
+      await ensureVerifiedRoots(ctx);
+      const db = ctx.db<typeof schema>();
+      const tRows = await db
+        .select()
+        .from(schema.forumThreads)
+        .where(eq(schema.forumThreads.id, args.threadId))
+        .limit(1);
+      const t = tRows[0];
+      if (!t) return { thread: null, posts: [], myRole: null, myCode: me.code };
+      const postRows = (
+        await db
+          .select()
+          .from(schema.forumPosts)
+          .where(eq(schema.forumPosts.threadId, args.threadId))
+      )
+        .filter((p) => p.deleted === 0)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      const badges = await db.select().from(schema.verifiedBadges);
+      const badgeOk = new Set(
+        badges.filter((b) => b.status === "verified").map((b) => b.collectorCode),
+      );
+      const posts: z.infer<typeof forumPostView>[] = [];
+      for (const p of postRows) {
+        posts.push({
+          id: p.id,
+          authorCode: p.authorCode,
+          authorUsername: p.authorUsername,
+          authorRole: await forumRoleFor(ctx, p.authorCode),
+          authorVerified: badgeOk.has(p.authorCode),
+          confirmedTrades: await forumConfirmedTrades(ctx, p.authorCode),
+          body: p.body,
+          createdAt: p.createdAt,
+          mine: p.authorCode === me.code,
+        });
+      }
+      // Mark read for the reader.
+      const now = Date.now();
+      await db
+        .insert(schema.forumThreadReads)
+        .values({ threadId: t.id, readerCode: me.code, lastReadAt: now })
+        .onConflictDoUpdate({
+          target: [
+            schema.forumThreadReads.threadId,
+            schema.forumThreadReads.readerCode,
+          ],
+          set: { lastReadAt: now },
+        });
+      const last = postRows[postRows.length - 1];
+      return {
+        thread: {
+          id: t.id,
+          category: t.category,
+          title: t.title,
+          authorCode: t.authorCode,
+          authorUsername: t.authorUsername,
+          authorRole: await forumRoleFor(ctx, t.authorCode),
+          authorVerified: badgeOk.has(t.authorCode),
+          pinned: t.pinned === 1,
+          locked: t.locked === 1,
+          replyCount: Math.max(0, postRows.length - 1),
+          createdAt: t.createdAt,
+          lastActivityAt: t.lastActivityAt,
+          lastPostBy: last ? last.authorUsername : t.authorUsername,
+          unread: false,
+          mine: t.authorCode === me.code,
+        },
+        posts,
+        myRole: await forumRoleFor(ctx, me.code),
+        myCode: me.code,
+      };
+    },
+  }),
+
+  createForumThread: defineAction({
+    description:
+      "Starts a forum thread in one of the seven categories with the opening post as its first post. Any registered collector can post (roles are only for moderation); locked categories don't exist — locking is per thread.",
+    request: z.object({
+      category: z.string().max(24),
+      title: z.string().trim().min(1).max(140),
+      body: z.string().trim().min(1).max(4000),
+      asTestFriend: z.boolean(),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      error: z.string().nullable(),
+      threadId: z.number().nullable(),
+    }),
+    async handler(ctx, args) {
+      if (
+        !(FORUM_CATEGORIES as readonly string[]).includes(args.category)
+      )
+        return { ok: false, error: "Pick a category.", threadId: null };
+      const me = await forumActor(ctx, args.asTestFriend);
+      const db = ctx.db<typeof schema>();
+      const now = Date.now();
+      const inserted = await db
+        .insert(schema.forumThreads)
+        .values({
+          category: args.category,
+          title: args.title,
+          authorCode: me.code,
+          authorUsername: me.username,
+          pinned: 0,
+          locked: 0,
+          createdAt: now,
+          lastActivityAt: now,
+        })
+        .returning({ id: schema.forumThreads.id });
+      const threadId = inserted[0]?.id;
+      if (threadId == null)
+        return { ok: false, error: "Couldn't post — try again.", threadId: null };
+      await db.insert(schema.forumPosts).values({
+        threadId,
+        authorCode: me.code,
+        authorUsername: me.username,
+        body: args.body,
+        deleted: 0,
+        createdAt: now,
+      });
+      ctx.invalidateQueries();
+      return { ok: true, error: null, threadId };
+    },
+  }),
+
+  createForumPost: defineAction({
+    description:
+      "Replies to a forum thread (flat posts, oldest first) and bumps the thread's last-activity time. Refused on locked threads (owner/admin excepted) and on threads that don't exist.",
+    request: z.object({
+      threadId: z.number(),
+      body: z.string().trim().min(1).max(4000),
+      asTestFriend: z.boolean(),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const me = await forumActor(ctx, args.asTestFriend);
+      const db = ctx.db<typeof schema>();
+      const tRows = await db
+        .select()
+        .from(schema.forumThreads)
+        .where(eq(schema.forumThreads.id, args.threadId))
+        .limit(1);
+      const t = tRows[0];
+      if (!t) return { ok: false, error: "That thread is gone." };
+      if (t.locked === 1) {
+        const role = await forumRoleFor(ctx, me.code);
+        if (role !== "owner" && role !== "admin")
+          return { ok: false, error: "This thread is locked." };
+      }
+      const now = Date.now();
+      await db.insert(schema.forumPosts).values({
+        threadId: t.id,
+        authorCode: me.code,
+        authorUsername: me.username,
+        body: args.body,
+        deleted: 0,
+        createdAt: now,
+      });
+      await db
+        .update(schema.forumThreads)
+        .set({ lastActivityAt: now })
+        .where(eq(schema.forumThreads.id, t.id));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  moderateForumThread: defineAction({
+    description:
+      "Forum moderation on a thread: pin/unpin (at most TWO pinned threads at a time, enforced here; owner/admin/moderator) and lock/unlock (owner/admin). The moderator's effective role is computed server-side and requires a currently verified badge — an unverified or suspended holder cannot moderate.",
+    request: z.object({
+      threadId: z.number(),
+      action: z.enum(["pin", "unpin", "lock", "unlock"]),
+      asTestFriend: z.boolean(),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const me = await forumActor(ctx, args.asTestFriend);
+      const role = await forumRoleFor(ctx, me.code);
+      if (!role)
+        return { ok: false, error: "You don't hold a forum role." };
+      if (
+        (args.action === "lock" || args.action === "unlock") &&
+        role !== "owner" &&
+        role !== "admin"
+      )
+        return { ok: false, error: "Only owner/admin can lock a thread." };
+      const db = ctx.db<typeof schema>();
+      if (args.action === "pin") {
+        const pinned = await db
+          .select()
+          .from(schema.forumThreads)
+          .where(eq(schema.forumThreads.pinned, 1));
+        if (pinned.length >= 2)
+          return {
+            ok: false,
+            error: "Two threads are already pinned — unpin one first.",
+          };
+      }
+      const set =
+        args.action === "pin"
+          ? { pinned: 1 }
+          : args.action === "unpin"
+            ? { pinned: 0 }
+            : args.action === "lock"
+              ? { locked: 1 }
+              : { locked: 0 };
+      await db
+        .update(schema.forumThreads)
+        .set(set)
+        .where(eq(schema.forumThreads.id, args.threadId));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  deleteForumPost: defineAction({
+    description:
+      "Removes a forum post: the author can remove their own post; owner/admin can remove any post (moderation). The opening post of a thread can't be removed here (it would orphan the thread). Removal is a soft delete — the row stays for audit, the post stops rendering.",
+    request: z.object({ postId: z.number(), asTestFriend: z.boolean() }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const me = await forumActor(ctx, args.asTestFriend);
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.forumPosts)
+        .where(eq(schema.forumPosts.id, args.postId))
+        .limit(1);
+      const post = rows[0];
+      if (!post) return { ok: false, error: "That post is gone." };
+      const threadPosts = await db
+        .select()
+        .from(schema.forumPosts)
+        .where(eq(schema.forumPosts.threadId, post.threadId));
+      const first = threadPosts
+        .filter((p) => p.deleted === 0)
+        .sort((a, b) => a.createdAt - b.createdAt)[0];
+      if (first && first.id === post.id)
+        return {
+          ok: false,
+          error: "The opening post can't be removed.",
+        };
+      const role = await forumRoleFor(ctx, me.code);
+      if (
+        post.authorCode !== me.code &&
+        role !== "owner" &&
+        role !== "admin"
+      )
+        return { ok: false, error: "That's not your post." };
+      await db
+        .update(schema.forumPosts)
+        .set({ deleted: 1 })
+        .where(eq(schema.forumPosts.id, post.id));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  getForumRoles: defineAction({
+    description:
+      "The forum role roster (Admin/Moderator grants), each with its holder's verified state and whether the role is currently effective (a suspended or unverified holder's role is shown as suspended — it confers nothing until the owner re-grants it against a verified badge).",
+    request: z.object({}),
+    response: z.object({
+      roles: z.array(
+        z.object({
+          collectorCode: z.string(),
+          role: z.string(),
+          suspended: z.boolean(),
+          verified: z.boolean(),
+          effective: z.boolean(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const [rows, badges] = await Promise.all([
+        db.select().from(schema.forumRoles),
+        db.select().from(schema.verifiedBadges),
+      ]);
+      const badgeOk = new Set(
+        badges.filter((b) => b.status === "verified").map((b) => b.collectorCode),
+      );
+      return {
+        roles: rows.map((r) => ({
+          collectorCode: r.collectorCode,
+          role: r.role,
+          suspended: r.suspended === 1,
+          verified: badgeOk.has(r.collectorCode),
+          effective: r.suspended !== 1 && badgeOk.has(r.collectorCode),
+        })),
+      };
+    },
+  }),
+
+  grantForumRole: defineAction({
+    description:
+      "OWNER-ONLY forum role grant (Anthony's rule: he alone grants/revokes forum roles, and NO role without a currently verified badge — the grant refuses an unverified target outright). Granting re-activates a suspended role as well. The owner's own Owner role is inherent and never granted here.",
+    request: z.object({
+      collectorCode: z.string().trim().min(1).max(60),
+      role: z.enum(["admin", "moderator"]),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE)
+        return { ok: false, error: "Only the owner grants forum roles." };
+      if (args.collectorCode === OWNER_COLLECTOR_CODE)
+        return {
+          ok: false,
+          error: "The owner already holds the Owner role.",
+        };
+      await ensureVerifiedRoots(ctx);
+      const badge = await badgeRowFor(ctx, args.collectorCode);
+      if (!badge || badge.status !== "verified")
+        return {
+          ok: false,
+          error:
+            "Forum roles require a verified badge — that collector isn't verified.",
+        };
+      const db = ctx.db<typeof schema>();
+      await db
+        .insert(schema.forumRoles)
+        .values({
+          collectorCode: args.collectorCode,
+          role: args.role,
+          grantedBy: profile.collectorCode,
+          grantedAt: Date.now(),
+          suspended: 0,
+        })
+        .onConflictDoUpdate({
+          target: schema.forumRoles.collectorCode,
+          set: {
+            role: args.role,
+            grantedBy: profile.collectorCode,
+            grantedAt: Date.now(),
+            suspended: 0,
+          },
+        });
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  revokeForumRole: defineAction({
+    description:
+      "OWNER-ONLY forum role revocation: removes the holder's forum role entirely (distinct from a badge-revocation suspension, which keeps the row dormant).",
+    request: z.object({
+      collectorCode: z.string().trim().min(1).max(60),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE)
+        return { ok: false, error: "Only the owner revokes forum roles." };
+      const db = ctx.db<typeof schema>();
+      await db
+        .delete(schema.forumRoles)
+        .where(eq(schema.forumRoles.collectorCode, args.collectorCode));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  getPendingListingPhotos: defineAction({
+    description:
+      "OWNER-ONLY photo review queue (Anthony, Nov 4, 2026): every accessory-listing photo still waiting on his approval, with the listing's title, category, price, and seller — the listings themselves are already live; only these photos are gated. Presented one by one in Admin's 'Photos needed for approval' review screen.",
+    request: z.object({}),
+    response: z.object({
+      isOwner: z.boolean(),
+      pending: z.array(
+        z.object({
+          listingId: z.number(),
+          title: z.string(),
+          category: z.string().nullable(),
+          price: z.number(),
+          sellerUsername: z.string(),
+          sellerCode: z.string(),
+          photoUrl: z.string().nullable(),
+          createdAt: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE)
+        return { isOwner: false, pending: [] };
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.marketplaceListings)
+        .where(eq(schema.marketplaceListings.photoStatus, "pending"));
+      const pending = await Promise.all(
+        rows
+          .filter((r) => r.kind === "other" && r.photoBlobKey)
+          .map(async (r) => ({
+            listingId: r.id,
+            title: r.name,
+            category: r.category,
+            price: r.askingPrice,
+            sellerUsername: r.sellerUsername,
+            sellerCode: r.sellerCode,
+            photoUrl: r.photoBlobKey
+              ? await ctx.blobs.getUrl(r.photoBlobKey).catch(() => null)
+              : null,
+            createdAt: r.createdAt,
+          })),
+      );
+      return { isOwner: true, pending };
+    },
+  }),
+
+  reviewListingPhoto: defineAction({
+    description:
+      "OWNER-ONLY photo review decision for an accessory listing: approve makes the photo visible on the already-live listing; reject means the photo never displays (the seller sees it marked not approved and may upload a replacement, which re-enters the queue as pending).",
+    request: z.object({
+      listingId: z.number(),
+      decision: z.enum(["approved", "rejected"]),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (profile.collectorCode !== OWNER_COLLECTOR_CODE)
+        return { ok: false, error: "Only the owner reviews photos." };
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.marketplaceListings)
+        .where(eq(schema.marketplaceListings.id, args.listingId))
+        .limit(1);
+      const row = rows[0];
+      if (!row || row.kind !== "other" || !row.photoBlobKey)
+        return { ok: false, error: "That listing has no photo to review." };
+      await db
+        .update(schema.marketplaceListings)
+        .set({ photoStatus: args.decision, updatedAt: new Date().toISOString() })
+        .where(eq(schema.marketplaceListings.id, args.listingId));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  replaceListingPhoto: defineAction({
+    description:
+      "Seller replaces the photo on their own accessory listing (after a rejection, or to fix a bad shot): the new photo goes back into the owner's review queue as pending — the listing stays live throughout, other users keep seeing the placeholder until the replacement is approved.",
+    request: z.object({
+      listingId: z.number(),
+      photoBase64: z.string().min(100).max(9_000_000),
+    }),
+    response: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.marketplaceListings)
+        .where(eq(schema.marketplaceListings.id, args.listingId))
+        .limit(1);
+      const row = rows[0];
+      if (!row || row.kind !== "other")
+        return { ok: false, error: "That listing takes no photo." };
+      if (row.sellerCode !== profile.collectorCode)
+        return { ok: false, error: "That's not your listing." };
+      const key = `marketplace-photos/${profile.collectorCode}-${Date.now()}.jpg`;
+      const bytes = Uint8Array.from(atob(args.photoBase64), (c) =>
+        c.charCodeAt(0),
+      );
+      await ctx.blobs.put(key, bytes, { contentType: "image/jpeg" });
+      await db
+        .update(schema.marketplaceListings)
+        .set({
+          photoBlobKey: key,
+          photoStatus: "pending",
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.marketplaceListings.id, args.listingId));
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  getArtworkDownloadQuote: defineAction({
+    description:
+      "Sizes the pending artwork download for the intro-screen download choice (Anthony, Nov 4, 2026): given the card ids this device still needs, samples up to 60 of them evenly and measures the server's stored artwork for the sample, returning the average bytes per image so the client can quote the pending total honestly (and count progress against that same figure). avgBytes is null when the server holds no measurable sample, so the client falls back to a count-only quote instead of inventing a size.",
+    request: z.object({
+      pendingIds: z.array(z.number().int().positive()).max(20000),
+    }),
+    response: z.object({
+      avgBytes: z.number().nullable(),
+      sampled: z.number(),
+      measured: z.number(),
+    }),
+    async handler(ctx, args) {
+      const ids = args.pendingIds;
+      if (ids.length === 0) {
+        return { avgBytes: null, sampled: 0, measured: 0 };
+      }
+      const SAMPLE = 60;
+      const step = Math.max(1, Math.floor(ids.length / SAMPLE));
+      const picks: number[] = [];
+      for (let i = 0; i < ids.length && picks.length < SAMPLE; i += step) {
+        const id = ids[i];
+        if (id != null) picks.push(id);
+      }
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select({
+          id: schema.cards.id,
+          imageBlobKey: schema.cards.imageBlobKey,
+        })
+        .from(schema.cards)
+        .where(inArray(schema.cards.id, picks));
+      let totalBytes = 0;
+      let measured = 0;
+      for (const row of rows) {
+        if (!row.imageBlobKey) continue;
+        const meta = await ctx.blobs.head(row.imageBlobKey);
+        if (meta && meta.size > 0) {
+          totalBytes += meta.size;
+          measured += 1;
+        }
+      }
+      return {
+        avgBytes: measured > 0 ? Math.round(totalBytes / measured) : null,
+        sampled: picks.length,
+        measured,
       };
     },
   }),
@@ -8899,7 +11475,7 @@ export const Actions = {
       "Marketplace browse: every available or sale-pending listing (sold and removed are hidden), searchable by name or name + collector number, filterable by item type and set/collection, sortable by price or newest. Market values are resolved live for cards and sealed items so the asking-vs-market comparison is current. Also returns Anthony's feedback gate state.",
     request: z.object({
       query: z.string().max(80),
-      kind: z.enum(["all", "card", "sealed", "comic"]),
+      kind: z.enum(["all", "card", "sealed", "comic", "other"]),
       group: z.string().max(120),
       sort: z.enum(["price-asc", "price-desc", "newest"]),
     }),
@@ -8912,17 +11488,12 @@ export const Actions = {
       const db = ctx.db<typeof schema>();
       const rows = await db.select().from(schema.marketplaceListings);
       const view = await listingViewContext(ctx);
-      let listings = rows
-        .filter((r) => r.status === "available" || r.status === "pending")
-        .map((r) =>
-          toListingView(
-            r,
-            profile.collectorCode,
-            view.cardById,
-            view.sealedUnitByName,
-            view.pendingByListing,
-          ),
-        );
+      let listings = await listingViewsWithPhotos(
+        ctx,
+        rows.filter((r) => r.status === "available" || r.status === "pending"),
+        profile.collectorCode,
+        view,
+      );
       if (args.kind !== "all")
         listings = listings.filter((l) => l.kind === args.kind);
       // Search: name tokens as substrings + optional collector
@@ -8974,21 +11545,17 @@ export const Actions = {
       const db = ctx.db<typeof schema>();
       const rows = await db.select().from(schema.marketplaceListings);
       const view = await listingViewContext(ctx);
-      const listings = rows
-        .filter(
-          (r) =>
-            r.sellerCode === profile.collectorCode && r.status !== "removed",
-        )
-        .map((r) =>
-          toListingView(
-            r,
-            profile.collectorCode,
-            view.cardById,
-            view.sealedUnitByName,
-            view.pendingByListing,
+      const listings = (
+        await listingViewsWithPhotos(
+          ctx,
+          rows.filter(
+            (r) =>
+              r.sellerCode === profile.collectorCode && r.status !== "removed",
           ),
+          profile.collectorCode,
+          view,
         )
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       const gate = await marketplaceGateFor(ctx, profile.collectorCode);
       return {
         listings,
@@ -8998,11 +11565,66 @@ export const Actions = {
     },
   }),
 
+  getSellerShop: defineAction({
+    description:
+      "One seller's shop inside the Marketplace: their live listings (available and sale pending, newest first) plus their confirmed-sales count — completed deals where both sides confirmed, the verified events their Trust Score is built from. Every collector has a shop automatically; no setup step exists.",
+    request: z.object({ sellerCode: z.string().max(40) }),
+    response: marketplaceShopResponse,
+    async handler(
+      ctx,
+      args,
+    ): Promise<z.infer<typeof marketplaceShopResponse>> {
+      const profile = await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const rows = await db.select().from(schema.marketplaceListings);
+      const view = await listingViewContext(ctx);
+      const sellerRows = rows.filter(
+        (r) => r.sellerCode === args.sellerCode,
+      );
+      const username =
+        sellerRows[0]?.sellerUsername ??
+        (args.sellerCode === JARVIS_REGISTRY_PROFILE.collector_id
+          ? JARVIS_REGISTRY_PROFILE.username
+          : args.sellerCode === profile.collectorCode
+            ? profile.username
+            : args.sellerCode);
+      const listings = (
+        await listingViewsWithPhotos(
+          ctx,
+          sellerRows.filter(
+            (r) => r.status === "available" || r.status === "pending",
+          ),
+          profile.collectorCode,
+          view,
+        )
+      ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const offers = await db.select().from(schema.marketplaceOffers);
+      const sellerListingIds = new Set(sellerRows.map((r) => r.id));
+      const confirmedSales = offers.filter(
+        (o) =>
+          sellerListingIds.has(o.listingId) &&
+          o.status === "accepted" &&
+          o.completedAt != null,
+      ).length;
+      const gate = await marketplaceGateFor(ctx, profile.collectorCode);
+      return {
+        sellerCode: args.sellerCode,
+        sellerUsername: username,
+        sellerIsTest: TEST_COLLECTOR_CODES.has(args.sellerCode),
+        mine: args.sellerCode === profile.collectorCode,
+        confirmedSales,
+        listingsLive: listings.length,
+        listings,
+        gate,
+      };
+    },
+  }),
+
   createListing: defineAction({
     description:
       "Publishes a marketplace listing from Anthony's own collection: a binder card in a finish he owns (quantity checked against the binder, minus what he already has listed), a sealed product he owns, or one of his graded comics (display fields come from the comics catalog in the client). Blocked while a finished deal awaits his feedback.",
     request: z.object({
-      kind: z.enum(["card", "sealed", "comic"]),
+      kind: z.enum(["card", "sealed", "comic", "other"]),
       cardId: z.number().nullable(),
       sealedName: z.string().nullable(),
       comicId: z.string().nullable(),
@@ -9014,6 +11636,20 @@ export const Actions = {
       condition: z.string().max(40),
       qty: z.number().int().min(1).max(99),
       askingPrice: z.number().positive().max(1000000),
+      /** "Allow offers" opt-in; the client defaults it off —
+          fixed price is the default way a listing sells. */
+      allowOffers: z.boolean(),
+      /** Accessory ("other") listings only: seller-written
+          title/description, the preset category, and the
+          REQUIRED photo of the actual item (JPEG base64 from
+          the client file picker). The photo starts "pending"
+          — the listing is live immediately, but other users
+          see a placeholder until the owner approves the
+          photo in Admin. */
+      otherTitle: z.string().max(120),
+      otherDescription: z.string().max(1200),
+      otherCategory: z.string().max(60),
+      photoBase64: z.string().max(9_000_000).nullable(),
     }),
     response: marketMutationResponse,
     async handler(
@@ -9029,6 +11665,17 @@ export const Actions = {
       const profile = await ensureCollectorProfile(ctx);
       const gate = await marketplaceGateFor(ctx, profile.collectorCode);
       if (gate.blocked) return fail(FEEDBACK_GATE_MESSAGE);
+      // Verified-only selling (Anthony's Marketplace rule,
+      // Nov 4, 2026): only a collector holding the verified
+      // badge may post a listing. Enforced here, server-side
+      // — the badge ledger is the single source, the same one
+      // forum roles will read.
+      await ensureVerifiedRoots(ctx);
+      const sellerBadge = await badgeRowFor(ctx, profile.collectorCode);
+      if (!sellerBadge || sellerBadge.status !== "verified")
+        return fail(
+          "Selling on the Marketplace is for verified collectors — earn the verified badge first (a completed trade with a verified collector, both sides confirmed).",
+        );
       const db = ctx.db<typeof schema>();
       const now = new Date().toISOString();
       const existing = await db.select().from(schema.marketplaceListings);
@@ -9045,6 +11692,10 @@ export const Actions = {
         groupName: string;
         finish: string;
         marketValue: number | null;
+        description?: string | null;
+        category?: string | null;
+        photoBlobKey?: string | null;
+        photoStatus?: string | null;
       } | null = null;
       if (args.kind === "card") {
         if (args.cardId == null) return fail("Pick a card first.");
@@ -9098,6 +11749,49 @@ export const Actions = {
               ? Math.round((item.value / item.qty) * 100) / 100
               : item.value,
         };
+      } else if (args.kind === "other") {
+        // Accessory listing (Anthony, Nov 4, 2026): free-form,
+        // NOT tied to any collection inventory — no counts are
+        // checked or changed, and there is NO market value
+        // (nothing tracks these; a comp is never invented).
+        // A photo of the actual item is required; it starts
+        // pending the owner's approval while the listing
+        // itself goes live immediately.
+        const ACCESSORY_CATEGORIES = [
+          "Oversized cards",
+          "Playmats",
+          "Lore counters",
+          "Flags & banners",
+          "Pins",
+          "Deck boxes & storage",
+          "Other accessories",
+        ];
+        const title = args.otherTitle.trim();
+        if (!title) return fail("Give the item a title first.");
+        if (!ACCESSORY_CATEGORIES.includes(args.otherCategory))
+          return fail("Pick a category for the item.");
+        if (!args.photoBase64 || args.photoBase64.length < 100)
+          return fail(
+            "Accessory listings need a photo of the actual item.",
+          );
+        const key = `marketplace-photos/${profile.collectorCode}-${Date.now()}.jpg`;
+        const bytes = Uint8Array.from(atob(args.photoBase64), (c) =>
+          c.charCodeAt(0),
+        );
+        await ctx.blobs.put(key, bytes, { contentType: "image/jpeg" });
+        fields = {
+          cardId: null,
+          sealedName: null,
+          comicId: null,
+          name: title,
+          groupName: args.otherCategory,
+          finish: "Accessory",
+          marketValue: null,
+          description: args.otherDescription.trim() || null,
+          category: args.otherCategory,
+          photoBlobKey: key,
+          photoStatus: "pending",
+        };
       } else {
         if (!args.comicId || !args.comicName)
           return fail("Pick a comic first.");
@@ -9126,7 +11820,12 @@ export const Actions = {
           condition: args.condition,
           qty: args.qty,
           askingPrice: Math.round(args.askingPrice * 100) / 100,
+          allowOffers: args.allowOffers ? 1 : 0,
           marketValue: fields.marketValue,
+          description: fields.description ?? null,
+          category: fields.category ?? null,
+          photoBlobKey: fields.photoBlobKey ?? null,
+          photoStatus: fields.photoStatus ?? null,
           status: "available",
           createdAt: now,
           updatedAt: now,
@@ -9143,10 +11842,11 @@ export const Actions = {
 
   updateListing: defineAction({
     description:
-      "Manages one of Anthony's own listings: edit the asking price (only while it's available), mark it sold outside a marketplace deal, relist a sold item, or remove it. A listing with a deal in progress can't be edited or removed — the deal owns its state.",
+      "Manages one of Anthony's own listings: edit the asking price (only while it's available), flip the per-listing Allow offers switch (only while it's available), mark it sold outside a marketplace deal, relist a sold item, or remove it. A listing with a deal in progress can't be edited or removed — the deal owns its state.",
     request: z.object({
       listingId: z.number(),
       askingPrice: z.number().positive().max(1000000).nullable(),
+      allowOffers: z.boolean().nullable(),
       action: z.enum(["none", "remove", "mark_sold", "relist"]),
     }),
     response: marketMutationResponse,
@@ -9213,6 +11913,18 @@ export const Actions = {
         await db
           .update(schema.marketplaceListings)
           .set({ status: "available", updatedAt: now })
+          .where(eq(schema.marketplaceListings.id, listing.id));
+        return { ok: true, error: null, offerId: null, listingId: listing.id };
+      }
+      if (args.allowOffers != null) {
+        if (listing.status !== "available")
+          return fail("Offers can only be changed while the listing is available.");
+        await db
+          .update(schema.marketplaceListings)
+          .set({
+            allowOffers: args.allowOffers ? 1 : 0,
+            updatedAt: now,
+          })
           .where(eq(schema.marketplaceListings.id, listing.id));
         return { ok: true, error: null, offerId: null, listingId: listing.id };
       }
@@ -9324,6 +12036,10 @@ export const Actions = {
       if (!listing) return fail("That listing is gone.");
       if (listing.sellerCode === profile.collectorCode)
         return fail("That's your own listing.");
+      if (listing.allowOffers !== 1)
+        return fail(
+          "This seller isn't taking offers on this listing — the asking price is the price. Buy Now claims it.",
+        );
       if (listing.status === "sold" || listing.status === "removed")
         return fail("That item is no longer for sale.");
       const mine = await db
@@ -9646,6 +12362,10 @@ export const Actions = {
         comment: args.comment,
         createdAt: new Date().toISOString(),
       });
+      // If this was the second side's rating, the deal is
+      // fully complete — settle its copies now (best-effort;
+      // the Inbox read sweep retries anything that misses).
+      await settleMarketplaceIfReady(ctx, offer, listing);
       return { ok: true, error: null, offerId: offer.id, listingId: listing.id };
     },
   }),
@@ -9667,6 +12387,26 @@ export const Actions = {
         db.select().from(schema.marketplaceFeedback),
       ]);
       const listingById = new Map(listings.map((l) => [l.id, l]));
+      // Auto-settlement sweep (Nov 4, 2026): a fully complete
+      // card deal whose settlement didn't land at feedback
+      // time settles here on read — the same retry-on-read
+      // pattern trades and cash purchases use.
+      for (const o of offers) {
+        if (o.completedAt && !o.settledAt) {
+          const listing = listingById.get(o.listingId);
+          if (listing) {
+            await settleMarketplaceIfReady(ctx, o, listing);
+            if (o.settledAt == null) {
+              const fresh = await db
+                .select()
+                .from(schema.marketplaceOffers)
+                .where(eq(schema.marketplaceOffers.id, o.id))
+                .limit(1);
+              if (fresh[0]?.settledAt) o.settledAt = fresh[0].settledAt;
+            }
+          }
+        }
+      }
       // Retry trust-ledger writes for completed deals involving me.
       for (const o of offers) {
         if (
@@ -9707,7 +12447,7 @@ export const Actions = {
             offerId: o.id,
             listingId: listing.id,
             itemName: listing.name,
-            kind: listing.kind as "card" | "sealed" | "comic",
+            kind: listing.kind as "card" | "sealed" | "comic" | "other",
             cardId: listing.cardId,
             sealedName: listing.sealedName,
             comicId: listing.comicId,
@@ -9750,7 +12490,7 @@ export const Actions = {
           offerId: o.id,
           listingId: listing.id,
           itemName: listing.name,
-          kind: listing.kind as "card" | "sealed" | "comic",
+          kind: listing.kind as "card" | "sealed" | "comic" | "other",
           cardId: listing.cardId,
           sealedName: listing.sealedName,
           comicId: listing.comicId,
@@ -9782,7 +12522,30 @@ export const Actions = {
           ),
           feedbackClosed,
           createdAt: o.createdAt,
+          photoUrl: null,
+          photoStatus: null,
         });
+      }
+      // Accessory deals carry the seller's photo under the
+      // same visibility rule as the listings themselves.
+      for (const d of deals) {
+        const listing = listingById.get(d.listingId);
+        if (listing && listing.kind === "other") {
+          d.photoStatus = (listing.photoStatus as
+            | "pending"
+            | "approved"
+            | "rejected"
+            | null) ?? null;
+          if (
+            listing.photoBlobKey &&
+            (listing.photoStatus === "approved" ||
+              listing.sellerCode === me)
+          ) {
+            d.photoUrl = await ctx.blobs
+              .getUrl(listing.photoBlobKey)
+              .catch(() => null);
+          }
+        }
       }
       incoming.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       outgoing.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -10159,6 +12922,7 @@ export const Actions = {
           "lego",
           "comics",
           "starwars",
+          "funko",
         ]),
       ),
     }),
@@ -10196,6 +12960,7 @@ export const Actions = {
         "lego",
         "comics",
         "starwars",
+        "funko",
       ]),
       hidden: z.boolean(),
     }),
@@ -10229,9 +12994,9 @@ export const Actions = {
 
   getGameCatalog: defineAction({
     description:
-      "One other game's catalog overview (Pokémon, Magic: The Gathering, or Star Wars: Unlimited): its sets with printing counts and owned counts, plus the catalog download progress (sets done of total, printings cataloged, complete) from the resumable importer.",
+      "One other collection's catalog overview (Pokémon, Magic: The Gathering, Star Wars: Unlimited, or Funko Pop!): its sets with printing counts and owned counts, plus the catalog download progress (sets done of total, printings cataloged, complete) from the resumable importer.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
     }),
     response: z.object({
       sections: z.array(
@@ -10257,7 +13022,7 @@ export const Actions = {
           name: schema.gameCards.sectionName,
           sort: sql<number>`min(${schema.gameCards.sectionSort})`,
           total: sql<number>`count(*)`,
-          owned: sql<number>`coalesce(sum(${schema.gameCards.ownedQty}), 0)`,
+          owned: sql<number>`coalesce(sum(${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty}), 0)`,
         })
         .from(schema.gameCards)
         .where(eq(schema.gameCards.game, args.game))
@@ -10286,7 +13051,7 @@ export const Actions = {
     description:
       "One set's printings inside a game catalog, in collector-number order, paged (150 at a time): name, number, rarity/finish, artwork link, price where the source publishes one, and the collector's owned count (0 = missing/ghosted).",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
       sectionKey: z.string().min(1).max(80),
       offset: z.number().int().min(0).max(200000).default(0),
     }),
@@ -10305,6 +13070,7 @@ export const Actions = {
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
           ownedQty: z.number(),
+          ownedSealedQty: z.number(),
         }),
       ),
     }),
@@ -10345,6 +13111,7 @@ export const Actions = {
           imageUrl: r.imageUrl,
           price: r.price,
           ownedQty: r.ownedQty,
+          ownedSealedQty: r.ownedSealedQty,
         })),
       };
     },
@@ -10354,7 +13121,7 @@ export const Actions = {
     description:
       "Searches one game catalog by card name (a trailing number narrows to that collector number, the same rule as the Lorcana search): up to 60 printings with their set, number, artwork link, price, and owned count — the add-by-search path for the new games.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
       query: z.string().trim().min(1).max(80),
     }),
     response: z.object({
@@ -10370,6 +13137,7 @@ export const Actions = {
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
           ownedQty: z.number(),
+          ownedSealedQty: z.number(),
         }),
       ),
     }),
@@ -10400,6 +13168,63 @@ export const Actions = {
           imageUrl: r.imageUrl,
           price: r.price,
           ownedQty: r.ownedQty,
+          ownedSealedQty: r.ownedSealedQty,
+        })),
+      };
+    },
+  }),
+
+  getGameOwnedItems: defineAction({
+    description:
+      "Every catalog item of one game the collector owns at least one copy of (opened or sealed), in theme/set order — the Lego Sealed shelf reads its sealed rows from here.",
+    request: z.object({
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+    }),
+    response: z.object({
+      items: z.array(
+        z.object({
+          id: z.number(),
+          sectionKey: z.string(),
+          sectionName: z.string(),
+          printed: z.string(),
+          name: z.string(),
+          rarity: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          ownedQty: z.number(),
+          ownedSealedQty: z.number(),
+        }),
+      ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          and(
+            eq(schema.gameCards.game, args.game),
+            or(
+              gt(schema.gameCards.ownedQty, 0),
+              gt(schema.gameCards.ownedSealedQty, 0),
+            ),
+          ),
+        )
+        .orderBy(
+          asc(schema.gameCards.sectionSort),
+          asc(schema.gameCards.slotSort),
+        )
+        .limit(2000);
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          sectionKey: r.sectionKey,
+          sectionName: r.sectionName,
+          printed: r.printed,
+          name: r.name,
+          rarity: r.rarity,
+          imageUrl: r.imageUrl,
+          ownedQty: r.ownedQty,
+          ownedSealedQty: r.ownedSealedQty,
         })),
       };
     },
@@ -10407,31 +13232,49 @@ export const Actions = {
 
   setGameCardOwned: defineAction({
     description:
-      "Sets how many copies of one Pokémon/Magic/Star Wars printing the collector owns (0 = missing, shown ghosted). Only the owned count changes; catalog data is untouched.",
+      "Sets how many copies of one catalog item the collector owns (0 = missing, shown ghosted). For Lego sets it can also set the SEALED copy count, which Lego tracks apart from opened copies because sealed-vs-opened drives Lego value. Only owned counts change; catalog data is untouched.",
     request: z.object({
       id: z.number().int(),
       ownedQty: z.number().int().min(0).max(999),
+      sealedQty: z.number().int().min(0).max(999).optional(),
     }),
-    response: z.object({ ok: z.literal(true), ownedQty: z.number() }),
+    response: z.object({
+      ok: z.literal(true),
+      ownedQty: z.number(),
+      ownedSealedQty: z.number(),
+    }),
     async handler(
       ctx,
       args,
-    ): Promise<{ ok: true; ownedQty: number }> {
+    ): Promise<{ ok: true; ownedQty: number; ownedSealedQty: number }> {
       const db = ctx.db<typeof schema>();
       await db
         .update(schema.gameCards)
-        .set({ ownedQty: args.ownedQty })
+        .set({
+          ownedQty: args.ownedQty,
+          ...(args.sealedQty != null
+            ? { ownedSealedQty: args.sealedQty }
+            : {}),
+        })
+        .where(eq(schema.gameCards.id, args.id));
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
         .where(eq(schema.gameCards.id, args.id));
       ctx.invalidateQueries();
-      return { ok: true as const, ownedQty: args.ownedQty };
+      return {
+        ok: true as const,
+        ownedQty: rows[0]?.ownedQty ?? args.ownedQty,
+        ownedSealedQty: rows[0]?.ownedSealedQty ?? 0,
+      };
     },
   }),
 
   importGameCatalog: defineAction({
     description:
-      "Downloads the next chunk of one game's catalog from its canonical free source (Pokémon: PokemonTCG/pokemon-tcg-data; Magic: Scryfall; Star Wars: Unlimited: Fantasy Flight's official card API) into game_cards and returns the running progress. Resumable: each call continues where the last stopped until the catalog is complete; existing printings and owned counts are never overwritten.",
+      "Downloads the next chunk of one game's catalog from its canonical free source (Pokémon: PokemonTCG/pokemon-tcg-data; Magic: Scryfall; Star Wars: Unlimited: Fantasy Flight's official card API; Funko Pop!: the open-source funko-pop-data dataset scraped from Pop Price Guide / HobbyDB; Lego: Rebrickable's official bulk catalog downloads) into game_cards and returns the running progress. Resumable: each call continues where the last stopped until the catalog is complete; existing printings and owned counts are never overwritten.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
     }),
     response: z.object({
       ok: z.boolean(),
@@ -10457,7 +13300,11 @@ export const Actions = {
             ? await importPokemonChunk(ctx, state)
             : args.game === "magic"
               ? await importMagicChunk(ctx, state)
-              : await importStarwarsChunk(ctx, state);
+              : args.game === "funko"
+                ? await importFunkoChunk(ctx, state)
+                : args.game === "lego"
+                  ? await importLegoChunk(ctx, state)
+                  : await importStarwarsChunk(ctx, state);
         const cardsTotal = await saveImportMeta(
           ctx,
           args.game,
@@ -10618,12 +13465,23 @@ export const Actions = {
           /^[A-Za-z0-9_]{3,20}$/,
           "Use 3-20 letters, numbers, or underscores",
         ),
+      /** Optional invite code from a Share Vault X invite
+          (Anthony, Nov 4, 2026 — invite lineage): resolved
+          server-side against the registry roster; a code that
+          matches nobody is ignored (no voucher on file) and
+          NEVER blocks registration. The newcomer presents a
+          code from the invite itself — never a typed name. */
+      inviteCode: z.string().trim().max(24).optional(),
     }),
     response: z.object({
       ok: z.boolean(),
       error: z.string().nullable(),
       username: z.string().nullable(),
       collectorCode: z.string().nullable(),
+      /** The inviter's username when the presented invite
+          code resolved, so the Welcome page can confirm whose
+          invite it was; null when no code / no match. */
+      vouchedByUsername: z.string().nullable(),
     }),
     async handler(ctx, args) {
       const profile = await ensureCollectorProfile(ctx);
@@ -10647,22 +13505,58 @@ export const Actions = {
               error: "That username is already taken on the network.",
               username: null,
               collectorCode: null,
+              vouchedByUsername: null,
             };
           }
         }
       }
       const db = ctx.db<typeof schema>();
       const now = new Date().toISOString();
+      // Invite lineage (Anthony, Nov 4, 2026): resolve the
+      // presented invite code to the inviting collector and
+      // record it on the new profile + the lineage ledger.
+      // No valid code = "no voucher on file", recorded by
+      // absence; a code naming the registrant themself is
+      // ignored (nobody vouches themself in). Lineage is
+      // provenance only — it never touches the badge.
+      let voucher: { collectorId: string; username: string } | null =
+        null;
+      if (args.inviteCode) {
+        const resolved = await resolveInviteCode(args.inviteCode);
+        if (resolved && resolved.collectorId !== profile.collectorCode)
+          voucher = resolved;
+      }
       await db
         .update(schema.collectorProfile)
-        .set({ username: args.username, registeredAt: now, updatedAt: now })
+        .set({
+          username: args.username,
+          registeredAt: now,
+          updatedAt: now,
+          vouchedByCode: voucher?.collectorId ?? null,
+          vouchedByUsername: voucher?.username ?? null,
+          vouchedAt: voucher ? now : null,
+        })
         .where(eq(schema.collectorProfile.id, 1));
+      if (voucher) {
+        await db
+          .insert(schema.inviteLineage)
+          .values({
+            newCollectorCode: profile.collectorCode,
+            newUsername: args.username,
+            vouchedByCode: voucher.collectorId,
+            vouchedByUsername: voucher.username,
+            source: "registration",
+            createdAt: now,
+          })
+          .onConflictDoNothing();
+      }
       ctx.invalidateQueries();
       return {
         ok: true,
         error: null,
         username: args.username,
         collectorCode: profile.collectorCode,
+        vouchedByUsername: voucher?.username ?? null,
       };
     },
   }),
@@ -11459,10 +14353,11 @@ export const Actions = {
 
   submitChangeRequest: defineAction({
     description:
-      "Opens a change-request TICKET for the developer (Anthony, Nov 3, 2026 — the ticket system that replaced the email model): a type (change request, bug, or idea) plus a text message from the Settings form. Stamped server-side with the sender's username, Collector ID, and date; the ticket starts Open and unassigned, the sender can follow it under Your tickets in Settings, and Anthony works it from his ticket list. Returns the new ticket's number.",
+      "Opens a change-request TICKET for the developer (Anthony, Nov 3, 2026 — the ticket system that replaced the email model): a type (change request, bug, or idea) plus a text message from the Settings form, with an optional screenshot (Anthony, Nov 4, 2026 — bug-form photo upload; JPEG bytes as base64, stored in blob storage so the photo travels with the ticket for the admin and the sender). Stamped server-side with the sender's username, Collector ID, and date; the ticket starts Open and unassigned, the sender can follow it under Your tickets in Settings, and Anthony works it from his ticket list. Returns the new ticket's number.",
     request: z.object({
       kind: z.enum(["change", "bug", "idea"]),
       message: z.string().min(1).max(1000),
+      imageBase64: z.string().min(100).max(9_000_000).optional(),
     }),
     response: z.object({
       ok: z.boolean(),
@@ -11487,7 +14382,20 @@ export const Actions = {
           assignee: null,
         })
         .returning({ id: schema.changeRequests.id });
-      return { ok: true, error: null, ticketId: inserted[0]?.id ?? null };
+      const ticketId = inserted[0]?.id ?? null;
+      if (ticketId != null && args.imageBase64) {
+        const key = `ticket-photos/${ticketId}.jpg`;
+        const bytes = Uint8Array.from(
+          atob(args.imageBase64),
+          (c) => c.charCodeAt(0),
+        );
+        await ctx.blobs.put(key, bytes, { contentType: "image/jpeg" });
+        await db
+          .update(schema.changeRequests)
+          .set({ photoBlobKey: key })
+          .where(eq(schema.changeRequests.id, ticketId));
+      }
+      return { ok: true, error: null, ticketId };
     },
   }),
 
@@ -11509,6 +14417,7 @@ export const Actions = {
           readAt: z.string().nullable(),
           status: z.string(),
           assignee: z.string().nullable(),
+          photoUrl: z.string().nullable(),
         }),
       ),
     }),
@@ -11525,17 +14434,22 @@ export const Actions = {
       return {
         isOwner: true,
         envelopeTestSeen: (profile.envelopeTestSeen ?? 0) > 0,
-        requests: rows.map((r) => ({
-          id: r.id,
-          senderCode: r.senderCode,
-          senderUsername: r.senderUsername,
-          kind: r.kind,
-          message: r.message,
-          createdAt: r.createdAt,
-          readAt: r.readAt ?? null,
-          status: r.status ?? "open",
-          assignee: r.assignee ?? null,
-        })),
+        requests: await Promise.all(
+          rows.map(async (r) => ({
+            id: r.id,
+            senderCode: r.senderCode,
+            senderUsername: r.senderUsername,
+            kind: r.kind,
+            message: r.message,
+            createdAt: r.createdAt,
+            readAt: r.readAt ?? null,
+            status: r.status ?? "open",
+            assignee: r.assignee ?? null,
+            photoUrl: r.photoBlobKey
+              ? await ctx.blobs.getUrl(r.photoBlobKey)
+              : null,
+          })),
+        ),
       };
     },
   }),
@@ -11553,6 +14467,7 @@ export const Actions = {
           createdAt: z.string(),
           status: z.string(),
           assignee: z.string().nullable(),
+          photoUrl: z.string().nullable(),
         }),
       ),
     }),
@@ -11566,14 +14481,146 @@ export const Actions = {
         .orderBy(desc(schema.changeRequests.id))
         .limit(50);
       return {
-        tickets: rows.map((r) => ({
-          id: r.id,
-          kind: r.kind,
-          message: r.message,
-          createdAt: r.createdAt,
-          status: r.status ?? "open",
-          assignee: r.assignee ?? null,
-        })),
+        tickets: await Promise.all(
+          rows.map(async (r) => ({
+            id: r.id,
+            kind: r.kind,
+            message: r.message,
+            createdAt: r.createdAt,
+            status: r.status ?? "open",
+            assignee: r.assignee ?? null,
+            photoUrl: r.photoBlobKey
+              ? await ctx.blobs.getUrl(r.photoBlobKey)
+              : null,
+          })),
+        ),
+      };
+    },
+  }),
+
+  sendDeckByMail: defineAction({
+    description:
+      "Shares one of the sender's decks with a connected collector as plain-text mail (Anthony, Nov 4, 2026 — deck sharing, simplified at his direction): the deck renders server-side to a plain-text list — deck name and inks at the top, then one line per card (quantity, card name, collector number, set) — and lands in the recipient's Inbox as a mail message they can read and use. No shared-deck object is created and the sender's deck is untouched. The recipient must be on the Collector ID registry.",
+    request: z.object({
+      deckId: z.number().int().positive(),
+      toCode: z.string().min(1).max(40),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      error: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      const fail = (error: string) => ({ ok: false, error });
+      const profile = await ensureCollectorProfile(ctx);
+      const me = profile.collectorCode;
+      if (args.toCode === me)
+        return fail("Pick someone other than yourself.");
+      const db = ctx.db<typeof schema>();
+      const deckRows = await db
+        .select()
+        .from(schema.decks)
+        .where(eq(schema.decks.id, args.deckId));
+      const deck = deckRows[0];
+      if (!deck || deck.ownerCode !== me)
+        return fail("That deck isn't yours to share.");
+      const list = await supabaseRest(
+        "profiles?select=collector_id,username&order=created_at.asc",
+      );
+      const registryRows = list.ok ? asRegistryRows(list.json) : [];
+      const recipient = registryRows.find(
+        (r) => r.collector_id === args.toCode,
+      );
+      if (!recipient)
+        return fail("That collector isn't on the network anymore.");
+      const lines = parseDeckCards(deck.cardsJson);
+      if (lines.length === 0)
+        return fail("That deck has no cards to share yet.");
+      const cardRows = await db
+        .select()
+        .from(schema.cards)
+        .where(
+          inArray(
+            schema.cards.id,
+            lines.map((l) => l.cardId),
+          ),
+        );
+      const byId = new Map(cardRows.map((r) => [r.id, r]));
+      const inks = [
+        ...new Set(
+          cardRows.map((r) => r.ink).filter((i): i is string => Boolean(i)),
+        ),
+      ];
+      const total = lines.reduce((sum, l) => sum + l.qty, 0);
+      const bodyLines = [
+        deck.name,
+        inks.length > 0 ? `Inks: ${inks.join(" / ")}` : null,
+        `${total} cards`,
+        "",
+        ...lines.map((l) => {
+          const c = byId.get(l.cardId);
+          if (!c) return `${l.qty} × (unknown card)`;
+          const num = c.number != null ? ` #${c.number}` : "";
+          return `${l.qty} × ${c.fullName}${num} · ${c.groupName}`;
+        }),
+      ].filter((l): l is string => l != null);
+      await db.insert(schema.mailMessages).values({
+        fromCode: me,
+        fromUsername: profile.username,
+        toCode: recipient.collector_id,
+        toUsername: recipient.username,
+        subject: `Deck list: ${deck.name}`,
+        body: bodyLines.join("\n"),
+        createdAt: new Date().toISOString(),
+      });
+      ctx.invalidateQueries();
+      return { ok: true, error: null };
+    },
+  }),
+
+  getMailMessage: defineAction({
+    description:
+      "One mail message for its recipient (or its sender): subject, from, date, and the full body text. Opening it as the recipient stamps it read, which clears its NEW badge in the Inbox. Anyone else gets found=false.",
+    request: z.object({ id: z.number().int().positive() }),
+    response: z.object({
+      found: z.boolean(),
+      subject: z.string(),
+      fromUsername: z.string(),
+      toUsername: z.string(),
+      date: z.string(),
+      body: z.string(),
+    }),
+    async handler(ctx, args) {
+      const empty = {
+        found: false,
+        subject: "",
+        fromUsername: "",
+        toUsername: "",
+        date: "",
+        body: "",
+      };
+      const profile = await ensureCollectorProfile(ctx);
+      const me = profile.collectorCode;
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.mailMessages)
+        .where(eq(schema.mailMessages.id, args.id));
+      const msg = rows[0];
+      if (!msg || (msg.toCode !== me && msg.fromCode !== me)) return empty;
+      if (msg.toCode === me && !msg.readAt) {
+        await db
+          .update(schema.mailMessages)
+          .set({ readAt: new Date().toISOString() })
+          .where(eq(schema.mailMessages.id, msg.id));
+        ctx.invalidateQueries();
+      }
+      return {
+        found: true,
+        subject: msg.subject,
+        fromUsername: msg.fromUsername,
+        toUsername: msg.toUsername,
+        date: msg.createdAt,
+        body: msg.body,
       };
     },
   }),
@@ -13073,7 +16120,10 @@ export const Actions = {
           })
           .from(schema.cashPurchases),
         db
-          .select({ status: schema.marketplaceListings.status })
+          .select({
+            status: schema.marketplaceListings.status,
+            photoStatus: schema.marketplaceListings.photoStatus,
+          })
           .from(schema.marketplaceListings),
         db
           .select({ completedAt: schema.marketplaceOffers.completedAt })
@@ -13534,6 +16584,16 @@ export const Actions = {
       metrics.set(
         "deals.listingsActive",
         `${deals.listingsActive}|${deals.listingsTotal}`,
+      );
+      // Photo review queue (Anthony, Nov 4, 2026): a rising
+      // pending count lights the Admin shield like any other
+      // change, so a photo waiting on his approval is noticed
+      // the same way as everything else in Admin.
+      metrics.set(
+        "marketplace.pendingPhotos",
+        String(
+          listingRows.filter((r) => r.photoStatus === "pending").length,
+        ),
       );
       metrics.set(
         "tickets.status",

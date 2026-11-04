@@ -132,12 +132,41 @@ export const priceAlerts = sqliteTable("price_alerts", {
       client's COMICS catalog, so the server resolves their current
       value from its mirrored COMIC_ALERT_CATALOG in actions.ts. */
   comicId: text("comic_id"),
+  /** game_cards id when targetKind is "game" (migration 0058) —
+      alerts generalize to any cataloged item with a tracked
+      price; the server refuses game items whose catalog row
+      carries no price. */
+  gameCardId: integer("game_card_id"),
   /** Display name captured when the alert was set. */
   label: text("label").notNull(),
   /** "below" | "above" */
   direction: text("direction").notNull(),
   /** USD threshold for the item's unit value. */
   threshold: real("threshold").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+/** Portfolio Watchlist (Nov 4, 2026): items the user is watching,
+    owned or not — cards and sealed products — added from the item's
+    detail view ("Watch" action) and managed in Portfolio's
+    Watchlist area. One row per watched target; prices are read live
+    from the same canonical sources as everywhere else (binder card
+    market value / sealed unit value), never stored here. */
+export const watchlistItems = sqliteTable("watchlist_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** "card" | "sealed" | "game" | "comic" (migration 0058:
+      the Watchlist generalizes to any cataloged item — game
+      catalog rows (Pokémon/Magic/Star Wars/Funko/Lego) and
+      graded comics included). */
+  targetKind: text("target_kind").notNull(),
+  /** Binder card id when targetKind is "card". */
+  cardId: integer("card_id"),
+  /** Exact sealed item name when targetKind is "sealed". */
+  sealedName: text("sealed_name"),
+  /** game_cards id when targetKind is "game". */
+  gameCardId: integer("game_card_id"),
+  /** Client comic catalog id when targetKind is "comic". */
+  comicId: text("comic_id"),
   createdAt: text("created_at").notNull(),
 });
 
@@ -170,6 +199,11 @@ export const collectorProfile = sqliteTable("collector_profile", {
       the default Vault Dark applies. Presentation only — the theme
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),
+  /** The UI language he picked in Settings ("en" | "es" | "de" |
+      "fr" | "ja"; Anthony, Nov 4, 2026); null = never picked, so
+      English applies. Presentation only — catalog names and
+      user content are never translated. */
+  language: text("language"),
   /** Set-page grid density he picked (Anthony, Nov 4, 2026):
       2 or 4 cards across on set/chapter grids app-wide; null =
       never picked, so the default of 2 applies. Presentation
@@ -257,6 +291,12 @@ export const collectorProfile = sqliteTable("collector_profile", {
       people won't know it's off and it would cause problems);
       the switch lives in Settings. */
   shareCollection: integer("share_collection").notNull().default(1),
+  /** The comic ids on display on this collector's Library
+      slab wall (migration 0058, Anthony, Nov 4, 2026): a JSON
+      array of client COMICS ids, max 5. NULL = never chosen —
+      the wall then shows Anthony's standing default, his two
+      signed comics (aliens-1, batman-136). */
+  libraryComicDisplay: text("library_comic_display"),
   /** 1 = this collector's TOTAL COLLECTION VALUE is hidden
       from other collectors on their profile (Anthony, Nov 3,
       2026, ~11:23 AM): a privacy choice with two controls —
@@ -318,7 +358,92 @@ export const collectorProfile = sqliteTable("collector_profile", {
       established profile — the welcome then shows once in
       its returning, dismissible form, with no forced tour). */
   registeredAt: text("registered_at"),
+  /** This user's own Vault X invite code (Anthony, Nov 4,
+      2026 — invite lineage): carried by the Share Vault X
+      invite they send, distinct from their Collector ID,
+      resolved server-side at a newcomer's registration so
+      attribution is captured from the invite itself and
+      never typed in as a name. Null = not generated yet
+      (generated on first read by the server). */
+  inviteCode: text("invite_code"),
+  /** Invite lineage for THIS profile (Anthony, Nov 4, 2026):
+      the collector code + username of whoever's invite code
+      was presented when this user registered, plus when.
+      Null = no voucher on file — recorded honestly, never
+      guessed. OWNER-ONLY data: it is read only by the
+      Admin user-trust action, never shown on any public
+      profile or friends view. Lineage is provenance only —
+      it NEVER feeds the verified badge. */
+  vouchedByCode: text("vouched_by_code"),
+  vouchedByUsername: text("vouched_by_username"),
+  vouchedAt: text("vouched_at"),
   updatedAt: text("updated_at").notNull(),
+});
+
+/** The verified badge ledger (Anthony, Nov 4, 2026 — his
+    design, spec at research_notes/verified-badge-spec):
+    one row per collector who has ever held the badge.
+    status "verified" | "revoked"; basis "root" (the owner,
+    root of the chain) | "builtin" (Jarvis, the built-in
+    friend) | "owner" (the owner's manual grant — the proof
+    honestly reads "Verified by the owner") | "trade" (earned
+    through a completed, both-sides-confirmed trade with an
+    already-verified counterparty). proof_json carries the
+    transparency record the badge's explainer shows: for a
+    trade, the deal kind/id, the counterparty, and when it
+    completed. Revocation keeps the row (and its proof) —
+    a revoked badge is visible as revoked, never erased. */
+export const verifiedBadges = sqliteTable("verified_badges", {
+  collectorCode: text("collector_code").primaryKey(),
+  username: text("username").notNull(),
+  status: text("status", { enum: ["verified", "revoked"] }).notNull(),
+  basis: text("basis", {
+    enum: ["root", "builtin", "owner", "trade"],
+  }).notNull(),
+  proofJson: text("proof_json"),
+  grantedAt: text("granted_at").notNull(),
+  revokedAt: text("revoked_at"),
+  revokedBy: text("revoked_by"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** Every badge conferral a completed trade ever produced
+    (Anthony, Nov 4, 2026): the pair rule — a given pair of
+    accounts can confer the badge only ONCE, ever — is
+    enforced against this history, so revoking a badge does
+    not let the same pair re-confer it. Invite lineage never
+    writes here: the badge comes only from completed trades
+    with a verified counterparty or the owner's own grant. */
+export const badgeConferrals = sqliteTable("badge_conferrals", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  earnerCode: text("earner_code").notNull(),
+  granterCode: text("granter_code").notNull(),
+  /** "trade" | "cash" | "marketplace" — the deal family. */
+  kind: text("kind").notNull(),
+  refId: integer("ref_id").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+/** Invite lineage ledger (Anthony, Nov 4, 2026): one row
+    per registration this server witnessed being vouched in
+    by someone's invite code (source "registration"), so the
+    owner can trace a swarm of signups back to one voucher
+    in Admin. OWNER-ONLY: read only by the Admin user-trust
+    action; never rendered on a public profile, a friends
+    view, or anywhere another user can see it. Provenance
+    only — it never grants, implies, or feeds the verified
+    badge. */
+export const inviteLineage = sqliteTable("invite_lineage", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  newCollectorCode: text("new_collector_code").notNull(),
+  newUsername: text("new_username").notNull(),
+  vouchedByCode: text("vouched_by_code").notNull(),
+  vouchedByUsername: text("vouched_by_username").notNull(),
+  /** "registration" (a code presented at sign-up) — kept as
+      a column so a future witnessed source can be told apart
+      from a witnessed registration rather than blended in. */
+  source: text("source").notNull(),
+  createdAt: text("created_at").notNull(),
 });
 
 /** A deck the collector built in the app (Anthony, Nov 3,
@@ -391,6 +516,12 @@ export const marketplaceListings = sqliteTable("marketplace_listings", {
   condition: text("condition").notNull(),
   qty: integer("qty").notNull().default(1),
   askingPrice: real("asking_price").notNull(),
+  /** Per-listing "Allow offers" switch (Anthony's approved
+      Marketplace design, Nov 4, 2026): fixed price is the
+      default way everything sells — Buy Now at the asking
+      price. Offers exist only where the seller turned this
+      on for that listing. 0 = off (the default), 1 = on. */
+  allowOffers: integer("allow_offers").notNull().default(0),
   /** Market value per unit at listing time (comics: the logged
       value; cards/sealed are re-resolved live when read). */
   marketValue: real("market_value"),
@@ -398,6 +529,23 @@ export const marketplaceListings = sqliteTable("marketplace_listings", {
   status: text("status").notNull().default("available"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  /** Accessory ("other") listings only (Anthony, Nov 4, 2026):
+      the seller-written description and the preset category
+      (Oversized cards, Playmats, Lore counters, Flags &
+      banners, Pins, Deck boxes & storage, Other accessories).
+      Null on catalog listings. */
+  description: text("description"),
+  category: text("category"),
+  /** The seller-uploaded photo's blob key (accessory listings
+      only; required for them, null on catalog listings). */
+  photoBlobKey: text("photo_blob_key"),
+  /** Photo review state (Anthony's corrected flow, Nov 4,
+      2026): the listing is live immediately; only the photo
+      is gated. "pending" — visible to the seller only, other
+      users see a placeholder; "approved" — visible to
+      everyone; "rejected" — never displays, the seller may
+      upload a replacement. Null on catalog listings. */
+  photoStatus: text("photo_status"),
 });
 
 /** A Buy Now claim (type "claim", at the full asking price) or a
@@ -422,6 +570,13 @@ export const marketplaceOffers = sqliteTable("marketplace_offers", {
   /** 1 once the completed deal has been written to the server
       trust_events ledger. */
   trustRecorded: integer("trust_recorded").notNull().default(0),
+  /** Auto-settlement (same columns and machinery as trades /
+      cash purchases): stamped when a fully complete card
+      deal's copies have moved seller -> buyer in both
+      collections; settlement_json stores the replayable plan.
+      Null = not settled yet. */
+  settledAt: text("settled_at"),
+  settlementJson: text("settlement_json"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -696,6 +851,31 @@ export const changeRequests = sqliteTable("change_requests", {
       (e.g. "Anthony" or "Jarvis"); null = unassigned. The
       submitter sees the assignee when following their ticket. */
   assignee: text("assignee"),
+  /** Blob key of the screenshot attached to a bug report
+      (Anthony, Nov 4, 2026 — bug-form photo upload); null =
+      no photo. The photo travels with the ticket: the admin
+      sees it in the ticket detail and the sender sees it
+      under Your tickets. */
+  photoBlobKey: text("photo_blob_key"),
+});
+
+/** Plain mail between collectors (Anthony, Nov 4, 2026 —
+    deck sharing, simplified at his direction): sharing a
+    deck renders it to a plain-text list and mails it here;
+    the recipient reads it in their Inbox. One row per
+    message; readAt null = unread for the recipient. */
+export const mailMessages = sqliteTable("mail_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fromCode: text("from_code").notNull(),
+  fromUsername: text("from_username").notNull(),
+  toCode: text("to_code").notNull(),
+  toUsername: text("to_username").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  /** ISO instant the message was sent. */
+  createdAt: text("created_at").notNull(),
+  /** ISO instant the recipient opened it; null = unread. */
+  readAt: text("read_at"),
 });
 
 /** Read markers for order message threads (Anthony, Nov 3,
@@ -731,9 +911,10 @@ export const inboxDeletions = sqliteTable("inbox_deletions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   /** The collector who deleted the item from their Inbox. */
   viewerCode: text("viewer_code").notNull(),
-  /** "cash" | "trade" | "ticket" */
+  /** "cash" | "trade" | "ticket" | "mail" */
   kind: text("kind").notNull(),
-  /** cash_purchases.id / trade_offers.id / change_requests.id. */
+  /** cash_purchases.id / trade_offers.id / change_requests.id /
+      mail_messages.id. */
   refId: integer("ref_id").notNull(),
   /** ISO instant of the deletion. */
   deletedAt: text("deleted_at").notNull(),
@@ -853,6 +1034,64 @@ export const gameCards = sqliteTable("game_cards", {
   /** Market price in USD where the source publishes one. */
   price: real("price"),
   ownedQty: integer("owned_qty").notNull().default(0),
+  /** Sealed copies owned (Lego only, migration 0058): Lego
+      value turns on the sealed-vs-opened distinction, so a
+      Lego set tracks sealed copies apart from opened ones.
+      Always 0 for the card games and Funko. */
+  ownedSealedQty: integer("owned_sealed_qty").notNull().default(0),
+});
+
+/** Forums (Anthony, Nov 4, 2026 — Direction A, "Latest-first
+    hybrid", LIVE at launch): threads live in one flat
+    category-tagged feed; posts are flat under their thread.
+    Read markers are per reader so thread rows can show an
+    honest read/unread state. Roles are forum-scoped and
+    gated on the verified-badge ledger (see forum_roles and
+    the actions): a role is effective only while its holder
+    is currently verified, and a badge revocation suspends it
+    until the owner re-grants. */
+export const forumThreads = sqliteTable("forum_threads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** Category key: announcements | general | showoffs |
+      decktalk | grading | trading | help. */
+  category: text("category").notNull(),
+  title: text("title").notNull(),
+  authorCode: text("author_code").notNull(),
+  authorUsername: text("author_username").notNull(),
+  pinned: integer("pinned").notNull().default(0),
+  locked: integer("locked").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  lastActivityAt: integer("last_activity_at").notNull(),
+});
+
+export const forumPosts = sqliteTable("forum_posts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadId: integer("thread_id").notNull(),
+  authorCode: text("author_code").notNull(),
+  authorUsername: text("author_username").notNull(),
+  body: text("body").notNull(),
+  deleted: integer("deleted").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const forumThreadReads = sqliteTable("forum_thread_reads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadId: integer("thread_id").notNull(),
+  readerCode: text("reader_code").notNull(),
+  lastReadAt: integer("last_read_at").notNull(),
+});
+
+export const forumRoles = sqliteTable("forum_roles", {
+  collectorCode: text("collector_code").primaryKey(),
+  /** "admin" | "moderator" (the owner's Owner role is
+      inherent to the owner account, never a row). */
+  role: text("role").notNull(),
+  grantedBy: text("granted_by").notNull(),
+  grantedAt: integer("granted_at").notNull(),
+  /** 1 once a badge revocation suspended the role; only an
+      owner re-grant (which requires a current verified
+      badge) clears it. */
+  suspended: integer("suspended").notNull().default(0),
 });
 
 /** Resumable import progress per game: the importer works in

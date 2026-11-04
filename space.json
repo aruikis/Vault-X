@@ -43,6 +43,24 @@
       },
       "schedule": "daily 06:00 America/Chicago",
       "purpose": "Continues the resumable Star Wars: Unlimited catalog download (Fantasy Flight official card API) a chunk per day until complete."
+    },
+    {
+      "id": "lorcana-binder-game-import-funko",
+      "action": "importGameCatalog",
+      "args": {
+        "game": "funko"
+      },
+      "schedule": "daily 06:10 America/Chicago",
+      "purpose": "Continues the resumable Funko Pop! catalog download (open-source funko-pop-data dataset, scraped from Pop Price Guide / HobbyDB) a chunk per day until complete; no-ops as a light re-check once complete."
+    },
+    {
+      "id": "lorcana-binder-game-import-lego",
+      "action": "importGameCatalog",
+      "args": {
+        "game": "lego"
+      },
+      "schedule": "daily 06:20 America/Chicago",
+      "purpose": "Continues the resumable Lego catalog download (Rebrickable official bulk data: sets.csv.gz + themes.csv.gz) a chunk per day until the catalog is complete; no-ops as a light re-check once complete."
     }
   ]
 }

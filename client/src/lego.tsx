@@ -1,21 +1,25 @@
-// Lego section scaffold (Anthony approved the researched section
-// structure on Nov 2, 2026 — Sets by theme, Sealed, Minifigures, and
-// Retiring Soon, modeled on BrickEconomy / Brickanize / Brickway).
+// Lego section (Anthony approved the researched section
+// structure on Nov 2, 2026 — Sets by theme, Sealed, Minifigures,
+// and Retiring Soon, modeled on BrickEconomy / Brickanize /
+// Brickway).
 //
-// Scaffold only: Anthony has not cataloged any Lego sets or figures
-// in this app yet, so every area is an honest empty state describing
-// what will live there — no sets, themes, figures, prices, or
-// retiring dates are invented. One real rule from Anthony is built
-// into the structure: he has SEALED Lego sets, and sealed-vs-opened
-// drives Lego value, so Sets and the Sealed area carry that
-// distinction from the start.
-//
-// The view mirrors the Comics/Lorcana construction: a summary
-// header, area pills (the Social/Portfolio pattern), and one page
-// per area.
+// Nov 4, 2026: the FULL Lego catalog download landed (Anthony's
+// direction, ~12:10 PM) — Rebrickable's official bulk data,
+// imported resumably into the shared game-catalog store like
+// Pokémon/Magic/Star Wars/Funko. The Sets area IS that catalog
+// (the shared GamePanel, embedded): themes as sections, every
+// set ghosted until owned, sealed-vs-opened tracked as two
+// counts because that distinction drives Lego value. The
+// Sealed area lists the sets marked sealed. Minifigures and
+// Retiring Soon stay honest empty states: Rebrickable's bulk
+// files carry no per-set minifigure counts and no retirement
+// schedule, and nothing is invented to fill them.
 
 import { useEffect, useState } from "react";
-import { SearchScanRow } from "./searchScanRow";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "./api";
+import { replaceNavState } from "./historyNav";
+import { GamePanel } from "./games";
 
 type LegoArea = "sets" | "sealed" | "minifigures" | "retiring";
 
@@ -24,7 +28,7 @@ const AREAS: { key: LegoArea; label: string; blurb: string }[] = [
     key: "sets",
     label: "Sets",
     blurb:
-      "Your sets grouped by theme — each set marked Sealed or Opened, because that distinction drives what a Lego set is worth.",
+      "Every Lego set in the catalog, grouped by theme — each of yours marked Sealed or Opened, because that distinction drives what a Lego set is worth.",
   },
   {
     key: "sealed",
@@ -46,13 +50,72 @@ const AREAS: { key: LegoArea; label: string; blurb: string }[] = [
   },
 ];
 
+function SealedShelf() {
+  const owned = useQuery({
+    queryKey: ["gameOwnedItems", "lego"],
+    queryFn: () => api.getGameOwnedItems({ game: "lego" }),
+  });
+  const sealedSets = (owned.data?.items ?? []).filter(
+    (i) => i.ownedSealedQty > 0,
+  );
+  if (owned.isPending) {
+    return (
+      <p className="mt-4 text-sm text-[var(--dim)]">
+        Loading your sealed shelf…
+      </p>
+    );
+  }
+  if (sealedSets.length === 0) {
+    return (
+      <div className="mt-4 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center">
+        <p className="text-sm font-medium text-[var(--text)]">
+          Nothing here yet
+        </p>
+        <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--dim)]">
+          No sealed sets added. Mark a set sealed from its page in
+          Sets and it will sit here, apart from your opened builds.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <ul className="mt-4 divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
+      {sealedSets.map((i) => (
+        <li key={i.id} className="flex items-center gap-3 py-2.5">
+          {i.imageUrl ? (
+            <img
+              src={i.imageUrl}
+              alt=""
+              loading="lazy"
+              className="h-14 w-14 shrink-0 rounded object-cover"
+            />
+          ) : (
+            <span className="h-14 w-14 shrink-0 rounded bg-[var(--bg)]" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-[var(--text)]">
+              {i.name}
+            </span>
+            <span className="block text-xs text-[var(--dim)]">
+              {i.sectionName} · #{i.printed}
+              {i.rarity ? ` · ${i.rarity}` : ""}
+            </span>
+          </span>
+          <span className="shrink-0 rounded-full border border-[var(--gold)]/50 px-2.5 py-1 text-xs font-bold text-[var(--gold-soft)]">
+            Sealed ×{i.ownedSealedQty}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function LegoPanel({ onScan }: { onScan?: () => void }) {
   const [area, setArea] = useState<LegoArea>("sets");
-  // Section search (Nov 3, 2026, ~11:14 PM): the Search +
-  // Scan row every collection section carries. No Lego
-  // items are cataloged yet, so a search honestly reports
-  // the empty catalog instead of pretending to look.
-  const [legoQuery, setLegoQuery] = useState("");
+  const catalog = useQuery({
+    queryKey: ["gameCatalog", "lego"],
+    queryFn: () => api.getGameCatalog({ game: "lego" }),
+  });
   // Area switches are navigation steps (whole-app back-gesture fix):
   // each pushes a history entry, and this listener syncs the area
   // from whatever entry Back lands on — a Lego entry restores its
@@ -78,23 +141,30 @@ export function LegoPanel({ onScan }: { onScan?: () => void }) {
     if (key === area) return;
     setArea(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    try {
-      window.history.pushState({ mcView: "lego", legoArea: key }, "");
-    } catch {
-      // History unavailable: the area still switched.
-    }
+    // Three-back rule (Anthony, Nov 4, 2026): area switches are
+    // main-flow navigation — replace, never push.
+    replaceNavState({ mcView: "lego", legoArea: key });
   };
   const current = AREAS.find((a) => a.key === area) ?? AREAS[0];
+  const setsCataloged = catalog.data?.cardsTotal ?? 0;
+  const setsOwned = catalog.data?.ownedTotal ?? 0;
   return (
     <div className="pt-4">
       <section aria-label="Legos collection summary">
         <p className="font-album text-lg leading-snug text-[var(--text)]">
-          No Lego sets cataloged yet
+          {catalog.isPending
+            ? "Loading your Lego collection…"
+            : setsCataloged > 0
+              ? `${setsCataloged.toLocaleString()} sets in the catalog`
+              : "The Lego catalog is on its way"}
         </p>
         <p className="mt-1.5 text-sm text-[var(--dim)]">
-          This section is scaffolded and ready — when you catalogue
-          your sets, they will land here with their sealed or opened
-          state attached.
+          {setsOwned > 0
+            ? `You own ${setsOwned.toLocaleString()} ${setsOwned === 1 ? "copy" : "copies"} so far — sealed copies counted apart from opened ones.`
+            : "Browse the catalog in Sets and mark what you own — each set as Sealed or Opened."}
+          {catalog.data && !catalog.data.complete
+            ? " The catalog download is still running in chunks; more sets land as it goes."
+            : ""}
         </p>
       </section>
 
@@ -103,26 +173,8 @@ export function LegoPanel({ onScan }: { onScan?: () => void }) {
       </h1>
       <p className="mt-1 text-sm text-[var(--dim)]">
         Four areas, the way the Lego collection apps organize a
-        collection. Pick an area to see what it will hold.
+        collection. The Sets area carries the full catalog search.
       </p>
-
-      <div className="mt-4">
-        <SearchScanRow
-          inputId="lego-section-search"
-          label="Search your Lego sets and minifigures"
-          placeholder="Search sets, themes, figures…"
-          value={legoQuery}
-          onChange={setLegoQuery}
-          onScan={onScan}
-        />
-      </div>
-      {legoQuery.trim().length >= 2 ? (
-        <p className="mt-3 text-sm text-[var(--dim)]">
-          No Lego items are cataloged yet, so there&rsquo;s nothing
-          to match — once your sets are cataloged, this bar searches
-          them.
-        </p>
-      ) : null}
 
       <div
         className="mt-4 flex flex-wrap gap-2"
@@ -154,28 +206,30 @@ export function LegoPanel({ onScan }: { onScan?: () => void }) {
           <p className="mt-1.5 text-sm leading-relaxed text-[var(--dim)]">
             {current.blurb}
           </p>
-          <div className="mt-4 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center">
-            <p className="text-sm font-medium text-[var(--text)]">
-              Nothing here yet
-            </p>
-            <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--dim)]">
-              {area === "sets"
-                ? "No sets added. When they are, they'll be grouped by theme, each marked Sealed or Opened."
-                : area === "sealed"
-                  ? "No sealed sets added. Your sealed sets will sit here, apart from opened builds."
-                  : area === "minifigures"
-                    ? "No minifigures added yet."
-                    : "Nothing is being tracked for retirement yet — sets get flagged here once they're cataloged."}
-            </p>
-          </div>
+          {area === "sets" ? (
+            <GamePanel game="lego" embedded onScan={onScan} />
+          ) : area === "sealed" ? (
+            <SealedShelf />
+          ) : (
+            <div className="mt-4 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center">
+              <p className="text-sm font-medium text-[var(--text)]">
+                Nothing here yet
+              </p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--dim)]">
+                {area === "minifigures"
+                  ? "No minifigures added yet — and the catalog source doesn't publish per-set minifigure counts, so none are shown rather than guessed."
+                  : "Nothing is being tracked for retirement yet — the catalog source doesn't publish a retirement schedule, so this stays empty rather than inventing dates."}
+              </p>
+            </div>
+          )}
         </section>
       ) : null}
 
       <footer className="mt-8 border-t border-[var(--border)] pt-3 text-xs leading-relaxed text-[var(--dim)]">
-        Structure approved from the collection-app research
-        (BrickEconomy / Brickanize / Brickway patterns). No Lego items
-        have been cataloged in this app yet, so no sets, values, or
-        retirement dates are shown.
+        Catalog: Rebrickable&rsquo;s official bulk Lego data — set
+        numbers, names, themes, years, piece counts, and set images.
+        That source publishes no prices and no per-set minifigure
+        counts, so neither is shown.
       </footer>
     </div>
   );

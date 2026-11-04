@@ -22,10 +22,17 @@
 // of a count editor.
 
 import { useEffect, useRef, useState } from "react";
+import {
+  pushWindowState,
+  readNavState,
+  replaceNavState,
+  scrubWindowKeys,
+} from "./historyNav";
 import { Turntable } from "./turntable";
 import { SearchScanRow } from "./searchScanRow";
 import { OwnedLocationBar } from "./whereItLives";
 import { PriceAlertBox } from "./priceAlerts";
+import { WatchToggleButton } from "./portfolioTools";
 import {
 Area,
 AreaChart,
@@ -624,7 +631,21 @@ function CgcHologram({ comic }: { comic: Comic }) {
     compartment from the comic compartment, and the cover sits
     inset inside the case like a real holder. The flip view
     pairs this slab front with his real label close-up photo. */
-export function SlabFront({ comic }: { comic: Comic }) {
+export function SlabFront({
+  comic,
+  uniformLabel = false,
+}: {
+  comic: Comic;
+  /** Library display wall (Anthony, Nov 4, 2026): every slab on
+      the wall renders with IDENTICAL geometry — the label band
+      is locked to one slim fixed height (extra small print
+      clips; readability there does not matter) and the cover
+      inset is locked to one fixed aspect ratio — so slabs with
+      different labels and different cover-photo aspects line
+      up evenly, like real slabs on a shelf. The detail view
+      keeps the natural variable layout. */
+  uniformLabel?: boolean;
+}) {
   const isSignature = comic.label === "Signature Series";
   const isAliens = comic.id === "aliens-1";
   // Anthony, Nov 3, 2026, ~2:08 PM: the label band STILL reads
@@ -676,6 +697,8 @@ export function SlabFront({ comic }: { comic: Comic }) {
             height, the way a real holder's label sits. */}
         <div
           className={`relative overflow-hidden text-black ${
+            uniformLabel ? "h-[54px] shrink-0" : ""
+          } ${
             isSignature
               ? "bg-gradient-to-b from-[#fbf3cd] via-[#f7e7a1] to-[#f1d67c]"
               : "bg-gradient-to-b from-[#c3d6f2] via-[#aec8ec] to-[#9dbde6]"
@@ -726,52 +749,31 @@ export function SlabFront({ comic }: { comic: Comic }) {
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-white/25 via-white/5 to-transparent"
           />
-          <div className="relative flex gap-1 px-1 pb-[3px] pt-[2px]">
-            {/* Grade box: a solid EQUAL SQUARE around the 9.8
-                alone (Anthony, Nov 3, 2026, ~4:05–4:06 PM: the
-                box was a tall vertical rectangle — on his real
-                CGC labels the white grade box is a square, on
-                every slab), and NO "WHITE Pages" line under the
-                grade on the non-signature (Universal) labels —
-                those words do not belong there. Signature
-                Series books and Aliens #1's older label print
-                WHITE Pages on the centered line instead (see
-                labelSubLine), so the fact stays on those
-                labels without sitting under the grade.
-                Mandalorian #4: the box is nudged a pixel DOWN
-                (its one approved tweak) via a transform, so
-                the label's layout height does not change. */}
-            <div
-              className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center self-center rounded-[4px] bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
-                isSignature
-                  ? "border-b-2 border-[#d4af37]"
-                  : "border-b-2 border-[#2c56a3]"
-              }`}
-              style={
-                isMandalorian
-                  ? { transform: "translateY(1px)" }
-                  : undefined
-              }
-            >
-              <span className="text-[14px] font-black leading-none tracking-tight">
-                9.8
-              </span>
-            </div>
-            {/* Right of the grade box: the centered title block
-                with the holographic sticker at its right, and
-                beneath it — spanning the full remaining width,
-                the way the real labels run their small print
-                edge to edge — ONE shallow small-print strip:
-                credits at the left, the cert number centered
-                over its barcode, and the label's note at the
-                right, each allowed to wrap inside its own third
-                so nothing is cut off. Joining the credits onto
-                one wrapping line (and the signed / edition /
-                WHITE Pages lines onto the title block's second
-                line) is what lets the whole band stay slim. */}
-            <div className="relative flex min-w-0 flex-1 flex-col">
-              <div className="flex items-center gap-1">
-                <div className="min-w-0 flex-1">
+          <div className="relative px-1 pb-[3px] pt-[2px]">
+            {/* Label body (Anthony, Nov 4, 2026): the GRADE sits
+                in the MIDDLE of the label — a three-column grid
+                (title block | grade box | hologram) puts the
+                grade square dead center instead of off at the
+                left edge, as he directed. The grade box itself
+                is unchanged: a solid EQUAL SQUARE around the
+                9.8 alone (Anthony, Nov 3, 2026, ~4:05–4:06 PM:
+                on his real CGC labels the white grade box is a
+                square, on every slab), no "WHITE Pages" line
+                under the grade on the non-signature (Universal)
+                labels — those words do not belong there;
+                Signature Series books and Aliens #1's older
+                label print WHITE Pages on the centered line
+                instead (see labelSubLine). Mandalorian #4's box
+                keeps its one approved tweak: nudged a pixel
+                DOWN via a transform. Beneath the grid —
+                spanning the full width, the way the real labels
+                run their small print edge to edge — ONE shallow
+                small-print strip: credits at the left, the cert
+                number centered over its barcode, and the
+                label's note at the right, each allowed to wrap
+                inside its own third so nothing is cut off. */}
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+              <div className="min-w-0">
                   <p
                     className={`text-center font-extrabold leading-[1.05] ${
                       longTitle ? "text-[7.5px]" : "text-[8.5px]"
@@ -787,10 +789,28 @@ export function SlabFront({ comic }: { comic: Comic }) {
                       {labelSubLine}
                     </p>
                   ) : null}
-                </div>
+              </div>
+              <div
+                className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[4px] bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
+                  isSignature
+                    ? "border-b-2 border-[#d4af37]"
+                    : "border-b-2 border-[#2c56a3]"
+                }`}
+                style={
+                  isMandalorian
+                    ? { transform: "translateY(1px)" }
+                    : undefined
+                }
+              >
+                <span className="text-[14px] font-black leading-none tracking-tight">
+                  9.8
+                </span>
+              </div>
+              <div className="flex items-center justify-end">
                 <CgcHologram comic={comic} />
               </div>
-              <div className="mt-auto flex items-end justify-between gap-1 pt-px">
+            </div>
+            <div className="flex items-end justify-between gap-1 pt-px">
                 <div className="min-w-0 flex-1">
                   <p className="text-[4px] leading-[1.2]">
                     {comic.labelLeftNote ? (
@@ -829,7 +849,6 @@ export function SlabFront({ comic }: { comic: Comic }) {
                   ) : null}
                 </div>
               </div>
-            </div>
           </div>
         </div>
         {/* The molded ridge under the label compartment, then the
@@ -852,11 +871,17 @@ export function SlabFront({ comic }: { comic: Comic }) {
           className="h-[2px] bg-black/70 shadow-[0_1px_0_rgba(255,255,255,0.28)]"
         />
         <div className="p-1.5 pt-1">
-          <div className="relative overflow-hidden rounded-[3px] shadow-[0_0_0_1px_rgba(255,255,255,0.22),0_2px_10px_rgba(0,0,0,0.5)]">
+          <div
+            className={`relative overflow-hidden rounded-[3px] shadow-[0_0_0_1px_rgba(255,255,255,0.22),0_2px_10px_rgba(0,0,0,0.5)] ${
+              uniformLabel ? "aspect-[0.66]" : ""
+            }`}
+          >
             <img
               src={comic.cover}
               alt=""
-              className="block w-full select-none"
+              className={`block w-full select-none ${
+                uniformLabel ? "h-full object-cover" : ""
+              }`}
               draggable={false}
             />
             {/* The recess shading + a soft diagonal reflection
@@ -1353,6 +1378,18 @@ export function ComicSheet({
               was recorded for the slabs, so there is no gain/loss figure
               here.
             </p>
+            {/* Watch — graded comics join the Portfolio
+                Watchlist like every cataloged item (Anthony,
+                Nov 4, 2026): the watch tracks the slab's
+                checked value. */}
+            <div className="mt-4">
+              <WatchToggleButton
+                targetKind="comic"
+                cardId={null}
+                sealedName={null}
+                comicId={comic.id}
+              />
+            </div>
             {/* Price alerts — every item detail carries the box
                 (Anthony's rule), graded comics included: its
                 heading opens the all-alerts management page. The
@@ -1498,20 +1535,14 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
   const [area, setArea] = useState<ComicsArea>("slabs");
   const [groupKey, setGroupKey] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(true);
-  // True while a comics group entry ({ mcView: "comics", comicsGroup })
-  // is the current history entry — kept in sync by pickGroup and the
-  // history listener below, so "← All comics" knows whether it can
-  // step back through history or should just flip state locally.
-  const groupPushedRef = useRef(false);
-  // Area switches and group drill-ins are navigation steps (whole-app
-  // back-gesture fix): each pushes a history entry carrying the
-  // Comics navigation snapshot, and this listener syncs the panel
-  // from whatever entry Back lands on — a Comics entry restores its
-  // area/group (the plain Comics entry means Slabs + the group
-  // picker), and pops landing on overlay entries (no mcView, e.g. the
-  // comic sheet's own entry) are left to those overlays' traps. It
-  // also runs once on mount, so returning to Comics via Back
-  // restores the area/group its entry names.
+  // Area switches and group drill-ins are main-flow navigation
+  // (three-back rule, Anthony, Nov 4, 2026): each REPLACES the
+  // single app entry carrying the Comics navigation snapshot,
+  // and this listener syncs the panel from whatever entry Back
+  // lands on — a Comics entry restores its area/group (the plain
+  // Comics entry means Slabs + the group picker). It also runs
+  // once on mount, so returning to Comics restores the
+  // area/group its entry names.
   useEffect(() => {
     const syncFromHistory = () => {
       const st = window.history.state as {
@@ -1523,11 +1554,9 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
       const a = COMICS_AREAS.find((x) => x.key === st.comicsArea);
       setArea(a ? a.key : "slabs");
       if (typeof st.comicsGroup === "string") {
-        groupPushedRef.current = true;
         setGroupKey(st.comicsGroup);
         setShowPicker(false);
       } else {
-        groupPushedRef.current = false;
         setGroupKey(null);
         setShowPicker(true);
       }
@@ -1539,18 +1568,13 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
   const pickArea = (key: ComicsArea) => {
     if (key === area) return;
     setArea(key);
-    try {
-      window.history.pushState(
-        {
-          mcView: "comics",
-          comicsArea: key,
-          ...(!showPicker && groupKey ? { comicsGroup: groupKey } : {}),
-        },
-        "",
-      );
-    } catch {
-      // History unavailable: the area still switched.
-    }
+    // Three-back rule (Anthony, Nov 4, 2026): area switches are
+    // main-flow navigation — replace, never push.
+    replaceNavState({
+      mcView: "comics",
+      comicsArea: key,
+      ...(!showPicker && groupKey ? { comicsGroup: groupKey } : {}),
+    });
   };
   const group: ComicGroup | undefined = COMIC_GROUPS.find(
     (g) => g.key === groupKey,
@@ -1558,36 +1582,33 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const sheetPushedRef = useRef(false);
+  const sheetHeldRef = useRef(false);
   const selected: Comic | undefined = COMICS.find((c) => c.id === selectedId);
   const openComic = (id: string) => {
     if (selectedId === id) return;
     setSelectedId(id);
-    try {
-      // Merge the underlying entry's state (the useHistorySheet
-      // pattern in App.tsx): pages layered over this sheet — the
-      // Price alerts management page — push their own merged
-      // entry on top, and Back has to unwind one layer at a time,
-      // so this sheet's entry must carry the whole stack beneath
-      // it (the Comics area/group entry included).
-      const cur = window.history.state as Record<
-        string,
-        unknown
-      > | null;
-      const next = { ...(cur ?? {}), comicsSheet: id };
-      if (sheetPushedRef.current) {
-        window.history.replaceState(next, "");
-      } else {
-        window.history.pushState(next, "");
-        sheetPushedRef.current = true;
-      }
-    } catch {
-      sheetPushedRef.current = false;
+    // Window (three-back rule, Anthony, Nov 4, 2026): one entry;
+    // layers into the open window's entry when one already holds
+    // the slot instead of stacking. The entry carries the whole
+    // stack beneath it (the useHistorySheet pattern), so a
+    // refresh restores everything in place.
+    const next: Record<string, unknown> = {
+      ...(readNavState() ?? {}),
+      comicsSheet: id,
+    };
+    if (sheetHeldRef.current) {
+      replaceNavState(next);
+    } else {
+      sheetPushedRef.current = pushWindowState(next, "comicsSheet");
+      sheetHeldRef.current = true;
     }
   };
   const closeComic = () => {
     if (sheetPushedRef.current) {
       window.history.back();
     } else {
+      sheetHeldRef.current = false;
+      scrubWindowKeys(["comicsSheet"]);
       setSelectedId(null);
     }
   };
@@ -1598,10 +1619,10 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
       // layered over it (e.g. Price alerts) still carries
       // comicsSheet and must leave the sheet open.
       if (
-        sheetPushedRef.current &&
-        typeof (window.history.state as { comicsSheet?: unknown } | null)
-          ?.comicsSheet !== "string"
+        sheetHeldRef.current &&
+        typeof readNavState()?.comicsSheet !== "string"
       ) {
+        sheetHeldRef.current = false;
         sheetPushedRef.current = false;
         setSelectedId(null);
       }
@@ -1614,18 +1635,11 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
     setShowPicker(false);
     setGroupKey(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    // Drilling into a group is a navigation step: push one history
-    // entry, so Back returns to the group-selection screen instead
-    // of leaving the app.
-    try {
-      window.history.pushState(
-        { mcView: "comics", comicsArea: "slabs", comicsGroup: key },
-        "",
-      );
-      groupPushedRef.current = true;
-    } catch {
-      groupPushedRef.current = false;
-    }
+    // Drilling into a group is main-flow navigation
+    // (three-back rule, Anthony, Nov 4, 2026): replace the
+    // single app entry — the device Back exits the app, and
+    // "← All comics" returns to the picker in place.
+    replaceNavState({ mcView: "comics", comicsArea: "slabs", comicsGroup: key });
   };
 
   const ranked = [...COMICS].sort((a, b) => b.value - a.value);
@@ -1989,15 +2003,11 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
             <button
               type="button"
               onClick={() => {
-                // Step back through history when the group was opened
-                // with a push (the history listener restores the
-                // picker); otherwise just flip state locally.
-                if (groupPushedRef.current) {
-                  window.history.back();
-                } else {
-                  setShowPicker(true);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }
+                // Three-back rule (Anthony, Nov 4, 2026): groups
+                // replace the single app entry, so this always
+                // flips state locally — the device Back exits.
+                setShowPicker(true);
+                window.scrollTo({ top: 0, behavior: "smooth" });
               }}
               aria-label="Back to comics group selection"
               className="rounded-full border border-[var(--accent)]/50 px-3.5 py-1.5 text-sm font-medium text-[var(--gold-soft)]"

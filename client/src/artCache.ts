@@ -18,7 +18,7 @@
 // useArtCacheProgress.
 //
 // Design:
-// - Cache Storage, one versioned cache ("lorcana-art-v2"); older
+// - Cache Storage, one versioned cache ("lorcana-art-v3"); older
 //   versions are deleted on startup so restyle/data updates never
 //   serve stale art. When artwork itself is replaced (a re-scan, a
 //   restyle pass like the sealed acrylic updates), bump CACHE_NAME
@@ -46,7 +46,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 
-const CACHE_NAME = "lorcana-art-v2";
+const CACHE_NAME = "lorcana-art-v3";
 const CACHE_PREFIX = "lorcana-art-";
 const INDEX_KEY = "lorcana-art-index-v2";
 const WARMUP_META_KEY = "lorcana-art-warmup-v2";
@@ -227,6 +227,22 @@ export async function getArtBlobForIndex(
 // and the detail view, so the same art is never fetched twice at once.
 const inflight = new Map<number, Promise<Blob | null>>();
 
+/** Session download accounting (Nov 4, 2026 — the intro
+    download choice): REAL bytes and fetch counts for every
+    source image downloaded since this app open, so the
+    intro screen's progress bar counts actual downloaded
+    data against the size quoted in its notice — never an
+    indeterminate spinner. */
+let sessionBytes = 0;
+let sessionFetches = 0;
+
+export function getSessionArtDownload(): {
+  bytes: number;
+  fetches: number;
+} {
+  return { bytes: sessionBytes, fetches: sessionFetches };
+}
+
 function fetchSourceBlob(cardId: number): Promise<Blob | null> {
   const existing = inflight.get(cardId);
   if (existing) return existing;
@@ -236,7 +252,10 @@ function fetchSourceBlob(cardId: number): Promise<Blob | null> {
       if (!url) return null;
       const res = await fetch(url);
       if (!res.ok) return null;
-      return await res.blob();
+      const blob = await res.blob();
+      sessionBytes += blob.size;
+      sessionFetches += 1;
+      return blob;
     } catch {
       return null;
     } finally {
@@ -531,4 +550,111 @@ export function startArtworkWarmup(plan: {
       emitProgress(false);
     }
   })();
+}
+
+/* ------------------------------------------------------------------
+   The intro-screen download choice (Anthony, Nov 4, 2026 —
+   his design, refining the "Preparing your vault" preload):
+   when genuinely NEW caching is pending (a new artwork
+   generation, or pending images for the current one that the
+   user has never been offered), the intro screen offers the
+   choice up front: download everything now with a size-based
+   progress bar, or OPT OUT — a true opt-out, no bulk job —
+   and let images cache as they scroll through the binders.
+   The choice is remembered per artwork generation, so the
+   notice returns only when genuinely new data appears.
+   ------------------------------------------------------------------ */
+
+export type ArtDownloadChoice = {
+  /** The artwork generation the choice was made for. */
+  version: string;
+  choice: "download" | "optout";
+  at: string;
+};
+
+const ART_CHOICE_KEY = "vaultx-art-download-choice-v1";
+
+export function readArtDownloadChoice(): ArtDownloadChoice | null {
+  try {
+    const raw = window.localStorage.getItem(ART_CHOICE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ArtDownloadChoice;
+    return typeof parsed?.version === "string" &&
+      (parsed.choice === "download" || parsed.choice === "optout")
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeArtDownloadChoice(choice: ArtDownloadChoice): void {
+  try {
+    window.localStorage.setItem(ART_CHOICE_KEY, JSON.stringify(choice));
+  } catch {
+    // Best-effort: without storage the choice is simply
+    // re-offered next open — never an error worth surfacing.
+  }
+}
+
+export type ArtworkPending = {
+  /** Grid (browsing) images the plan wants that this device
+      doesn't hold yet, in plan order (own collection first). */
+  gridMissing: number[];
+  /** Two-across copies wanted for the priority + owned
+      segment that this device doesn't hold yet. */
+  largeMissing: number[];
+  /** Stored bytes currently on device, per kind. */
+  gridBytes: number;
+  largeBytes: number;
+};
+
+/** What of a warm-up plan is still missing on THIS device —
+    the pending set the intro notice quotes and the progress
+    bar counts down. Mirrors startArtworkWarmup's own
+    computation (cache keys for grid, plus the large-wanted
+    segment: priority ids + the owned head of the plan). */
+export async function getArtworkPending(plan: {
+  ids: number[];
+  ownedTotal?: number;
+  priorityIds?: number[];
+  artworkVersion: string;
+}): Promise<ArtworkPending> {
+  const meta = readWarmupMeta();
+  const generationChanged =
+    meta != null && meta.version !== plan.artworkVersion;
+  const cache = await openCache();
+  const present = new Set<string>();
+  if (cache && !generationChanged) {
+    try {
+      const keys = await cache.keys();
+      for (const req of keys) present.add(new URL(req.url).pathname);
+    } catch {
+      // Fall through with an empty set: everything reads as
+      // pending, which is the honest answer mid-failure.
+    }
+  }
+  const gridMissing = generationChanged
+    ? [...plan.ids]
+    : plan.ids.filter((id) => !present.has(keyFor(id, "grid")));
+  const largeWanted = [
+    ...new Set([
+      ...(plan.priorityIds ?? []),
+      ...plan.ids.slice(0, plan.ownedTotal ?? 0),
+    ]),
+  ];
+  const largeMissing = generationChanged
+    ? largeWanted
+    : largeWanted.filter((id) => !present.has(keyFor(id, "large")));
+  const entries = generationChanged ? [] : loadIndex();
+  const sum = (kind: ArtKind) =>
+    entries
+      .filter((e) => e.kind === kind)
+      .reduce((s, e) => s + (e.s ?? 0), 0);
+  return {
+    gridMissing,
+    largeMissing,
+    gridBytes: sum("grid"),
+    largeBytes: sum("large"),
+  };
 }

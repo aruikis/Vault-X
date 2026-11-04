@@ -277,9 +277,20 @@ const PUZZLE_SETS: PuzzleSetSpec[] = [
     pieceTcg: [
       724311, 724312, 724313, 724314, 724315, 724316, 724317, 724318, 724319,
     ],
-    // The "Set of 9" product (723665) has no image on
-    // TCGplayer's CDN, so the Full entry stays imageless; the
-    // nine piece scans carry the artwork.
+    // The "Set of 9" product (723665) DOES carry the assembled
+    // artwork photo on TCGplayer's CDN after all (verified
+    // Nov 4, 2026 via Hoard's TCGplayer-fed listing, which
+    // shows product 723665's photo for "Hyperia City Puzzle
+    // Insert (Set of 9)" — the earlier no-image note was
+    // wrong). The Full entry uses that genuine assembled
+    // photo, the same source pattern as every other set; the
+    // assembled-from-pieces composite remains the fallback
+    // if the photo ever fails to load. Piece order verified
+    // the same day against Hoard's per-piece pages: 724311
+    // Top Left, 724312 Top Middle, 724313 Top Right, 724314
+    // Middle Left, 724315 Middle Center — ascending ids are
+    // reading order.
+    fullArtTcg: 723665,
   },
 ];
 

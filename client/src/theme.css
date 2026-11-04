@@ -185,7 +185,13 @@
   --pocket: #101527;
   --pocket-edge: rgba(148, 163, 255, 0.3);
   --gold: #4f8cff;
-  --gold-soft: #bcd4ff;
+  /* Soft accent text (Nov 4, 2026 sweep): #bcd4ff read as the
+     OLD Vault blue on soft-accent text (the About box buttons
+     were Anthony's named case) — the soft tone now leans
+     violet, the gradient's other pole, so it sits in the
+     Rainbow world. Filled gold-token controls take the full
+     blue-to-violet gradient via the rule below. */
+  --gold-soft: #c9b8ff;
   --ghost: #8fa3c8;
 }
 
@@ -248,10 +254,22 @@
 
 /* Accent-filled controls take the Trades page's signature
    blue-to-violet gradient (not a flat violet fill) plus
-   its glow (unification pass, Nov 4, 2026). */
-:root[data-theme="rainbow"] [class*="bg-\[var\(--accent\)\]"] {
+   its glow (unification pass, Nov 4, 2026). Gold-token
+   filled controls join them (theme sweep, Nov 4, 2026):
+   under Rainbow --gold is the gradient's blue end, so a
+   gold-filled primary (the change-request Bug/Idea toggle
+   and Send button, the Check for update button, alert
+   Save buttons) rendered FLAT blue and read as the old
+   Vault theme — Anthony's named re-report. With the
+   gradient they are unmistakably in the Trades world. */
+:root[data-theme="rainbow"] [class*="bg-\[var\(--accent\)\]"],
+:root[data-theme="rainbow"] [class*="bg-\[var\(--gold\)\]"] {
   background-image: linear-gradient(120deg, #4f8cff, #9a5cf5);
   box-shadow: 0 6px 22px rgba(110, 92, 245, 0.38);
+  /* The Trades gradient buttons carry white text; the dark
+     text these controls pair with the flat fills elsewhere
+     washed out on the gradient's violet end. */
+  color: #ffffff;
 }
 
 :root[data-theme="rainbow"] img[class*="rounded-full"],
@@ -1125,15 +1143,22 @@ body::before {
 /* Floating search overlay entrance: the panel illuminates out over
    the current view — a soft fade with a small rise and settle.
    Slowed and smoothed (Anthony, Nov 3, 2026, ~10:03 AM: the old
-   180ms pop felt sharp, like a cut). */
+   180ms pop felt sharp, like a cut).
+   Transition pass (Nov 4, 2026): Anthony reported the trip INTO
+   Search felt rough — the full-screen overlay cut in instantly
+   while its panel took a long, slow 0.62s rise, so the view
+   arrived in two pieces. Now the whole overlay fades in as ONE
+   piece over 180ms (search-fade on the root) and the panel's own
+   settle is a short, small 260ms rise with no scale — one clean
+   fluid motion, settled state untouched. */
 .search-pop {
-  animation: search-pop 0.62s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: search-pop 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes search-pop {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.985);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -1141,8 +1166,24 @@ body::before {
   }
 }
 
+.search-fade {
+  animation: search-fade 0.18s ease-out;
+}
+
+@keyframes search-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .search-pop {
+    animation: none;
+  }
+  .search-fade {
     animation: none;
   }
 }
@@ -1325,32 +1366,54 @@ body::before {
 }
 
 /* The cartridge deck box opening (Anthony, Nov 3, 2026,
-   ~12:00 PM): tapping a closed box flips its lid up on the
-   back hinge while the deck inside rises a little, then
-   the full deck page follows. */
+   ~12:00 PM; CLEANED UP Nov 4, 2026 — he reported the
+   animation "does not look right"): tapping a closed box
+   flips its lid up on the back hinge while the deck
+   inside rises a little, then the full deck page
+   follows. What was wrong: the lid rotated -97deg around
+   its bottom edge, which swings the lid's top FORWARD,
+   out over the front of the box toward the viewer — a
+   lid falling on you, not a lid opening — and it faded
+   to 90% opacity mid-flip for no reason. Now the lid
+   tips BACK on the seam hinge (+102deg: past flat, so it
+   reads as fully opened behind the box), stays fully
+   opaque, and hides its back face — at the flat point
+   the lid is edge-on, so it hands off to the open box
+   with no mirrored-name flash and no pop. The deck
+   inside waits a beat for the lid to start moving
+   before it rises, instead of sliding up through the
+   still-closed lid. */
 .deck-lid-open {
-  animation: deck-lid-open 0.7s ease-in forwards;
+  animation: deck-lid-open 0.85s cubic-bezier(0.3, 0.7, 0.3, 1) forwards;
   transform-origin: center bottom;
+  backface-visibility: hidden;
+  will-change: transform;
 }
 @keyframes deck-lid-open {
   from {
     transform: perspective(700px) rotateX(0deg);
-    opacity: 1;
   }
   to {
-    transform: perspective(700px) rotateX(-97deg);
-    opacity: 0.9;
+    transform: perspective(700px) rotateX(102deg);
   }
 }
+/* Full-card rise (Anthony, Nov 4, 2026, ~10:15 AM
+   re-report: only HALF the card showed): the rising card
+   is the FULL card at its own proportions, starting
+   pushed 94% down inside its clipped slot (a sliver
+   peeking over the seam) and settling at zero — the
+   whole card clear above the box front, nothing clipped
+   or zoomed. */
 .deck-card-rise {
-  animation: deck-card-rise 0.7s ease-out forwards;
+  animation: deck-card-rise 0.75s ease-out 0.2s both;
+  will-change: transform;
 }
 @keyframes deck-card-rise {
   from {
-    transform: translateY(10px);
+    transform: translateY(94%);
   }
   to {
-    transform: translateY(-36px);
+    transform: translateY(0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1358,6 +1421,119 @@ body::before {
   .deck-card-rise {
     animation: none;
   }
+}
+
+/* Stepper rings (Anthony, Nov 4, 2026): the plus/minus
+   count steppers were plain filled circles whose outlines
+   rendered INCOMPLETE — clipped at the tile edges. They
+   are now HOLLOW GLOWING RINGS in the same treatment as
+   the Trades profile pictures: a bright ring in the active
+   theme's accent with light coming off it, a hollow center,
+   and the glyph clear in the middle. The ring is drawn
+   entirely inside the element's own box (border + inset
+   shadow live inside; only the soft outer glow extends,
+   and losing a whisper of glow to a tile edge can never
+   break the circle itself), the element never shrinks, and
+   box-sizing keeps the border inside the stated size — so
+   the circle always closes, in every grid density, on
+   sealed tiles, and in detail views. (The original
+   per-theme accent coloring is superseded by the constant
+   direction colors directly below.) */
+/* Stepper colors (Anthony, Nov 4, 2026): the hollow-glow
+   ring he confirmed perfect, split by direction — PLUS is
+   GREEN, MINUS is RED, ring and glyph alike — and CONSTANT
+   across every theme (no per-theme tinting, no Rainbow /
+   Light variants). One shared class drives every stepper in
+   the app (the StepperButton and BarStepperButton components
+   and the game grids all render it), so the colors can't
+   drift between sections. */
+.stepper-ring {
+  --stepper-color: var(--accent);
+  box-sizing: border-box;
+  flex: none;
+  border: 2px solid var(--stepper-color);
+  background: radial-gradient(
+    circle at 50% 42%,
+    color-mix(in srgb, var(--stepper-color) 16%, transparent),
+    transparent 72%
+  );
+  box-shadow:
+    inset 0 0 9px color-mix(in srgb, var(--stepper-color) 38%, transparent),
+    0 0 10px color-mix(in srgb, var(--stepper-color) 45%, transparent);
+  color: var(--stepper-color);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--stepper-color) 65%, transparent);
+}
+.stepper-ring[data-dir="plus"] {
+  --stepper-color: #3ddc74;
+}
+.stepper-ring[data-dir="minus"] {
+  --stepper-color: #ff5147;
+}
+
+/* Zero owned (Anthony, Nov 4, 2026): an owned count of 0 is
+   BOLD and in the MINUS button's exact red (#ff5147, the
+   .stepper-ring[data-dir="minus"] color above) — app-wide,
+   every owned-count display wears this class when its count
+   is 0: binder pockets, per-finish counts, the Copies owned
+   bar, game copies, sealed owned lines. Non-zero counts keep
+   their normal styling; the steppers themselves are
+   untouched (he called them a fantastic job). */
+.zero-owned {
+  color: #ff5147 !important;
+  font-weight: 800;
+}
+
+/* Verified badge seal (Anthony, Nov 4, 2026): the check
+   beside verified usernames everywhere — accent-colored
+   with the theme's light coming off it; richest under
+   Rainbow via the shared gold/accent tokens. */
+.vx-verified-badge {
+  color: var(--accent);
+  filter: drop-shadow(
+    0 0 5px color-mix(in srgb, var(--accent) 55%, transparent)
+  );
+}
+
+/* Home shield + mail count badges (Anthony, Nov 4, 2026):
+   the notification counts on the Home Admin shield and the
+   Inbox envelope get the full theme treatment — the shared
+   --gold fill (which the Rainbow rule above already turns
+   into the Trades gradient) with white text and a glow,
+   instead of the old flat blue. Positions and behavior are
+   unchanged; this is color only. */
+.vx-count-badge {
+  background: var(--gold);
+  color: #fff;
+  box-shadow:
+    0 2px 8px color-mix(in srgb, var(--accent) 55%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* The Admin "changed" highlight family (whole-app theme
+   sweep, Nov 4, 2026): the changed-since-last-look glow on
+   Admin metrics, roster rows, the What-changed panel, and
+   Inbox "new" markers was hard-coded translucent BLUE —
+   off-theme under Rainbow and every other theme. These
+   token-driven classes replace those blue utilities
+   everywhere the changed/new highlight appears, so the
+   flag follows the active theme like everything else. */
+.vx-changed-panel {
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.vx-changed-chip {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--gold-soft);
+}
+.vx-changed-row {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.vx-changed-ring {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.vx-changed-text {
+  color: var(--gold-soft);
 }
 
 /* The floating up/down scroll arrows (Anthony, Nov 3, 2026,
@@ -1399,4 +1575,21 @@ body::before {
   .welcome-reveal {
     animation: none;
   }
+}
+
+/* The long-press 1–9 count dial (Anthony, Nov 4, 2026): the
+   picker was styled off-theme next to the rest of Vault X.
+   Its panel now takes the app's shared floating-panel
+   treatment in every theme — surface fill, token border, an
+   accent-tinted glow in the shadow, and the generous
+   rounding the app's sheets use — so it reads as Vault X
+   furniture wherever it opens (Rainbow included, through
+   the same tokens everything else follows). */
+.count-dial-panel {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.6),
+    0 0 22px color-mix(in srgb, var(--accent) 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent);
 }

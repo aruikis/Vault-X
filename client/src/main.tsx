@@ -13,8 +13,50 @@ import "./theme.css";
 try {
   const storedTheme = window.localStorage.getItem("vaultx-theme");
   if (storedTheme) document.documentElement.dataset.theme = storedTheme;
+  // Same first-frame treatment for the document theme-color, so
+  // the band around the header paints in the picked theme's
+  // background from the very first frame on every page.
+  const themeBg: Record<string, string> = {
+    vault: "#060913",
+    light: "#edf0f8",
+    midnight: "#0b0516",
+    crimson: "#090505",
+    contrast: "#000000",
+    rainbow: "#0b0f1e",
+  };
+  const meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (meta) meta.content = themeBg[storedTheme ?? "vault"] ?? "#060913";
 } catch {
   // Storage unavailable: the default Vault Dark theme applies.
+}
+
+// Same first-frame treatment for the UI language (Nov 4,
+// 2026): seed the i18n module's active language from the
+// device mirror and stamp the document language, so the
+// first paint and the shared formatters start in the
+// picked language. The profile's saved choice still wins
+// when it arrives.
+try {
+  const storedLang = window.localStorage.getItem("vaultx-language");
+  if (
+    storedLang === "es" ||
+    storedLang === "de" ||
+    storedLang === "fr" ||
+    storedLang === "ja"
+  ) {
+    document.documentElement.lang =
+      storedLang === "es"
+        ? "es-ES"
+        : storedLang === "de"
+          ? "de-DE"
+          : storedLang === "fr"
+            ? "fr-FR"
+            : "ja-JP";
+  }
+} catch {
+  // Storage unavailable: English applies.
 }
 
 const rootEl = document.querySelector<HTMLElement>("[data-generated-space-root]");
