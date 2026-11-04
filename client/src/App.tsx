@@ -8178,10 +8178,10 @@ function HomePanel({
 
 /** Missing-cards sheet for one section: every missing printing of
     the COMPLETE set (Enchanteds and Iconics included) with its
-    current price and a direct TCGplayer link, the total cost to
-    complete, and the one-click "Buy missing cards" handoff — which
-    starts Jarvis's TCGplayer cart build under Anthony's rules; it is
-    not an in-app checkout, and final payment approval stays his. */
+    current price, the total cost to complete, and a direct
+    click-only TCGplayer product link per card — Vault X never
+    sends the list anywhere or buys anything itself; shopping
+    happens on TCGplayer, in the browser, by hand. */
 function MissingSheet({
   groupKey,
   onClose,
@@ -8189,28 +8189,12 @@ function MissingSheet({
   groupKey: string;
   onClose: () => void;
 }) {
-  const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["setCompletion", groupKey],
     queryFn: () => api.getSetCompletion({ groupKey }),
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   });
-  const buy = useMutation({
-    mutationFn: () =>
-      api.requestBuyList({ groupKey, confirmed: true }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["setCompletion", groupKey],
-      });
-    },
-  });
-  // Per-run confirmation (Nov 3, 2026): the handoff sends
-  // the missing list OUT to Jarvis for TCGplayer, so the
-  // first tap only arms this confirmation — naming the
-  // destination (TCGplayer, via Jarvis) and the exact
-  // payload — and the second tap actually sends.
-  const [confirmBuy, setConfirmBuy] = useState(false);
   const data = detail.data;
   return (
     <div
@@ -8275,62 +8259,13 @@ function MissingSheet({
                   : ""}
               </p>
               {data.missingCount > 0 ? (
-                <>
-                  {confirmBuy && !buy.isSuccess ? (
-                    <div className="mt-3.5 rounded-xl border border-[var(--accent)]/50 bg-[var(--bg)] p-3.5">
-                      <p className="text-sm leading-relaxed text-[var(--text)]">
-                        Send this list to{" "}
-                        <strong>TCGplayer</strong> via Jarvis?
-                        You&rsquo;re sending the{" "}
-                        {data.missingCount} missing printings of{" "}
-                        {data.groupName} — each card&rsquo;s name,
-                        finish, TCGplayer ID, and market price
-                        (about {fmtUSD(data.costToComplete)} in
-                        total). Jarvis builds the cart only: no
-                        checkout, and final payment approval
-                        stays yours.
-                      </p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          disabled={buy.isPending}
-                          onClick={() => buy.mutate()}
-                          className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
-                        >
-                          {buy.isPending
-                            ? "Handing the list to Jarvis…"
-                            : "Send the list"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={buy.isPending}
-                          onClick={() => setConfirmBuy(false)}
-                          className="rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-60"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={buy.isPending || buy.isSuccess}
-                      onClick={() => setConfirmBuy(true)}
-                      className="mt-3.5 w-full rounded-full bg-[var(--gold)] px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
-                    >
-                      {buy.isSuccess && buy.data?.started
-                        ? "Buy list handed off ✓"
-                        : "Buy missing cards"}
-                    </button>
-                  )}
-                  <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-                    {buy.isSuccess && buy.data?.started
-                      ? "Jarvis is building the TCGplayer cart for this list (Near Mint, his shipping rules). Checkout and final payment approval stay yours, on TCGplayer."
-                      : buy.isError
-                        ? "The handoff didn't start — try again."
-                        : "One tap hands this whole list to Jarvis, who builds the TCGplayer cart the usual way (Near Mint, no single-card package over $3 shipping). Nothing is bought in the app — checkout and final payment approval stay yours, on TCGplayer."}
-                  </p>
-                </>
+                <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+                  Every card below links straight to its TCGplayer
+                  product page — tap the TCGplayer link on a card
+                  to open it there and shop for it yourself.
+                  Vault X never sends this list anywhere and
+                  never buys anything itself.
+                </p>
               ) : (
                 <p className="mt-3 text-sm font-semibold text-emerald-400">
                   This set is complete — nothing missing.
@@ -18123,15 +18058,12 @@ type DeckCheckT = ApiResponse<typeof api, "checkDeck">["check"];
     the missing copies with the estimated cost at current
     prices, Cost-to-complete style: copies with no tracked
     price are counted and disclosed, never guessed.
-    The buy list is actionable: "Send buy list to my Muse"
-    (the whole list, or one card at a time) hands your OWN
-    Muse a ready-to-execute instruction — the exact missing
-    cards with the direction to build a TCGplayer cart on your
-    account. Vault X says plainly what that is: the app itself
-    cannot open TCGplayer or buy anything; your Muse does
-    the TCGplayer work under your own sign-in, and final
-    payment approval always stays with you. Back returns to
-    the deck this check came from. */
+    Each buy-list card links straight to its TCGplayer
+    product page (click-only, carrying just the card's public
+    product ID) so the collector can shop for it there by
+    hand; Vault X never sends the list anywhere and never
+    buys anything itself. Back returns to the deck this
+    check came from. */
 function DeckCheckView({
   deck,
   check,
@@ -18147,56 +18079,6 @@ function DeckCheckView({
   isOwnDeck: boolean;
   onBack: () => void;
 }) {
-  const [sendNote, setSendNote] = useState<{
-    ok: boolean;
-    text: string;
-  } | null>(null);
-  const [sentKeys, setSentKeys] = useState<Set<string>>(
-    () => new Set(),
-  );
-  // Per-run confirmation (Nov 3, 2026): a send hands the
-  // buy list OUT to Muse for TCGplayer, so the first tap
-  // only arms this confirmation — naming the destination
-  // (TCGplayer, via his Muse) and the exact payload —
-  // and only the confirmation's Send actually sends.
-  const [confirmSend, setConfirmSend] = useState<{
-    key: string;
-    items: { cardId: number; qty: number }[];
-    label: string;
-    est: number | null;
-  } | null>(null);
-  const sendBuyList = useMutation({
-    mutationFn: (args: {
-      key: string;
-      items: { cardId: number; qty: number }[];
-    }) =>
-      api.requestDeckBuyList({
-        deckName: deck.name,
-        items: args.items,
-        confirmed: true,
-      }),
-    onSuccess: (res, args) => {
-      if (res.started) {
-        hapticConfirm();
-        setSentKeys((prev) => new Set(prev).add(args.key));
-        setSendNote({
-          ok: true,
-          text: "Sent to your Muse — it will build the TCGplayer cart and report back in your chat. Nothing is bought until you approve payment.",
-        });
-      } else {
-        setSendNote({
-          ok: false,
-          text: "That didn't send — your Muse couldn't be reached just now. Try again.",
-        });
-      }
-    },
-    onError: () =>
-      setSendNote({
-        ok: false,
-        text: "That didn't send — try again.",
-      }),
-  });
-  const wholeSent = sentKeys.has("all");
   return (
     <div className="mt-4">
       <button
@@ -18270,7 +18152,6 @@ function DeckCheckView({
           </p>
           <ul className="mt-2 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
             {check.buyList.map((l) => {
-              const key = `card-${l.cardId}`;
               return (
                 <li
                   key={l.cardId}
@@ -18287,120 +18168,26 @@ function DeckCheckView({
                         : "price not tracked"}
                     </span>
                   </span>
-                  {sentKeys.has(key) ? (
-                    <span className="shrink-0 text-xs font-semibold text-emerald-400">
-                      Sent ✓
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={sendBuyList.isPending}
-                      onClick={() =>
-                        setConfirmSend({
-                          key,
-                          items: [
-                            { cardId: l.cardId, qty: l.shortfall },
-                          ],
-                          label: `${l.fullName} ×${l.shortfall} (${l.groupName} #${l.printed})`,
-                          est:
-                            l.unitPrice != null
-                              ? l.unitPrice * l.shortfall
-                              : null,
-                        })
-                      }
-                      aria-label={`Send ${l.fullName} to my Muse to buy ${l.shortfall} missing cop${l.shortfall === 1 ? "y" : "ies"}`}
-                      className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] disabled:opacity-50"
+                  {l.tcgplayerId ? (
+                    <a
+                      href={`https://www.tcgplayer.com/product/${l.tcgplayerId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`View ${l.fullName} on TCGplayer`}
+                      className="shrink-0 rounded-full border border-[var(--accent)]/60 px-2.5 py-1 text-xs font-semibold text-[var(--gold-soft)]"
                     >
-                      Send to my Muse
-                    </button>
-                  )}
+                      TCGplayer ↗
+                    </a>
+                  ) : null}
                 </li>
               );
             })}
           </ul>
-          {wholeSent ? (
-            <p
-              role="status"
-              className="mt-3 text-sm font-semibold text-emerald-400"
-            >
-              Buy list sent ✓ — your Muse is on it.
-            </p>
-          ) : (
-            <button
-              type="button"
-              disabled={sendBuyList.isPending}
-              onClick={() =>
-                setConfirmSend({
-                  key: "all",
-                  items: check.buyList.map((l) => ({
-                    cardId: l.cardId,
-                    qty: l.shortfall,
-                  })),
-                  label: `the full buy list for ${deck.name} — ${check.needTotal} cards across ${check.buyList.length} printings, with your username and the deck's name`,
-                  est: check.buyList.reduce(
-                    (sum, l) =>
-                      sum +
-                      (l.unitPrice != null
-                        ? l.unitPrice * l.shortfall
-                        : 0),
-                    0,
-                  ),
-                })
-              }
-              aria-label={`Send the whole buy list for ${deck.name} to my Muse`}
-              className="mt-3 w-full rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)] disabled:opacity-50"
-            >
-              {sendBuyList.isPending
-                ? "Sending…"
-                : "Send buy list to my Muse"}
-            </button>
-          )}
-          {confirmSend ? (
-            <div className="mt-3 rounded-2xl border border-[var(--accent)]/50 bg-[var(--surface)] p-3.5">
-              <p className="text-sm leading-relaxed text-[var(--text)]">
-                Send this to <strong>TCGplayer</strong> via your
-                Muse? You&rsquo;re sending {confirmSend.label}
-                {confirmSend.est != null && confirmSend.est > 0
-                  ? ` — about ${fmtUSD(confirmSend.est)} at tracked prices`
-                  : ""}
-                . Your Muse builds the cart on TCGplayer under
-                your sign-in; nothing is checked out, and final
-                payment approval stays yours.
-              </p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  disabled={sendBuyList.isPending}
-                  onClick={() => {
-                    sendBuyList.mutate({
-                      key: confirmSend.key,
-                      items: confirmSend.items,
-                    });
-                    setConfirmSend(null);
-                  }}
-                  className="flex-1 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)] disabled:opacity-50"
-                >
-                  {sendBuyList.isPending ? "Sending…" : "Send it"}
-                </button>
-                <button
-                  type="button"
-                  disabled={sendBuyList.isPending}
-                  onClick={() => setConfirmSend(null)}
-                  className="rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : null}
-          <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-            How this works: Vault X can&rsquo;t open TCGplayer
-            or buy anything itself. This hands your own Muse
-            the exact list — each card&rsquo;s name, set,
-            collector number, and how many you need — with the
-            direction to build a cart on TCGplayer under your
-            sign-in. Your Muse does that work and reports
-            back; final payment approval always stays with you.
+          <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+            Each card above links straight to its TCGplayer
+            product page — open one to shop for that card
+            there. Vault X never sends this list anywhere and
+            never buys anything itself.
           </p>
         </>
       ) : (
@@ -18412,16 +18199,6 @@ function DeckCheckView({
           buy.
         </p>
       )}
-      {sendNote ? (
-        <p
-          role={sendNote.ok ? "status" : "alert"}
-          className={`mt-3 text-sm font-medium ${
-            sendNote.ok ? "text-emerald-400" : "text-red-300"
-          }`}
-        >
-          {sendNote.text}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -32063,7 +31840,7 @@ export function App() {
 
             {/* Cost to complete the COMPLETE set (every printing and
                 finish, Enchanteds and Iconics included), with the
-                door to the missing list + buy handoff. */}
+                door to the missing list. */}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
               {group.missingPockets > 0 ? (
                 <>

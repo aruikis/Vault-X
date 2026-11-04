@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.82.3
+
+- Removed the buy handoffs: the missing-cards sheet and the deck collection check no longer send your lists out to have a TCGplayer cart built for you. Nothing leaves the app. Every missing card still carries its own TCGplayer link — tap it to open that card on TCGplayer and shop there yourself, exactly as before.
+
 ## v1.82.2
 
 - Epic cards fixed: an Epic has exactly ONE finish, and its line is labeled Epic. The card page for an Epic (like Tiana 220 from Hyperia City) used to offer Regular and Cold Foil steppers — both wrong, since Epics are foil-only. Now there is a single Epic stepper. Enchanted and Iconic printings, which are foil-only too, likewise show their single finish line only.
