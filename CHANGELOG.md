@@ -1,6 +1,408 @@
 # Vault X — Changelog
 
-All notable changes to Vault X, newest first. The same notes appear in the app under Settings → App updates.
+All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
+
+## v1.71.1
+
+- Two-across scrolling in set pages is smoother: the bigger tiles now use a right-sized 640px copy of each card saved on your device (your own collection is cached first), they decode without blocking the scroll, and the grid reserves the right height per tile so the page no longer jumps around while you scroll.
+- The themed background now fills the whole screen on every page: scroll all the way down (the profile included) and the background continues to the edge - no more empty void band at the bottom.
+
+## v1.71.0
+
+- Full Puzzle Art in Hyperia City finally shows the artwork: no assembled photo of that puzzle exists in any source, so the entry now joins the set's own nine piece cards together into the completed picture - in the grid and in the card view.
+- Every other set's Full Puzzle Art was audited too: The First Chapter, Rise of the Floodborn, Ursula's Return, Azurite Sea, Fabled, Winterspell, Wilds Unknown, and Attack of the Vine! all show their real assembled artwork.
+- Shimmering Skies, Archazia's Island, Reign of Jafar, and Whispers in the Well have no assembled artwork published and no complete piece scans to build one from - the lore sets' pictures live on the card backs, which no source scans - so those entries settle on their name plate instead of sitting on Loading art forever.
+
+## v1.70.1
+
+- Prices that come from eBay sold listings now say so right on the item in the missing list: recent sales read 'eBay sold median' with the dates they sold, and once the sale behind a price is more than about 90 days old the line switches to 'Last sold at that price on eBay' with the month - a stale price is never dressed up as a current one.
+
+## v1.70.0
+
+- Set pages now open two cards across by default, big enough to catalog by scrolling: the regular and foil pockets sit side by side, and each pocket has its own minus and plus stepper right on the grid - tap to add or remove a copy without opening the card, or hold the plus to pick a count.
+- A 2 across / 4 across toggle sits at the top of every set page in every collection - Lorcana chapters and promos, Pokemon, Magic, and Star Wars Unlimited - and your choice is saved to your profile, so it follows you. Four across stays for fast hunting.
+- Curator's Collection: Beauty and the Beast promos are priced now from recent eBay sold listings (median sale price): Be Our Guest $39.99, Belle $69.99, Lumiere $29.99, Gaston $28.99, and Beast $60.00 - so that set's cost to complete finally shows a real number.
+- Mrs. Potts (2/CC2) has no recorded sale anywhere yet, and Promo Set 4, Ravensburger Play Hub, and Challenge Series 3 still have no eBay sales to price from - those stay honestly marked as having no tracked price rather than a made-up one.
+- Prices now follow your hierarchy everywhere the app prices a card: TCGplayer first, and where TCGplayer has no price, the median of recent eBay sold listings - asking prices never count.
+
+## v1.69.0
+
+- The whole app now lives in the Trades world under Rainbow: every page sits in the same lit backdrop of soft blue and violet glows, cards read as raised panels with a lit top edge, and inset boxes like text fields share the same tones instead of sitting as flat dark patches.
+- Portfolio joins that world too: the Total Value hero and the value chart card now use the raised Trades panel look with its top glow and hairline border, the chart grid is softer, and the Home Portfolio pill matches.
+- Settings is fully in the theme now: Send a change request, Share Vault X, Username, and App updates - including their inner boxes and fields - all carry the same depth and glow as the rest of the app.
+- Buttons and highlights everywhere now wear the blue-to-violet gradient with its glow, the exact treatment from the Trades page.
+- Set complete now reads like the achievement it is: on finished chapter, promo, and Illumineer's Quest tiles, the label is rich gold with a warm glow instead of plain text.
+
+## v1.68.0
+
+- Your profile got the cleanup design you approved: your photo sits centered with a glowing ring and its edit button on the photo itself, your @username and bio centered under it, your Collector ID QR small in the corner of the card (tap it for the big scannable view), one full-width Edit Profile button, and one stat strip with Trust Score (tap it for the breakdown), Confirmed connections, and your joined month.
+- Your profile now has four boxes under your Library picture: they are your deck boxes - each one shows the featured card you picked for that deck in its window - and any box without a deck showcases one of your most valuable cards instead, with its value stamped underneath. Tap a deck box to open that deck; if you ever have more than four decks, an All my boxes link opens the full My Decks page. Your Library picture itself stays your binders, exactly as before.
+- Fixed the tile drag for real this time: the page was stealing the gesture - a held tile lifted, moved a millimeter, and then the whole page scrolled. Now, the moment a tile lifts, the page scroll is locked until you drop it, while a normal scroll starting anywhere else still works as always.
+- Rainbow now carries the whole Trades look across every page: surfaces have that gradient depth, cards and pills take the rounder bubbly curvature, profile pictures glow, and buttons carry the blue-violet glow - the full treatment, everywhere.
+- New My Collection section on your profile, built from the design you approved: the Lorcana row carries a big glowing completion bar with your unique-owned count and total cards, your chapter closest to finished gets its own row with its bar and exactly what it costs to finish, and Comics and Sealed rows sit beneath - every row taps straight into that part of your collection.
+
+## v1.67.0
+
+- Trades is rebuilt in the new design you approved: Best Matches shows each friend with what you can get and what they can get (exact printings, both ways) and a balance bar, and Browse Cards pools every available printing into one board with direction, set, foil, and rarity filters and sort by value. Tapping a card starts a trade with its owner. Trade Match itself stays on your friends profiles.
+- New theme: Rainbow. The Trades colors - deep navy, blue and violet glows - now carry across the whole app when you pick Rainbow in Settings, and it is set as your theme. The other five themes are unchanged.
+- Fixed the Your Collections tile drag: hold a tile until it lifts, drag it with your finger over another tile to swap places, and let go to drop it - the other tiles glide out of the way, and your order is saved.
+
+## v1.66.0
+
+- Your Collector ID page is display-only now: the photo changer box at the bottom of that screen is gone - it just shows your QR code, Collector ID, and username.
+- Change your profile photo right on your profile: a small edit button now sits on the photo itself - tap it to pick a new one.
+- New Edit profile on your own profile: change your photo, edit your bio line (it saves to your profile now), and manage your banner, all in one place. Username changes still live in Settings, where they can be changed once.
+
+## v1.65.0
+
+- The Home Portfolio pill graph is now a smooth, rounded curve - the bubbly line from the design you approved - instead of sharp straight segments, with the same soft gradient fill underneath it.
+- Top Movers on Home tightened a little more: slightly shorter rows and smaller card thumbnails, while card names and their gains and losses stay full size and easy to read.
+- Even spacing on Home: the gap between Top Movers and Your Collections now exactly matches the gap between the Portfolio pill and Top Movers, so the three blocks stack evenly and Your Collections rides up with the shorter movers.
+
+## v1.64.0
+
+- Home snapshot: a slim Portfolio pill now sits near the top of Home - a mini value graph with your total and its change across the tracked history; tap it to jump straight to Portfolio. Right under it, Top Movers lists the three cards in your own collection that moved the most in the last 24 hours, gain or loss; tap one to open that card.
+- Portfolio Total Value box redesigned from the ground up: a deep dark hero block with a soft blue-purple glow along its top edge, the value big and fully formatted (commas and cents, the cents set smaller), your period change as one tinted chip under the value that follows the range selector, the stat strip below a hairline, and the priced-as-of line demoted to a small footer showing the actual latest reprice date instead of the old stale headline.
+- Search in every section: Lorcana, Pokemon, Magic: The Gathering, Legos, Comics, and Star Wars Unlimited now share the same top row - a search bar styled to match the Scan pill with its own magnifier icon, and the Scan pill at the top right. Each bar searches its own section's catalog; the Lorcana bar hands off to the full catalog search, which hones in with name plus collector number.
+- Smoother binder scrolling: card pockets far off screen now skip their layout and paint work until they approach the viewport, so long set grids scroll lighter. Nothing on screen changes.
+- Buy handoffs confirm first: Buy missing cards and the deck buy list now show exactly what will be sent and where (TCGplayer, via Jarvis) before anything is handed off - nothing leaves the app until you tap Send on that confirmation.
+- Home pill, final layout: the text group (label, total, and the change as a small tinted chip) is centered together, the mini graph starts right after the numbers and fills the rest of the pill to its right edge - never running behind the words - and the pill shows the same grand total as Portfolio.
+- Home tidy-up: the Top Movers rows are condensed about 30 percent, Your Collections now sits snugly right under them, and the Collection Value figure beside the Your Collections heading is gone - the total now lives in the pill, shown once.
+- Portfolio's value chart now wears the Total Value box's theme: the same deep dark block with the soft glow along its top edge.
+- Reprice Force joins Re-price now in the Total Value box: the normal button runs the day's re-pricing (once a day), and Reprice Force starts a fresh run on the spot even when today's already ran.
+
+## v1.63.0
+
+- Fixed: the Home tab now always lands on the actual Home screen. It could greet you with your name and QR code instead - the big QR view now opens only from your profile (tap your name pill to open your profile, then the QR / Collector ID element there), and tapping Home closes anything stacked above Home.
+- Fixed Trade Match: it matched cards by NAME, so cards a friend holds as a different printing - or a foil you only have in regular - never showed. It now compares exact printings (set, number, and finish) both ways, with the match counts shown. Jarvis's Elsa - Snow Queen Cold Foil and his Stitch - Rock Star printing now show next to his Mickey Mouse - Brave Little Tailor.
+- Trades tidy-up: the moment a trade offer or purchase order is done - declined, withdrawn, or completed with feedback wrapped up - it files itself into the new History section at the bottom of Trades, and finished deals already on the books moved there too. History stays collapsed until you tap it, records are kept for good (they feed Trust Scores), and you can also archive any finished deal by hand with its Archive button. Active and pending deals never move.
+
+## v1.62.0
+
+- My Decks: the deck box is redesigned to look like a real deck box - a solid molded box in your chosen color with a lid seam under the embossed name and a small window in the front panel. The window shows a close-up of the featured card's face and art, not the whole card. Your Village Aggro box now features Mickey Mouse - Best in Town in its window, and you can change the featured card any time in the deck builder.
+- Settings: the Username section now has its own icon beside its heading - a person mark in the same style as the other section icons. Nothing else about the username box changed.
+
+## v1.61.2
+
+- Home: the Your Collections section and the collection value beside it now sit noticeably lower on the page - a clear step down in the space above the section, with the value moved down to match. Nothing else on Home moved.
+
+## v1.61.1
+
+- Home polish: the Legos tile now reads Legos with Coming Soon beside it in smaller print on the same line, so the tile is the same height as every other tile and the row lines up evenly wherever the tiles are dragged.
+- The Your Collections section sits a little lower on Home (about a fifth more space above it), and the collection value total beside it nudged down slightly to match.
+- Your name and Collector ID oval at the top of Home is now pinned flush to the right edge, in line with everything else on that side of the page. It still opens your profile.
+- Settings cleanup: the row of quick-jump icons under the About box is gone. Every section keeps the icon beside its own heading, and the Vault X server registry section has a new icon of its own - a server stack inside the Vault ring.
+
+## v1.61.0
+
+- Fixed: refreshing while on Search now stays on Search - it restores in place before the page paints, with no detour or flash through Home, and the keyboard still never opens on its own.
+- Your name at the top of Home now opens your profile directly again - no page in between. The big scannable QR view opens from the QR / Collector ID element on your profile, and Back returns to your profile.
+- The Trust Score breakdown has a new home: tap the Trust Score line on any profile (right under the joined date) to open the breakdown page - what the score is made of, verified events only. The QR view now shows just the number.
+- Settings: Theme is now a proper drop-down in the Vault X style - tap it, pick from the themed menu, and it applies and saves as before. Your Collections in Settings is a matching drop-down box that expands to the same six show/hide switches.
+
+## v1.60.0
+
+- Three new collections open: Pokemon, Magic: The Gathering, and Star Wars Unlimited lose their Coming soon labels and each opens its own section - browsable by set and card number like Lorcana, cards ghosted until you mark copies owned, with search across the whole catalog. Their catalogs download in chunks from their official free sources (Pokemon TCG data, Scryfall, and Fantasy Flight for Star Wars), and each section shows the download progress honestly until it is complete.
+- Friends is now a MySpace-style grid: just each friend photo with their name underneath, nothing else - tapping still opens their profile.
+- Lego is now Legos, everywhere the collection label shows. The Legos section itself is untouched.
+- Your identity page (tap your name at the top of Home) is now just your big QR code, your username, your Trust Score breakdown, and the link through to your profile. Username editing moved to Settings - and you can change your username one time only, so the Settings box says so plainly and locks after one change. Your server registry entry moved to Settings too.
+
+## v1.59.0
+
+- Admin: Registered Collectors is now called Registered Users everywhere in Admin, and that list is redesigned - clean, roomy rows with the avatar and username up top, the Collector ID underneath, and one tidy line for Trust Score, items collected, connections, and joined date.
+- Search: the search box is back up at the top of the screen, right under the Search heading, where it looks right. It still only opens the keyboard when you tap the field.
+- Social: Add a friend by code now sits right under the Social heading as a quick add - just the code field and the Add friend button, nothing else - and it is gone from down in the Friends list.
+
+## v1.58.0
+
+- New: rearrange your Home collections. Hold any Your Collections tile and drag it to a new spot - put Magic first, or any order you like - and the app remembers your order on your profile. Hidden tiles stay hidden and the rest reflow in your order; a normal tap still opens the collection as before.
+- Removed the Marketplace from the bottom of the Home screen - it is gone from Home entirely. The Marketplace still lives in Social, exactly as before.
+
+## v1.57.7
+
+- Removed the Marketplace from the bottom of the Home screen - it is gone from Home entirely. The Marketplace still lives in Social, exactly as before.
+
+## v1.57.6
+
+- Removed the Two pockets for every card number note from the bottom of the Home screen - it is gone entirely, for you and for every other collector.
+
+## v1.57.5
+
+- Collection Distribution moved, as you directed: it is gone from Home entirely - no copy, no summary left behind - and now lives in Portfolio in your final order: the value graph, then the Collection Distribution, then the Movers. Same rows, same percentages, same total underneath it all.
+- The Queen, diagnosed end to end this time instead of guessed at: her catalog entry is correct (Promo Set 3, printed 3/P3, your two Promo Cold Foils), she is in the scanner plan's priority list, and her artwork loads fine - those stages were never the problem. The drop was in the trust rule: your phone only trusted a sure on-device match if ALL roughly 3,700 card fingerprints had finished building, which takes a very long time, so her match kept being handed to the server read - the one measured at 18 to 25 seconds - and died at the time limit in every version. Now a sure match on a promo printing stands on its own as soon as the promo tier (which builds first) is complete, so scanning her can finish in about a second on the phone's own match. Please re-scan The Queen after updating and give the app a little open time first if the scanner still shows the index building - her tier is the first one it builds.
+
+## v1.57.4
+
+- Scanner, rebuilt around your five-second rule: a scan now NEVER runs longer than five seconds, period. Your last tests ran 30 and 31 seconds, and one of them ended with no suggestions at all - both of those are fixed at the root. The old build waited on the server read, which takes far longer than five seconds, and threw the wait away at the last moment; the scan now lands at about four and a half seconds with the best matches your phone itself found, so you always get picks to choose from instead of a spinner.
+- The server check also starts the moment you take the photo - it is already running inside the first second or two, not at three or four seconds - and the server itself now stops at four seconds. A sure on-device match still answers in about a second, exactly as before. And if a scan ever does stop at the limit, the closest matches from your phone are shown below the note, never a bare empty list.
+- Please re-scan The Queen (Promo Set 3, number 3) after updating: the scan should finish inside five seconds and offer her among the picks if your phone index has her artwork - and the search on the result screen (try The Queen 3) is there if it does not.
+
+## v1.57.3
+
+- Portfolio, aligned to the example you approved: the header is now exactly the mockup - Total value, its change line right beneath, then the five labeled figures (Paid, Net, Cards with unique count, Graded, Sealed) as clean cells. The extra text that had crept into the header is gone from there (the foil and spare-copies note now sits at the bottom of the page), the long explanation paragraph under the chart is one short line, and the breakdown choices are a simple row of pills like the example - so the page reads value, trend, movers, breakdowns, sets, in one scroll, the way the example showed it.
+- Settings cleanup, as you directed: the Admin section is removed from Settings (your Admin still lives on Home behind the shield badge, with every statistic), and the Tickets list is removed from Settings too - tickets live in your Inbox only now. Send a change request stays in Settings; it is the form tickets are sent from. No Tickets icon was added anywhere - you decided that would be redundant with the Inbox.
+
+## v1.57.2
+
+- Scanner fix, after your Queen test failed again: this time the failure was measured, not guessed. The server read of a card photo actually takes about 20 seconds - the old scan gave up at about 14 seconds and showed you only your phone closest artwork guesses, which is why a bunch of cards appeared and The Queen was never one of them. The read itself was perfect when it was allowed to finish: exact title, and the collector line read as 3/P3.
+- What changed: the server check now starts the moment you take the photo (not after the on-device match), the reading prompt is focused so the read comes back faster, and a scan that needs the server is allowed up to 32 seconds before it stops - the waiting screen now says the server route can take up to about half a minute. A sure on-device match still answers in about a second, exactly as before.
+- Please re-scan The Queen (Promo Set 3, number 3) after updating: she is the test case. The scan should now land on her exact printing, or offer her among the printings to pick from.
+
+## v1.57.1
+
+- Portfolio check, after your report that the new layout still was not showing on your phone: the rebuilt Portfolio (one scroll, one range selector driving the change line, the chart, and Movers together) is confirmed in this version - tap Portfolio and you should see your total with its range change right beneath it, the 7d / 30d / 90d / 1y / All pills above the value chart, and Movers under the chart. If your copy still shows the old Portfolio, use Update now here rather than a pull-to-refresh - a plain refresh can be answered from your phone cache with the old version, while Update now fetches the fresh build first.
+- Also fixed in the Portfolio per-set table: every set was showing 0.0 percent complete and Complete - nothing to buy, because the table was reading the Puzzle rows that share each set name instead of the set itself. It now shows each set real completion and cost to finish (for example Hyperia City at about 74 percent with its real cost to finish).
+
+## v1.57.0
+
+- Scanner rebuilt the internet way, the option you approved: when your phone is not sure about a card, it now sends the photo to the server with its closest artwork matches, and the server reads the tiny collector line at the bottom of the card (like 3/P3) and uses that exact line to pin the printing. That is the check that can find The Queen, Promo Set 3 number 3, even on a phone whose on-device card index has not finished building - her artwork twin in Fabled and the Epic share her name, but only her promo printing carries the line 3/P3.
+- A sure match on a finished on-device index still answers in about a second with no server call. Anything less than sure now takes the server route, which can take a few seconds longer; the whole scan is allowed up to 15 seconds instead of 10 so that read is never cut off mid-check.
+- When more than one printing still fits after the line check, the pick list now shows up to eight printings instead of four, so the right one is not cut off the bottom of the suggestions.
+
+## v1.56.0
+
+- Portfolio rebuilt to the layout you approved: one scroll, one range selector. The 7d / 30d / 90d / 1y / All pills above the value chart now drive everything together - the change line under your total, the chart window, and the new Movers list of your top gainers and losers (tap a mover to open the card).
+- The header is tighter: your total, its change for the selected range right beneath it, and one stat strip - total paid, net, cards with unique printings, graded, sealed - plus an eye button that hides the money figures when you show the app to someone. The chart also gained an optional Paid line, off by default.
+- Breakdowns now switch in place on the same page (no separate pages to back out of), with a new By Type pill - Singles / Graded / Sealed. The per-set table gained Complete % and $ to Finish and sorts by net or completion, and Most Valuable now shows each item's share of your portfolio.
+- Two honest limits: prices are only tracked from Oct 25, 2026, so for now the longer ranges measure from that first tracked day (the page says so where it happens) and will separate on their own as daily history builds. And there is no Recently Added strip yet - the app doesn't record the day each card was added, so rather than invent dates, that strip waits until additions are tracked.
+
+## v1.55.3
+
+- Promo tiles checked family by family against the price sources: the Curator's Collection Heroines (CC1) tile and the PD1 tile said 'no tracked prices yet', but those cards do sell on TCGplayer - their prices were pulled in, so CC1 now shows a real cost to complete and PD1 shows the cost of the four missing cards TCGplayer sells (the other five PD1 cards you need are not sold there and still count as unpriced).
+- The other four families that say 'no tracked prices yet' were verified one by one and genuinely have no tracked prices anywhere the app can see: Promo Set 4's last missing card, the Ravensburger Play Hub set, Challenge Series 3, and the Curator's Collection Beauty and the Beast set - no marketplace the app tracks sells them, so the label stays for those four, honestly.
+
+## v1.55.2
+
+- Scanner: The Queen, Promo Set 3 number 3, could still slip past when the on-device card index had not finished building on your phone. The index now builds in the background whenever the app is open, not only while the scanner is open, so promos and puzzle inserts are fingerprint-ready long before you scan.
+- Any scan that is not a sure match on a finished index is now double-checked against the full catalog reader at the same time, inside the same 10-second limit, and the two answers are combined - a card your phone has not fingerprinted yet can still be found instead of never appearing.
+- The catalog reader no longer throws away a good card name over a misread of the tiny bottom line: the number after EN is the set number, not the collector number, and a read number that fits no printing of that name now falls back to the name itself, so the right printing still shows up in the picks.
+- The picks list has room for more close artworks, so the card in your hand is easier to spot in the list.
+
+## v1.55.1
+
+- Scanner fix for The Queen, Promo Set 3 number 3: she was in the catalog all along, but the scanner could not reach her. Every promo printing now jumps to the front of the on-device index build, with the puzzle inserts, instead of waiting behind thousands of main-set cards - so promos are ready to scan within the first stretch of the build.
+- Until your on-device index has finished building, every scan is now also checked against the full catalog reader and the two results are combined. A card whose fingerprint is not built yet can still be found, instead of silently missing from the list - and the result screen now tells you when a scan ran while the index was still building.
+- The picks list is wider: the nearest few artworks always appear as choices when they are anywhere close, so the right card is there to tap even when it is not the top match. That helps close calls like the legendary Tiana too.
+- If a scan still cannot place a card, its closest on-device matches are shown as picks instead of an empty result.
+
+## v1.55.0
+
+- Puzzle sections checked for every set, and the pieces have their artwork now. Attack of the Vine! has its Puzzle section at last: 9 pieces that assemble the Winnie the Pooh and Hunny characters artwork, Winnie at the centre.
+- Puzzle pieces and Lore cards across the sets now show their real scans, and most sets' Full Puzzle Art shows the assembled artwork - Hyperia City's nine pieces included. Two Full Puzzle Art entries (Hyperia City and Reign of Jafar) still show a name plate because no assembled photo exists for them yet; their pieces all have art.
+- Counts corrected from TCGplayer's own catalog: Azurite Sea's puzzle is 9 pieces, not 6. Winterspell has two insert series - 9 Lore cards and a separate 9-piece Snowball Fight puzzle - and Wilds Unknown's inserts are puzzle pieces. Into the Inklands is confirmed as the one set with no puzzle (its packs carried rules cards).
+
+## v1.54.3
+
+- Scanner fix for the Ink Drop miss: your photo was clear enough - the matcher was not. It now compares the brightness pattern of the whole card as well as the fine detail, and it tries the card at more sizes and positions in the frame instead of only dead center, so a card sitting a little off-center still matches. On your exact Ink Drop photo the blue design now scores as the clear best match, with the gold design behind it.
+- The Ink Drop counters and the other puzzle inserts now jump to the front of the scanner index build even when a build from an earlier open is still running, instead of waiting at the end of the queue.
+
+## v1.54.2
+
+- Ink Drop counters can be scanned now: the two Hyperia City Ink Drop counter cards are fingerprinted first when the scanner index builds instead of last, and the backup reader now knows Counter cards are real catalog items even though their printed text says the counter does not count as a card. When a scan reads an Ink Drop, you pick between the gold design and the blue design, so the exact one in your hand is the one that gets added.
+- Auto capture is quicker: it fires after about half a second of a clear, steady card instead of a second or more, camera brightness shifts no longer count as movement, and one small tremor no longer restarts the wait from zero. It still will not fire on a blurry frame.
+
+## v1.54.1
+
+- Scanner screen fixed: the camera and the Capture button now come first, so the Capture button is always on screen when the scanner opens - no scrolling past a wall of text to reach it. The long how-it-works explanation and the on-device index status moved into a short How scanning works section under the buttons; tap it only if you want the details.
+
+## v1.54.0
+
+- Scanner rebuilt: matching now happens on your device. Your phone keeps a small fingerprint of every card artwork (built from the artwork already saved on the device, at no cost and with no outside service), and a scan compares your photo against all of them in about a second instead of sending it away and waiting.
+- When several printings share the same artwork - reprints and promos a fingerprint cannot tell apart - you get the list and tap the exact printing in your hand. That tap is how the right printing is chosen, so a scan can no longer confidently name the wrong printing.
+- The scanner shows its on-device index progress while it builds in the background. A photo the device cannot place at all (like a whole binder page) still uses the older slower reader, and the result says which one matched. Auto capture, the frozen snapshot, the 10-second stop, and search on the no-match screen all work as before. This is a first trial of the new matcher - scan some real cards and tell Jarvis how it does.
+
+## v1.53.0
+
+- New: Auto capture in the card scanner. Hold a card in the frame and the photo takes itself the moment the card is sharp, steady, and close enough to read - no button tap needed. The viewfinder tells you what it sees as you line up (too dark, glare, not sharp yet, hold still) and the frame turns gold, then green, as the card gets clear enough.
+- Auto capture is on by default and can be switched off right above the Capture button - the manual Capture button and the photo button work exactly as before either way.
+
+## v1.52.0
+
+- Trades and cash purchases now settle themselves: when a deal is fully complete — both sides confirmed and both feedbacks in — the cards each side gave come out of their collection and the cards they received go in, automatically, using the deal's own agreed lists. No re-entering quantities anywhere.
+- Every trade now carries a note at the very bottom: Once this trade is complete, the new quantities will be reflected in your sets — there's nothing further for you to do. Completed deals show a Settled into your sets line once their quantities have landed.
+- Fixed: Back from an opened deck now returns to your deck boxes — only Back from the decks page itself returns to your profile.
+- Fixed: refreshing while in your profile, Library, or My Decks no longer flashes the Home screen first — the page you were on is covered from the first frame and reloads in place.
+- Admin: tapping a highlighted change now clears it immediately, in place. A new What changed panel at the top of Admin lists every change in plain words with its old and new values, and the changed tiles and roster rows carry the same readout, so the badge count maps to exactly that many readable changes.
+
+## v1.51.0
+
+- Swipe between tabs is gone: it worked, but Anthony did not like it, so tabs switch by tapping the bottom bar again and the slide animation went with it. The Library binder's finger-swipe page flipping is a different feature and is untouched.
+- The active tab highlight in the bottom bar is now a boxier rounded rectangle instead of the in-between oval pill — same blue-purple glow, new shape.
+- Fixed: tapping the empty space on the My Decks page no longer throws you back to your profile. Only the deck boxes and the real Back and Close buttons navigate now.
+- The Library shelf on profiles is centered by construction now — its middle sits exactly halfway between your profile picture's edge and the deck box icon's edge, worked out by the layout itself instead of by nudges.
+- Scanner: identification now has a hard 10-second stop — it can never spin for half a minute again — and when it stops it lands on the no-match screen with the catalog search right there. The reader now also understands promo collector lines like 20/C2.
+
+## v1.50.0
+
+- The daily catalog audit now shows its last run in Settings under Your data and backups - when it ran and how many printings it added.
+- Promo tiles now carry the same progress bar with owned counts as the chapter tiles, and their Cost to complete uses real promo prices - families with no tracked prices say so instead of showing zero dollars.
+- The Hyperia City Ink Drop counter cards are in the catalog and sit in the Puzzle section at the very end of the Hyperia City list.
+- Refreshing on your own profile now reloads your profile in place - no more disappearing to Home and back.
+- Every dropdown in the app has one clean modern look now - dark, rounded, with a check mark on the current choice - instead of the old grey system menus.
+- Slab labels: the white box around the 9.8 is now an equal square like the real CGC labels, and White Pages no longer sits under the grade on Universal slabs.
+- The Library shelf on profiles was nudged right so it sits truly centered between your photo and the deck box.
+- Your Village Aggro deck is built and on display in My Decks: all 60 cards from your collection, with its value taken from your own inventory, and every copy in the deck marked in Where it lives as living in the Village Aggro deck box.
+- Refreshing while you are in My Decks or your Library now reloads that page in place instead of bouncing you to Home.
+
+## v1.49.0
+
+- The card catalog is now complete: a full audit against every Lorcana card ever released added 40 missing promo printings, each with its real artwork, so every one can be scanned, searched by name and number, and added to your collection.
+- Challenge C2 now runs all the way to number 20, including Minnie Mouse - Amethyst Champion 20/C2, the card that started the audit. Searching Minnie 20 finds her.
+- Two whole promo families are new: Challenge Series 3 (C3, 17 cards including the serialized Hades - Dark Usurper prize printings) and the Beauty and the Beast Curator's Collection (CC2, 6 cards). Also filled in: the serialized Mickey Mouse - Brave Little Tailor 5/C1, Baymax - Lab Assistant 5/DIS and Creative Inspiration 19/DIS, Mickey Mouse - True Friend 15/P2, Elsa - Queen Regent 16/P2, Anna - Braving the Storm 17/P2, and Donald Duck - Taxi Driver 1/P4.
+- A catalog audit now runs every day on its own: when a new set or promo printing is released and published by the card databases, it is added to the catalog automatically. Your existing cards, ownership counts, and prices are never touched by it.
+
+## v1.48.1
+
+- Fixed: the Collector ID card at the top of Home could get stuck on Generating when its saved profile photo could not be read back from storage. A photo or banner whose stored copy is missing now simply shows the plain initial-letter card instead of failing, and card artwork whose stored copy is missing is fetched fresh again rather than erroring.
+
+## v1.48.0
+
+- Scan a card, rebuilt for speed and accuracy, and this was the top-priority fix. Taking a photo now freezes the snapshot on screen with a shutter flash, so you can see the exact photo being identified, and Identifying shows a live timer and what stage it is on instead of a silent pause. If a scan runs long you can cancel it, and at 45 seconds the wait stops on its own with your photo kept and Try again and Retake options. Matching is stricter now: a card is only named for sure when the title, number, set, ink color and cost read from the photo agree — when a read could be more than one printing, you pick the right one from the candidates instead of being handed a wrong card, and every certain match shows what was actually read from your photo so a misread is easy to spot. A card outline in the viewfinder helps fit one card in the frame, and scanning another card now keeps the camera live instead of going black.
+
+## v1.47.0
+
+- New: copy a deck. Open a deck box on another collector profile and tap Copy to My Decks and check my collection: the deck lands in your My Decks marked Copied from that collector, and you get a check against your own collection — you have X of the deck, you need Y more — with a card-by-card breakdown, a buy list of just the missing copies, and what they would cost at current prices. On the buy list, Send buy list to my Muse (or Send on a single card) hands your own Muse the exact missing cards to build a TCGplayer cart under your sign-in; Vault X never buys anything itself and final payment approval stays with you. Your own decks get the same collection check from their deck page.
+
+## v1.46.0
+
+- Price alerts now have their own page: tap the Price alerts heading at the bottom of any card, sealed product, or graded comic and you get every alert you have set, all in one list, each with its picture, its current price, and the price you are watching for. You can edit any alert right there (change it to at or below or at or above a new price) or delete it, and Back takes you straight back to the item you came from. Graded comics can have price alerts now too, set from the Performance tab on a comic page, and a triggered comic alert banner on Home takes you to your comics.
+
+## v1.45.3
+
+- The Comics shelf sign in the Library got the comic-book treatment: Comics now sits on a deep-blue halftone-dot plaque in bold yellow block lettering with a black outline and a red offset shadow, tilted like a classic comic masthead. The Lorcana wordmark signs and the Promos sticker sign are unchanged.
+
+## v1.45.2
+
+- Refreshing on the Admin page now reloads Admin in place: refresh while Admin is open, or while the Registered Collectors page is open on top of it, and you land right back on that same page with everything as it was, instead of being thrown back to Home.
+
+## v1.45.1
+
+- Admin opens fast now: tapping the Admin badge shows the page right away with your last-known numbers, labeled with the time they were computed, while the fresh numbers load in the background and swap in when they land. The heavy server work behind Admin also runs in parallel now, so the refresh itself finishes much sooner too.
+
+## v1.45.0
+
+- Admin: the Registered collectors tile now opens its own full page — one detailed row per collector with their username, Collector ID, Trust Score, items collected, confirmed connections, and the date they joined, all live from the server. Anything the registry does not track is labeled as such instead of guessed. Back from that page — its Back button or the phone back gesture — always returns to Admin, never out of the app.
+
+## v1.44.0
+
+- All card artwork now saves to your device up front: after the welcome tour, a background pass downloads every card picture — your own collection first, then the whole catalog set by set — so browsing never waits for images to load. It never blocks the app, and Settings under Your data and backups shows exactly how many images are saved on this device. When an update brings new or refreshed artwork, the new copies save on their own and replace the old ones.
+
+## v1.43.5
+
+- The three Illumineer's Quest tiles — Deep Trouble, Palace Heist, and The Great Hunny Rescue — now carry the same rich, edge-to-edge key art as the premium chapter tiles like Hyperia City and Attack of the Vine!: Ursula with her trident and eels for Deep Trouble, Jafar wearing the Reforged Crown for Palace Heist, and Winnie the Pooh the Hunny Archmage with his friends in the Vine for The Great Hunny Rescue, all from the official high-resolution quest artwork. Tile size, names, and progress lines are unchanged, and the quest box art still shows on the quest pages themselves.
+
+## v1.43.4
+
+- Your Inbox now marks anything you have not opened yet with a bright blue NEW badge right next to its subject, so read and unread are easy to tell apart. Opening a message clears its badge the moment you open it, even if you have not answered yet — the Pending label stays exactly as it is until the order, trade, or ticket actually finishes. The number on the mail icon on Home now matches the number of NEW badges in your Inbox, and a new reply in a thread you already read makes it NEW again.
+- Share Vault X in Settings has moved: it now sits directly underneath Send a change request, with nothing between them. The share sheet, the Muse-first note, and your saved Muse invite link all work exactly as before — only its spot in Settings changed.
+
+## v1.43.3
+
+- New in Settings, right under About this app: Share Vault X. Paste your own Muse invite link once (find it in the Muse app, under the Invite button) and it is saved; the Share button then opens the share sheet with a ready-made invite that starts by telling your friend they need the Muse app first, includes your invite link so the sign-up is credited to you, and walks them through getting the install file from you and the quick first-open tour. No link saved yet? Share asks you to paste it first instead of sending an invite without it, and if there is no share sheet the message is copied instead
+- Bottom menu fix: going into Comics (or Lego) no longer adds an extra Comics tab to the bottom bar. The bar is now the same five tabs — Home, Search, Social, Portfolio, Settings — in the same order, in every section of the app
+
+## v1.43.2
+
+- Comics slabs rebuilt to look like real graded cases: the CGC label is now a slim band across the top of every slab — about a tenth of its height, the way a real holder runs — with all the same label information (grade 9.8, the signed line, WHITE Pages, cert number, credits) set in compact small print, and the cases themselves now wear the clear rigid acrylic look of the sealed cases: beveled edges, molded seams, and realistic light and reflections down the thick case walls. It applies everywhere the slab shows, including the Library comics binder pages
+
+## v1.43.1
+
+- Card alignment fixed in collection grids: the split buttons already lined up, and now the cards do too — every tile artwork starts at the exact same top height in its row (the taller tile no longer pushes its neighbours card down), with the buttons still pinned to their shared baseline
+- The Zelle mark is toned down as you asked: no more solid purple square — it is now an outlined line-art Z in the same neutral style as the cash icon beside it, everywhere it appears (the cash segment of the split button and the Pay the seller line on an order)
+
+## v1.43.0
+
+- Admin change notifications: when any Admin number changes — a new collector registers, item counts climb, ticket counts move — the Admin shield on Home gets a blue count badge on its upper right, like the mail marker. Inside the Admin page, every item that changed glows translucent blue until you tap that item to clear it; just opening the page clears nothing, and the Home badge clears when the last changed item is tapped
+- Library binder background fixed: opening a set binder now shows ALL of that set sealed products you own behind the binder — for Hyperia City that is the Booster Box, the Prerelease Box and the Booster Pack together — and their black studio backdrop is washed out, so only the acrylic-cased items float in the scene with no black rectangles
+- Floating scroll arrows faded further, just as you asked: they are still there on both edges, same size and behavior, but barely visible now — a faint ghost until you look for them
+
+## v1.42.4
+
+- The standalone Sealed tab is gone from the bottom menu — the bar now runs Home, Search, Social, Portfolio, Settings, and tab swipes follow that same order. No sealed items or data were removed
+- Set pages are reordered the way you asked: each set opens with its sealed products at the very top, then its cards, and the puzzle pieces and Full Puzzle Art now sit at the very, very bottom of the page
+
+## v1.42.3
+
+- Comics slabs: The Mandalorian #4 grade sits a little lower now, just as you asked, with nothing else on that slab changed
+- Aliens #1 and Batman #136: their gold Signature Series label bands are condensed further toward real slab proportions, with smaller type, grade box, barcode and hologram, and Aliens gets a stronger case bevel, seams and acrylic-style light streaks on its case walls
+- Slab turn view: comics now show real slab thickness as they turn — a thick molded clear edge and case back, so the slab reads as a rigid case turning in 3D instead of a flat card
+
+## v1.42.2
+
+- Library graded comics binder: each page now shows the rendered slab from the Comics section — the slab with the label band on top carrying the grade, title, cert and all label info over the real cover art — instead of the raw photo originally submitted for that comic. The binder open and flip animations are unchanged, and tapping a slab still opens its full page
+
+## v1.42.1
+
+- Library flip-through binders: pages now lay out 4 pockets across by 3 down — still 12 pockets per page, matching your physical Vault X binders. The cover open animation and finger-swipe page flipping are unchanged
+
+## v1.42.0
+
+- Hyperia City: the two Ink Drop counter cards are now in the binder — find both designs at the end of the set's Puzzle section, after the Full Puzzle Art, each with its real counter-card artwork. They start ghosted like any missing piece; tap one and use the count stepper to add the copies you own
+
+## v1.41.4
+
+- Library: the Lorcana shelf signs now wear the real Lorcana look — serif display lettering in gold, like the Disney Lorcana wordmark — and the Illumineer's Quest naming in the Library gets the same gold serif treatment, on the Quest shelf sign and on the Quest binder names (Deep Trouble, Palace Heist, The Great Hunny Rescue). Signs keep their size and place, and the promo artwork and icons are untouched
+
+## v1.41.3
+
+- Fixed: every Illumineer's Trove photo in Sealed had traces of its white studio backdrop baked into the picture — a white strip or halo around the box, and on Winterspell a white shadow puddle under it. All 14 Trove photos are cleaned down to the bare box, so the moment you mark one owned it shows as a clean cut-out in its acrylic case, exactly like the Quest boxes, with no white or ghostly border. Nothing else in Sealed changed
+
+## v1.41.2
+
+- Fixed: the Shimmering Skies and Ursula's Return chapter artwork now matches the rest of the Lorcana chapters — clean logo artwork on its own, like every other chapter tile, instead of the full banner pictures those two carried
+
+## v1.41.1
+
+- Fixed: the Admin shield badge on Home now appears right away, together with your Collector ID. It used to wait on the full app statistics loading from the server — the slowest check in the app — before it could show. The badge now uses the quick identity check, and the full statistics only load when you actually open Admin
+
+## v1.41.0
+
+- The graded comics get the flip-binder too: opening the Comics book in your Library lays the slab binder open on the table, one graded slab per page — flip through them and tap a slab to open its full page
+- Chapter tiles show their completion again, in order: set name, a progress bar with how many of the set you own, then the cost to complete below it
+- Chapter tile artwork gets a richer premium finish — a soft glow in each set's color and a gloss sweep — and the D23 and Illumineer's Quest tiles now present their art at the same clean size as the other tiles instead of blown up or cropped
+
+## v1.40.0
+
+- New: flip-through binders in the Library. Open any Lorcana binder spine and you are looking down at your own binder lying open on a table — the cover, carrying the set's artwork and name, swings open to pocket pages you flip through, with the page number and your pocket count at the top. Regular and foil sit side by side (regular first), owned cards in full color, missing cards ghosted with their real art, owned foils shimmering — and tap any card to open it. If you own that set's Illumineer's Trove or booster box, they stand on the table behind your binder too
+- Library: the shelves are families now — shelf one is the Lorcana chapter binders, chapters 1 through 14 under a Lorcana sign; every promo binder stands together on the next shelf under Lorcana Promos, with Promos as a playful sticker; the Quest binders get their own shelf under those
+- My Decks: every deck on display is now its own deck box, cartridge-style — its name embossed across the top, a tidy border around the front window, and one featured card showing in it. Pick the box's color and its featured card in the deck builder (until you pick, the window shows the deck's most valuable card). Tap a closed box and it opens — lid flips up, deck inside — then its page shows every card and how many copies
+- Admin: the Registered collectors tile is tappable now — tap it to open the list of every registered collector's username, with test accounts labeled
+- Profile: the little Library shelf is centered on the measured middle between your profile photo and the deck-box icon, and nudged down a touch — no change to its size, and the header spacing you approved is untouched
+
+## v1.39.0
+
+- Fixed: Update now actually updates. It used to bounce you back to Home still on the old version — the reload could be answered from the phone's saved copy. Now the update step fetches the new version and restarts onto it for real, and you will see an Updating note while it works
+- Fixed: refreshing on the Library page reloads the Library right where you are — it no longer throws you back to Home
+- Library: shelves are organized by universe now. All fourteen Lorcana chapters stand together on the first shelf, filled as full as it goes, and every shelf wears a little sign naming its universe — Lorcana, Comics, and any others as they arrive. Books slim down on a crowded shelf so everything fits
+- My Decks: the deck box photo is gone. Your deck box is now yours to create — pick its color, type in a custom name, and it is drawn right there on its shelf with your name on the front, like the chapters on the Library page
+- My Decks: your decks on display now stand as books on shelves below the deck box, Library-style — tap one to open its card list
+- Profile: the stretch between your name and badges and your bio is tightened up, so the whole header reads as one block — the Library shelf stays dropped under your Value and Collected stats, just with less empty air
+
+## v1.38.0
+
+- Profile: the little Library shelf of books now sits underneath your Value and Collected stats — centered under those two — and dropped down a few lines from where it sat before
+- New: value privacy. You can hide your total collection value from other collectors: use the switch in Settings under Sharing, or the little eye button right above the value figure on your own profile. Both places control the same setting and always agree, and you always see your own value
+- Home: the little eye button next to Your Collections opens its own window with the same collection switches as Settings — show or hide the Home tiles right there, without going to Settings
+- Owner only: an Admin shield badge now sits at the far left of Home's top row, on the same line as the mailbox icons. Nobody else ever sees it
+- Admin rebuilt: tapping the Home shield opens a brand-new Admin window (not Settings) with a rebuilt analytics-style dashboard — headline numbers up top, an items-by-kind ring chart, collector growth line and bar charts, tidy tables of collectors and most-owned items, trades and cash orders, tickets by status, and storage against the Supabase free plan. The same rebuilt dashboard now fills the Admin section in Settings too. Real server numbers only, with test profiles labeled
+
+## v1.37.4
+
+- Profile: the little Library shelf of books is now properly centered — the whole picture (the books, the shelf they stand on, and the Library label) is sized to the books and centered as one piece across the full space under your Value, Collected, and Trust Score stats, instead of sitting off to the left in part of that space. The deck-box icon stays at the right edge, and crowded shelves use slightly slimmer books so the picture stays clear of it
+
+## v1.37.3
+
+- Removed: the Dummy Friend test profile is deleted from the app entirely — its profile, its little collection, and its entry in Friends are gone, and it no longer figures in any Admin counts. Only you and Jarvis remain
+
+## v1.37.2
+
+- Fixed: the Great Hunny Rescue sealed photo is restored — the box standing in its clear acrylic display case on its black stand, the look that was approved, with no white or ghostly border around the photo
+- Profile: your @handle now sits right below your profile photo, and your bio sits one space below the handle
+- Profile: the little Library shelf picture nudged down and to the right a touch, so it sits centered in its space under your stats
+
+## v1.37.1
+
+- Profile: the deck-box icon moved all the way over to the right — it now sits at the edge of the profile, lined up with everything else on the page, instead of centered under the Trust Score
 
 ## v1.37.0
 
@@ -380,4 +782,3 @@ All notable changes to Vault X, newest first. The same notes appear in the app u
 - The Best Offer button now shows the TCGplayer logo
 - New button on a friend's page: Cards They Have That I Need, with its own search and set filter
 - Removed the extra Binders button from the bottom menu — tap a collection to open its binder
-

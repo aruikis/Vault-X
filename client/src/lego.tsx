@@ -15,6 +15,7 @@
 // per area.
 
 import { useEffect, useState } from "react";
+import { SearchScanRow } from "./searchScanRow";
 
 type LegoArea = "sets" | "sealed" | "minifigures" | "retiring";
 
@@ -45,8 +46,13 @@ const AREAS: { key: LegoArea; label: string; blurb: string }[] = [
   },
 ];
 
-export function LegoPanel() {
+export function LegoPanel({ onScan }: { onScan?: () => void }) {
   const [area, setArea] = useState<LegoArea>("sets");
+  // Section search (Nov 3, 2026, ~11:14 PM): the Search +
+  // Scan row every collection section carries. No Lego
+  // items are cataloged yet, so a search honestly reports
+  // the empty catalog instead of pretending to look.
+  const [legoQuery, setLegoQuery] = useState("");
   // Area switches are navigation steps (whole-app back-gesture fix):
   // each pushes a history entry, and this listener syncs the area
   // from whatever entry Back lands on — a Lego entry restores its
@@ -81,7 +87,7 @@ export function LegoPanel() {
   const current = AREAS.find((a) => a.key === area) ?? AREAS[0];
   return (
     <div className="pt-4">
-      <section aria-label="Lego collection summary">
+      <section aria-label="Legos collection summary">
         <p className="font-album text-lg leading-snug text-[var(--text)]">
           No Lego sets cataloged yet
         </p>
@@ -93,17 +99,35 @@ export function LegoPanel() {
       </section>
 
       <h1 className="font-album mt-5 text-2xl leading-tight text-[var(--text)]">
-        Lego
+        Legos
       </h1>
       <p className="mt-1 text-sm text-[var(--dim)]">
         Four areas, the way the Lego collection apps organize a
         collection. Pick an area to see what it will hold.
       </p>
 
+      <div className="mt-4">
+        <SearchScanRow
+          inputId="lego-section-search"
+          label="Search your Lego sets and minifigures"
+          placeholder="Search sets, themes, figures…"
+          value={legoQuery}
+          onChange={setLegoQuery}
+          onScan={onScan}
+        />
+      </div>
+      {legoQuery.trim().length >= 2 ? (
+        <p className="mt-3 text-sm text-[var(--dim)]">
+          No Lego items are cataloged yet, so there&rsquo;s nothing
+          to match — once your sets are cataloged, this bar searches
+          them.
+        </p>
+      ) : null}
+
       <div
         className="mt-4 flex flex-wrap gap-2"
         role="group"
-        aria-label="Lego areas"
+        aria-label="Legos areas"
       >
         {AREAS.map((a) => (
           <button

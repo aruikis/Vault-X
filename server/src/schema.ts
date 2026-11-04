@@ -121,12 +121,17 @@ export const sealedPriceHistory = sqliteTable("sealed_price_history", {
     whenever alerts are read — no separate evaluation job. */
 export const priceAlerts = sqliteTable("price_alerts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  /** "card" | "sealed" */
+  /** "card" | "sealed" | "comic" */
   targetKind: text("target_kind").notNull(),
   /** Binder card id when targetKind is "card". */
   cardId: integer("card_id"),
   /** Exact sealed item name when targetKind is "sealed". */
   sealedName: text("sealed_name"),
+  /** Client comic catalog id (e.g. "batman-136") when targetKind
+      is "comic" (migration 0044) — graded comics live in the
+      client's COMICS catalog, so the server resolves their current
+      value from its mirrored COMIC_ALERT_CATALOG in actions.ts. */
+  comicId: text("comic_id"),
   /** Display name captured when the alert was set. */
   label: text("label").notNull(),
   /** "below" | "above" */
@@ -155,11 +160,21 @@ export const collectorProfile = sqliteTable("collector_profile", {
       one). Rendered behind the profile header with the avatar on
       top, fully visible. */
   bannerBlobKey: text("banner_blob_key"),
+  /** The one-line bio shown on his profile (Anthony, Nov 3,
+      2026, late): edited from Edit profile on the profile
+      itself; null = never edited — the profile then shows
+      its starting line. */
+  bio: text("bio"),
   /** The app theme he picked in Settings ("vault" | "light" |
       "midnight" | "crimson" | "contrast"); null = never picked, so
       the default Vault Dark applies. Presentation only — the theme
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),
+  /** Set-page grid density he picked (Anthony, Nov 4, 2026):
+      2 or 4 cards across on set/chapter grids app-wide; null =
+      never picked, so the default of 2 applies. Presentation
+      only, like the theme. */
+  gridCols: integer("grid_cols"),
   /** Trade availability (Anthony, Nov 2, 2026, late): how many
       copies of a card he is willing to trade or part with —
       tradeable quantity is SEPARATE from owned quantity.
@@ -242,6 +257,17 @@ export const collectorProfile = sqliteTable("collector_profile", {
       people won't know it's off and it would cause problems);
       the switch lives in Settings. */
   shareCollection: integer("share_collection").notNull().default(1),
+  /** 1 = this collector's TOTAL COLLECTION VALUE is hidden
+      from other collectors on their profile (Anthony, Nov 3,
+      2026, ~11:23 AM): a privacy choice with two controls —
+      a switch in Settings and a small hide button right above
+      the value figure on their own profile — both driving
+      this one flag. The owner always sees their own value;
+      other viewers of the profile do not see the figure at
+      all. 0 = value shown (the default). */
+  hideCollectionValue: integer("hide_collection_value")
+    .notNull()
+    .default(0),
   /** The user's own Zelle handle — the email or phone number
       their Zelle is registered under (Anthony, Nov 3, 2026) —
       entered by the user in Settings > Payment info, never
@@ -251,11 +277,35 @@ export const collectorProfile = sqliteTable("collector_profile", {
       seller" line), so the buyer can copy it into their own
       bank app. Null = not saved. */
   zelleHandle: text("zelle_handle"),
+  /** The user's own Muse invite link, pasted by the user
+      themselves in Settings (Share Vault X) from the Muse
+      app's Invite button (Anthony, Nov 3, 2026): it is
+      included in the Share Vault X invite message so a new
+      Muse sign-up is credited to the person who shared.
+      Never invented or hard-coded — null until the user
+      pastes their own link. */
+  museInviteLink: text("muse_invite_link"),
   /** JSON array of Home "Your Collections" tile keys this
       user has hidden in Settings (Anthony, Nov 3, 2026):
       display-only — hiding a tile deletes nothing and touches
       no totals; null/empty = all six tiles shown. */
   hiddenCollections: text("hidden_collections"),
+  /** JSON array of Home "Your Collections" tile keys in the
+      order this user arranged them by long-hold drag on Home
+      (Anthony, Nov 3, 2026, late): display-only — the order
+      deletes nothing and touches no totals; null = the default
+      order (Lorcana, Pokémon, Magic, Lego, Comics, Star Wars).
+      Keys missing from the array (e.g. a tile added later)
+      fall back to their default position at the end. */
+  collectionOrder: text("collection_order"),
+  /** 1 once the user has used their ONE username change in
+      Settings (Anthony, Nov 3, 2026, late): a username may be
+      changed exactly one time after registration, then it
+      locks. Registration (the Welcome flow) is the initial
+      set and does NOT consume the change. */
+  usernameChangeUsed: integer("username_change_used")
+    .notNull()
+    .default(0),
   /** 1 once the one-time Welcome page has been completed on
       this profile (Anthony, Nov 3, 2026): the welcome +
       registration + forced tour flow shows exactly once per
@@ -285,8 +335,28 @@ export const decks = sqliteTable("decks", {
   /** The deck owner's collector code. */
   ownerCode: text("owner_code").notNull(),
   name: text("name").notNull(),
+  /** The deck box's body color (Anthony, Nov 3, 2026,
+      ~12:00 PM — the cartridge-style deck box): a color id
+      from the client's box palette, picked when the box is
+      created/edited; null = never picked (the client shows
+      its default box color). */
+  color: text("color"),
+  /** The card featured in the deck box's front display
+      window: a binder card id from THIS deck's lines, picked
+      by the owner; null = unpicked, and the box shows the
+      deck's signature card instead (its highest-value card,
+      resolved when the deck is read). */
+  featuredCardId: integer("featured_card_id"),
   /** JSON: [{cardId, qty}] */
   cardsJson: text("cards_json").notNull().default("[]"),
+  /** Copy attribution (Anthony, Nov 3, 2026 — copy-a-deck):
+      when this deck was copied from another collector's
+      displayed deck, the source collector's code, username,
+      and the source deck's name at copy time. Null on decks
+      the owner built themselves. */
+  copiedFromCode: text("copied_from_code"),
+  copiedFromUsername: text("copied_from_username"),
+  sourceDeckName: text("source_deck_name"),
   /** 1 = shown on the owner's My Decks display page. */
   displayed: integer("displayed").notNull().default(0),
   createdAt: text("created_at").notNull(),
@@ -396,10 +466,32 @@ export const tradeOffers = sqliteTable("trade_offers", {
   note: text("note"),
   /** "pending" | "accepted" | "declined" | "cancelled" */
   status: text("status").notNull().default("pending"),
+  /** Trade auto-archive (Anthony, Nov 3, 2026, ~11:04 PM):
+      stamped the moment the offer reaches an end state
+      (declined, cancelled/withdrawn, or fully complete with
+      feedback resolved) — or earlier when either side
+      archives a finished trade by hand. An archived trade
+      leaves the active Trades list for the collapsed History
+      section; the record itself is NEVER deleted (Trust and
+      feedback read it forever). Null = still active. */
+  archivedAt: text("archived_at"),
   proposerConfirmed: integer("proposer_confirmed").notNull().default(0),
   partnerConfirmed: integer("partner_confirmed").notNull().default(0),
   completedAt: text("completed_at"),
   trustRecorded: integer("trust_recorded").notNull().default(0),
+  /** Trade auto-settlement (Anthony, Nov 3, 2026, ~5:17 PM):
+      once the trade is fully complete — both sides confirmed
+      AND both sides' feedback in (or the 7-day neutral close)
+      — the agreed give/get lists are settled into both
+      collections automatically. settlement_json stores the
+      computed settlement plan (absolute per-card finish
+      targets for the local binder and absolute cloud rows
+      for the counterparty) the first time settlement is
+      attempted, so a retry replays the same plan and can
+      never double-apply; settled_at stamps when the plan
+      fully landed. */
+  settledAt: text("settled_at"),
+  settlementJson: text("settlement_json"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -459,10 +551,25 @@ export const cashPurchases = sqliteTable("cash_purchases", {
   priceSource: text("price_source").notNull(),
   /** "pending" | "accepted" | "declined" | "cancelled" */
   status: text("status").notNull().default("pending"),
+  /** Auto-archive, the cash twin of trade_offers.archivedAt
+      (Anthony, Nov 3, 2026, ~11:04 PM): stamped at an end
+      state or by either side's hand on a finished order; the
+      order then lives in the Trades History section and is
+      never deleted. Null = still active. */
+  archivedAt: text("archived_at"),
   buyerConfirmed: integer("buyer_confirmed").notNull().default(0),
   sellerConfirmed: integer("seller_confirmed").notNull().default(0),
   completedAt: text("completed_at"),
   trustRecorded: integer("trust_recorded").notNull().default(0),
+  /** Cash-purchase auto-settlement — same mechanism and
+      rules as trade_offers.settledAt / settlementJson
+      (Anthony, Nov 3, 2026, ~5:17 PM): when the purchase
+      fully completes, the bought copies move from the
+      seller's collection to the buyer's automatically,
+      under a stored absolute-target plan that retries
+      replay without double-applying. */
+  settledAt: text("settled_at"),
+  settlementJson: text("settlement_json"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -632,6 +739,66 @@ export const inboxDeletions = sqliteTable("inbox_deletions", {
   deletedAt: text("deleted_at").notNull(),
 });
 
+/** Admin change tracking (Anthony, Nov 3, 2026, 1:51 PM): one
+    row per Admin dashboard metric key. `last_value` is the
+    value getAdminStats most recently computed for that metric
+    (a stringified scalar or composite); `seen_value` is the
+    value the owner last acknowledged by tapping the metric's
+    highlighted tile. A metric counts as CHANGED when the two
+    differ; a null seen_value means the metric appeared after
+    the baseline was set and has never been acknowledged. The
+    very first stats run (empty table) writes the baseline
+    with seen = last, so nothing lights up spuriously. */
+export const adminMetricSeen = sqliteTable("admin_metric_seen", {
+  /** Metric key, e.g. "users.total", "roster:MC-XXXX-XXXX". */
+  key: text("key").primaryKey(),
+  /** Last value the owner acknowledged (tap on the tile). */
+  seenValue: text("seen_value"),
+  /** Value from the most recent getAdminStats computation. */
+  lastValue: text("last_value").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** The last fully computed Admin dashboard payload (Anthony,
+    Nov 3, 2026 — the Admin page speed fix): getAdminStats is the
+    app's slowest action (it pages every collection_items row on
+    Supabase, bulk-reads connections/trust, and estimates storage
+    table by table), so tapping the Admin badge could wait ~10s
+    on it. Every successful owner computation now stores its
+    whole result here (single row, id = 1) and the Admin page
+    reads this snapshot FIRST — one local row, no Supabase — so
+    it opens instantly with the last-known numbers, labeled with
+    `computedAt` as their as-of time, while the live computation
+    refreshes behind it. The payload is the exact JSON of a real
+    past getAdminStats response — never invented numbers; with
+    no row yet, the page shows honest loading states instead. */
+export const adminStatsCache = sqliteTable("admin_stats_cache", {
+  id: integer("id").primaryKey(),
+  /** JSON of the last full getAdminStats response (owner only). */
+  payload: text("payload").notNull(),
+  /** ISO instant that payload was computed. */
+  computedAt: text("computed_at").notNull(),
+});
+
+/** One completed catalog audit run (Anthony, Nov 3, 2026: the
+    audit-and-fill runs DAILY and its last result is visible
+    in-app under Settings > Your data & backups). Written by
+    saveCatalogAdditions every time the daily audit task saves
+    its findings — including a zero-additions save, which is
+    how a run that found nothing new still records that it
+    ran. The Settings line reads the newest row. */
+export const catalogAuditLog = sqliteTable("catalog_audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** ISO instant the audit run completed (its save landed). */
+  ranAt: text("ran_at").notNull(),
+  /** Printings that run inserted into the catalog. */
+  added: integer("added").notNull().default(0),
+  /** Printings the run supplied that were already cataloged. */
+  skipped: integer("skipped").notNull().default(0),
+  /** "daily" for the scheduled audit task's saves. */
+  source: text("source").notNull().default("daily"),
+});
+
 /** One point on a single card's value-over-time chart. Seeded from the five
     real Shiny exports (Oct 25 – Nov 1, 2026) with the card's weighted
     average value per copy that day; the daily re-pricing appends a point
@@ -645,4 +812,61 @@ export const cardPriceHistory = sqliteTable("card_price_history", {
   /** Market value per copy that day, USD. */
   unitValue: real("unit_value").notNull(),
   source: text("source").notNull().default("export"),
+});
+
+/** Catalog rows for the other card games (Anthony, Nov 3, 2026,
+    late — the three-game build): Pokémon, Magic: The Gathering,
+    and Star Wars: Unlimited, cataloged the Vault X way — one row
+    per printing (name, set/section, collector number, rarity /
+    finish variant, artwork as an image LINK only — artwork bytes
+    are not stored server-side, matching the Lorcana catalog's
+    storage model — and a market price where the source publishes
+    one). Rows are filled by the resumable importGameCatalog
+    action from each game's canonical free source (Pokémon:
+    PokemonTCG/pokemon-tcg-data on GitHub; Magic: Scryfall;
+    Star Wars: Unlimited: Fantasy Flight's official card API).
+    owned_qty is the collector's own count for that printing
+    (0 = missing, shown ghosted) and is only ever set by them. */
+export const gameCards = sqliteTable("game_cards", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** "pokemon" | "magic" | "starwars" */
+  game: text("game").notNull(),
+  /** Stable per-game printing id, e.g. "pokemon:base1-4". */
+  uid: text("uid").notNull().unique(),
+  /** Section (set) key inside the game, e.g. "base1" / "sld". */
+  sectionKey: text("section_key").notNull(),
+  sectionName: text("section_name").notNull(),
+  /** Section order inside the game (source release order). */
+  sectionSort: integer("section_sort").notNull().default(0),
+  /** Card order inside the section (collector number order). */
+  slotSort: integer("slot_sort").notNull().default(0),
+  /** Collector number as text (some games print letters). */
+  number: text("number"),
+  /** Printed identifier, e.g. "4/102", "257/204". */
+  printed: text("printed").notNull(),
+  name: text("name").notNull(),
+  rarity: text("rarity"),
+  /** Finish / variant label where the game has them. */
+  finish: text("finish"),
+  /** Artwork URL from the source (link only, never stored). */
+  imageUrl: text("image_url"),
+  /** Market price in USD where the source publishes one. */
+  price: real("price"),
+  ownedQty: integer("owned_qty").notNull().default(0),
+});
+
+/** Resumable import progress per game: the importer works in
+    chunks (a few sets/pages per call) and stores its cursor in
+    `state` (JSON), so a download of tens of thousands of
+    printings never has to finish inside one request — the
+    section's Continue control and the daily continuation both
+    pick up exactly where the last chunk stopped. */
+export const gameImportMeta = sqliteTable("game_import_meta", {
+  game: text("game").primaryKey(),
+  state: text("state").notNull().default("{}"),
+  setsTotal: integer("sets_total").notNull().default(0),
+  setsDone: integer("sets_done").notNull().default(0),
+  cardsTotal: integer("cards_total").notNull().default(0),
+  complete: integer("complete").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
 });

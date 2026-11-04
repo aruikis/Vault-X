@@ -8,7 +8,13 @@
 // server so the choice persists for the user across devices.
 // Presentation only: no collection data is involved.
 
-export type ThemeId = "vault" | "light" | "midnight" | "crimson" | "contrast";
+export type ThemeId =
+  | "vault"
+  | "light"
+  | "midnight"
+  | "crimson"
+  | "contrast"
+  | "rainbow";
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -50,6 +56,13 @@ export const THEMES: ThemeMeta[] = [
     blurb: "Maximum contrast — brightest text, strongest outlines.",
     swatches: { bg: "#000000", surface: "#0a0a0a", accent: "#ffd60a" },
   },
+  {
+    id: "rainbow",
+    name: "Rainbow",
+    blurb:
+      "The Trades look, everywhere — deep navy lit by blue and violet glows, with the blue-to-violet gradient on accents.",
+    swatches: { bg: "#070a14", surface: "#141a2e", accent: "#9a5cf5" },
+  },
 ];
 
 export const DEFAULT_THEME: ThemeId = "vault";
@@ -62,7 +75,8 @@ export function isThemeId(value: unknown): value is ThemeId {
     value === "light" ||
     value === "midnight" ||
     value === "crimson" ||
-    value === "contrast"
+    value === "contrast" ||
+    value === "rainbow"
   );
 }
 

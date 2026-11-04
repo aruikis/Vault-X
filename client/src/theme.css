@@ -156,8 +156,237 @@
   background-image: none;
 }
 
+/* Rainbow (Anthony, Nov 3, 2026, ~11:56 PM): the Trades
+   redesign mock's palette carried app-wide as a named theme,
+   at his direction ("name it like rainbow or something").
+   Extracted from the mock verbatim — the named reference
+   palette: bg #070a14, screen #0b0f1e, card surface #141a2e,
+   raised card #1a2140, inset #101527, hairlines
+   rgba(148,163,255,0.13), text #eef0fb, muted #9aa3c7 /
+   #6f789c, blue #4f8cff, violet #9a5cf5, the accent gradient
+   linear-gradient(120deg, #4f8cff, #9a5cf5), amber #f5b74f,
+   green #3fd68f. The app's single --accent takes the
+   gradient's violet end and --gold its blue end, so the pair
+   together carry the gradient's two poles; the shell
+   background below reproduces the mock's layered radial
+   glows (blue top-left, violet top-right) over the deep
+   navy. --border is a touch stronger than the mock's 0.13
+   hairline so app cards keep definition at app density. */
+:root[data-theme="rainbow"] {
+  color-scheme: dark;
+  --bg: #0b0f1e;
+  --surface: #141a2e;
+  --text: #eef0fb;
+  --dim: #9aa3c7;
+  --border: rgba(148, 163, 255, 0.24);
+  --accent: #9a5cf5;
+  --on-accent: #ffffff;
+  --radius: 20px;
+  --pocket: #101527;
+  --pocket-edge: rgba(148, 163, 255, 0.3);
+  --gold: #4f8cff;
+  --gold-soft: #bcd4ff;
+  --ghost: #8fa3c8;
+}
+
+/* Rainbow, FULL treatment (Anthony, Nov 4, 2026, ~12:17 AM:
+   "The whole app needs to look like this. Everything.") —
+   carrying the implemented Trades page's look app-wide, not
+   just its colors:
+   (1) SHADING — surfaces take the mock's gradient depth:
+   a soft violet-to-blue wash settling from the top edge
+   over the flat surface fill.
+   (2) BUBBLING — the common card radii round up, so cards,
+   pills, and controls share the Trades page's rounded
+   curvature (the shared --radius token above grows too).
+   (3) GLOW — accent-filled controls glow the way the
+   Trades page's interactive elements do, and round
+   avatars (photos and initial discs) carry a halo.
+   Dense data surfaces — tables, binder pockets, grid
+   tiles — take the shading and curvature but no per-item
+   glow; their geometry is untouched. */
+:root[data-theme="rainbow"] [class*="bg-\[var\(--surface\)\]"] {
+  background-image: linear-gradient(
+    165deg,
+    rgba(154, 92, 245, 0.1),
+    rgba(79, 140, 255, 0.05) 45%,
+    rgba(79, 140, 255, 0) 78%
+  );
+  /* Trades depth (unification pass, Nov 4, 2026): a lit top
+     edge and a soft drop shadow, the way Trades cards sit
+     raised in their lit world instead of flat on the page. */
+  box-shadow:
+    0 10px 24px rgba(2, 0, 20, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+/* Insets and wells (unification pass): components across
+   the app paint their inset wells (inputs, disclaimer
+   boxes, code blocks) with the page-background token,
+   which under Rainbow is near-black — they rendered as
+   flat dark holes inside the themed cards (the Settings
+   username box, the Share box, the change-request form).
+   The Trades world uses a three-step scale — screen
+   #0b0f1e, inset #101527, surface #141a2e — so wells take
+   the Trades inset tone and sit IN the world. */
+:root[data-theme="rainbow"] [class*="bg-\[var\(--bg\)\]"] {
+  background-color: #101527;
+}
+
+:root[data-theme="rainbow"] .rounded-lg {
+  border-radius: 0.875rem;
+}
+:root[data-theme="rainbow"] .rounded-xl {
+  border-radius: 1.125rem;
+}
+:root[data-theme="rainbow"] .rounded-2xl {
+  border-radius: 1.375rem;
+}
+:root[data-theme="rainbow"] .rounded-3xl {
+  border-radius: 1.75rem;
+}
+
+/* Accent-filled controls take the Trades page's signature
+   blue-to-violet gradient (not a flat violet fill) plus
+   its glow (unification pass, Nov 4, 2026). */
+:root[data-theme="rainbow"] [class*="bg-\[var\(--accent\)\]"] {
+  background-image: linear-gradient(120deg, #4f8cff, #9a5cf5);
+  box-shadow: 0 6px 22px rgba(110, 92, 245, 0.38);
+}
+
+:root[data-theme="rainbow"] img[class*="rounded-full"],
+:root[data-theme="rainbow"]
+  [class*="rounded-full"][class*="bg-\[var\(--accent\)\]"] {
+  box-shadow:
+    0 0 0 2px rgba(154, 92, 245, 0.35),
+    0 0 16px rgba(99, 102, 255, 0.45);
+}
+
+/* The Rainbow world (unification pass, Nov 4, 2026): the
+   Trades page paints its own backdrop — soft color glows,
+   no starfield — so the shell's star dots go away under
+   Rainbow and the glows take the Trades recipe: blue from
+   the top-left, violet from the top-right, a low violet
+   wash mid-page, over the Trades screen tone. */
+:root[data-theme="rainbow"] .app-shell {
+  background-image:
+    radial-gradient(620px 380px at 12% -60px, rgba(79, 140, 255, 0.19), transparent 62%),
+    radial-gradient(560px 420px at 96% 8%, rgba(154, 92, 245, 0.17), transparent 60%),
+    radial-gradient(480px 260px at 85% 34%, rgba(154, 92, 245, 0.09), transparent 60%);
+  background-size: auto, auto, auto;
+}
+
+/* Portfolio hero + chart card (unification pass): the hero
+   keeps its layout and every control, but under Rainbow its
+   surface joins the Trades world — raised Trades panel
+   tones with a hairline border and the violet-blue top
+   glow at Trades intensity — instead of the separate navy
+   family it kept before, which is why Portfolio felt like a
+   different app from Trades. */
+:root[data-theme="rainbow"] .portfolio-hero {
+  background:
+    radial-gradient(
+      ellipse 95% 62% at 50% -22%,
+      rgba(154, 92, 245, 0.3),
+      rgba(79, 140, 255, 0.12) 46%,
+      transparent 72%
+    ),
+    linear-gradient(180deg, #1c2444 0%, #141a2e 58%, #101527 100%);
+  border: 1px solid rgba(148, 163, 255, 0.16);
+  box-shadow:
+    0 18px 34px rgba(2, 0, 20, 0.5),
+    inset 0 1px 0 rgba(196, 212, 255, 0.14),
+    inset 0 0 42px rgba(99, 102, 255, 0.06);
+}
+
+/* The Portfolio chart's grid softens to Trades hairlines
+   under Rainbow. */
+:root[data-theme="rainbow"] .portfolio-hero .recharts-cartesian-grid line {
+  stroke: rgba(148, 163, 255, 0.1);
+}
+
+/* Home snapshot pill (unification pass): its inline navy
+   gradient gives way to the Trades raised-panel recipe. */
+:root[data-theme="rainbow"] .home-snapshot-pill {
+  background:
+    radial-gradient(
+      ellipse 90% 90% at 85% -30%,
+      rgba(154, 92, 245, 0.22),
+      transparent 65%
+    ),
+    linear-gradient(165deg, #1c2444, #141a2e 55%, #101527) !important;
+  border-color: rgba(148, 163, 255, 0.22);
+  box-shadow:
+    0 12px 26px rgba(2, 0, 20, 0.4),
+    inset 0 1px 0 rgba(196, 212, 255, 0.12) !important;
+}
+
+:root[data-theme="rainbow"] .rounded-md {
+  border-radius: 0.625rem;
+}
+
 body {
   background-color: var(--bg);
+}
+
+/* Profile identity card (Nov 4, 2026): callers pass a 96px
+   avatar node; the cleanup design's centered photo is
+   112px, so the frame sizes the passed node up to it. */
+.profile-avatar-frame > img,
+.profile-avatar-frame > span {
+  width: 112px;
+  height: 112px;
+}
+
+/* Portfolio Total Value hero (full redesign, Nov 3, 2026,
+   ~11:18 PM): Anthony called the old box cheap — flat pill,
+   plain label, bare number. The redesign follows the premium
+   fintech hero pattern (Robinhood / Delta / Collectr): a
+   borderless block on a deep charcoal-navy surface — dark
+   grey, never pure black — with ONE very subtle radial
+   blue-purple glow bleeding down from the top edge. The
+   gradient lives only in this block, nowhere else on the
+   page. The block stays dark in every theme on purpose: it
+   is the page's hero, the way a premium app's value header
+   reads as a distinct object. Text colors inside are set
+   explicitly by the component so the theme variables never
+   wash it out. */
+.portfolio-hero {
+  background:
+    radial-gradient(
+      ellipse 95% 62% at 50% -22%,
+      rgba(126, 110, 255, 0.3),
+      rgba(108, 124, 255, 0.12) 46%,
+      transparent 72%
+    ),
+    linear-gradient(180deg, #111b31 0%, #0c1322 58%, #0a0f1d 100%);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(196, 212, 255, 0.16),
+    inset 0 0 42px rgba(108, 124, 255, 0.05);
+}
+
+/* Smoothness pass (Nov 3, 2026, queued by Anthony ~11:16 PM —
+   performance and feel only): binder pockets are the app's
+   longest scroll surface (hundreds of cards per set). With
+   content-visibility, the browser skips layout and paint for
+   pockets far off screen and renders them as they approach;
+   the `auto` intrinsic size remembers each pocket's real
+   height after its first render, so the scrollbar never
+   jumps. No visual change to anything on screen. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* Two-across pockets are roughly 340px tall (bigger art, name
+   lines, the stepper row). The 160px fallback above made the
+   browser reserve half the real height, so pockets popping in
+   and out during a scroll shoved the layout around — a named
+   part of the two-across jank (Nov 4, 2026). */
+.cv-auto-lg {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
 }
 
 /* Settings quick-jump targets land with a little breathing room
@@ -190,12 +419,223 @@ section[id^="settings-"] {
   background-attachment: fixed;
 }
 
+/* Background fill (Anthony, Nov 4, 2026, ~1:29 AM): the
+   themed background lived only on .app-shell, so at full
+   scroll-down — and on any page shorter than the screen — a
+   flat unthemed band showed beneath the content ("can we
+   fill that void with that background?"). The theme layers
+   now ALSO paint on a fixed full-viewport underlay
+   (body::before) in every theme, so the area below the last
+   content, including overscroll, is the same world. The
+   underlay is the single painter — .app-shell no longer
+   paints the image itself (its per-theme image rules above
+   are overridden below), so the washes never double up or
+   step down at the shell's bottom edge. */
+html {
+  background-color: var(--bg);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(96, 130, 255, 0.16), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(150, 110, 255, 0.08), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 255, 255, 0.35) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(190, 205, 255, 0.5) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 255, 255, 0.28) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 255, 255, 0.4) 50%, transparent 52%);
+  background-size:
+    auto,
+    auto,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px;
+}
+
+:root[data-theme="light"] body::before {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(108, 124, 255, 0.1), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(150, 110, 255, 0.07), transparent 65%);
+  background-size: auto, auto;
+}
+
+:root[data-theme="midnight"] body::before {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(150, 110, 255, 0.18), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(108, 80, 255, 0.12), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 255, 255, 0.35) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(220, 205, 255, 0.5) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 255, 255, 0.28) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 255, 255, 0.4) 50%, transparent 52%);
+  background-size:
+    auto,
+    auto,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px;
+}
+
+:root[data-theme="crimson"] body::before {
+  background-image:
+    radial-gradient(ellipse 700px 420px at 85% -80px, rgba(255, 107, 74, 0.12), transparent 65%),
+    radial-gradient(ellipse 560px 420px at -120px 32%, rgba(255, 60, 40, 0.07), transparent 65%),
+    radial-gradient(1.2px 1.2px at 24px 36px, rgba(255, 235, 225, 0.45) 50%, transparent 52%),
+    radial-gradient(1px 1px at 130px 90px, rgba(255, 235, 225, 0.3) 50%, transparent 52%),
+    radial-gradient(1.4px 1.4px at 210px 160px, rgba(255, 205, 185, 0.42) 50%, transparent 52%),
+    radial-gradient(1px 1px at 70px 200px, rgba(255, 235, 225, 0.24) 50%, transparent 52%),
+    radial-gradient(1px 1px at 280px 60px, rgba(255, 235, 225, 0.34) 50%, transparent 52%);
+  background-size:
+    auto,
+    auto,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px,
+    300px 260px;
+}
+
+:root[data-theme="contrast"] body::before {
+  background-image: none;
+}
+
+:root[data-theme="rainbow"] body::before {
+  background-image:
+    radial-gradient(620px 380px at 12% -60px, rgba(79, 140, 255, 0.19), transparent 62%),
+    radial-gradient(560px 420px at 96% 8%, rgba(154, 92, 245, 0.17), transparent 60%),
+    radial-gradient(480px 260px at 85% 34%, rgba(154, 92, 245, 0.09), transparent 60%);
+  background-size: auto, auto, auto;
+}
+
+.app-shell {
+  min-height: 100dvh;
+  /* The fixed body::before underlay above paints the theme
+     layers now; the shell keeps only its --bg base color. */
+  background-image: none !important;
+}
+
 /* Headings and display numbers use a clean bold sans, matching the
    reference app's look (class name kept from the earlier serif theme). */
 .font-album {
   font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+/* Lorcana wordmark treatment (Anthony, Nov 3, 2026): used ONLY
+   for the word "Lorcana" on the Library's shelf signs, the
+   Library's Quest shelf sign, and the Illumineer's Quest
+   binder names inside the Library — styled after the real
+   Disney Lorcana wordmark: a distinctive serif display face
+   in a layered gold gradient, instead of the app's plain sans
+   text. Everywhere else keeps the app's normal lettering. */
+.lorcana-wordmark {
+  font-family:
+    "Playfair Display", Georgia, "Palatino Linotype", "Book Antiqua",
+    "Times New Roman", Times, serif;
+  font-weight: 700;
+  background-image: linear-gradient(
+    180deg,
+    #fff3c4 0%,
+    #f6d97b 30%,
+    #d9a441 54%,
+    #9a6b1c 78%,
+    #e8c766 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+
+/* Comics shelf sign (Anthony, Nov 3, 2026): the Library's
+   "Comics" shelf label in a classic comic-book masthead
+   idiom — punchy yellow block lettering with a hard black
+   outline and a red offset shadow, italicised and skewed
+   like a masthead, on a deep-blue halftone-dot plaque with
+   a slight tilt and a hard offset drop shadow. Fixed comic
+   colours in every theme, the way the Promos sticker keeps
+   its own colours. Used ONLY for this one shelf sign. */
+.comics-sign {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px 7px 10px;
+  border: 1.5px solid #0a0a0c;
+  border-radius: 4px;
+  background-color: #1e40af;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.26) 1px, transparent 1.4px),
+    linear-gradient(180deg, #2b54c9 0%, #1e40af 55%, #162f73 100%);
+  background-size:
+    7px 7px,
+    100% 100%;
+  background-position:
+    2px 2px,
+    0 0;
+  transform: rotate(-1.5deg);
+  box-shadow:
+    3px 3px 0 rgba(0, 0, 0, 0.9),
+    0 4px 10px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.comics-masthead {
+  display: inline-block;
+  font-family:
+    "Arial Black", Impact, Haettenschweiler, "Franklin Gothic Heavy",
+    ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  transform: skewX(-7deg);
+  color: #ffd81a;
+  -webkit-text-stroke: 0.35px #111111;
+  text-shadow:
+    -1px -1px 0 #111111,
+    1px -1px 0 #111111,
+    -1px 1px 0 #111111,
+    1px 1px 0 #111111,
+    2px 2px 0 #d92323,
+    3px 3px 0 rgba(0, 0, 0, 0.85);
+}
+
+/* "Set complete" achievement marker (Anthony, Nov 4, 2026):
+   the completion line on set, promo, and Illumineer's Quest
+   tiles in rich gold with a warm glow — an achievement
+   marker that stands out, not plain text. Fixed gold in
+   every theme, the way the Lorcana wordmark keeps its gold. */
+.set-complete-label {
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background-image: linear-gradient(
+    180deg,
+    #fff3c4 0%,
+    #f6d97b 32%,
+    #e3ac3c 55%,
+    #a8741a 80%,
+    #e8c766 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 6px rgba(246, 217, 123, 0.45))
+    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
 }
 
 /* Missing cards: the card's ACTUAL artwork, ghosted — washed out, brightened,
@@ -389,6 +829,120 @@ section[id^="settings-"] {
   background-size: 260% 100%;
   background-position: 92% 0;
   animation: card-glare-move 9s ease-in-out infinite;
+}
+
+/* Graded slab thickness in the comics turn view (Anthony,
+   Nov 3, 2026, 1:34 PM): the slab must read as a thick rigid
+   case turning in 3D, not a flat card. SlabTurnSlab builds a
+   CSS box around SlabFront: front face pushed half the depth
+   toward the viewer, a plain holder back half the depth
+   behind, and four molded clear edges 18px deep joining
+   them. The Turntable supplies the rotation (sway -17..17deg,
+   drag to 52deg); as it turns, the edge on the turning side
+   becomes visible with its ridged plastic shading. The
+   .card-turn parent already carries preserve-3d; every layer
+   here keeps it so the faces share one 3D space. */
+.slab-3d {
+  --slab-depth: 18px;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.slab-3d-face {
+  border-radius: 16px;
+  backface-visibility: hidden;
+}
+
+.slab-3d-front {
+  position: relative;
+  transform: translateZ(calc(var(--slab-depth) / 2));
+}
+
+.slab-3d-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg) translateZ(calc(var(--slab-depth) / 2));
+  background:
+    linear-gradient(150deg, rgba(190, 205, 230, 0.28), rgba(90, 105, 135, 0.32) 55%, rgba(160, 178, 205, 0.24)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.05) 0 2px, transparent 2px 7px),
+    #232a3d;
+  /* Beveled rim rings on the case back too (Nov 3, 2026): the
+     same stepped acrylic edge the front wears — bright outer
+     rim, dark recess line, pale inner rim — over the deep well
+     shadow, so the back reads as the same molded holder. */
+  box-shadow:
+    inset 0 0 0 2px rgba(238, 246, 255, 0.5),
+    inset 0 0 0 4px rgba(10, 16, 30, 0.3),
+    inset 0 0 0 6px rgba(205, 226, 255, 0.16),
+    inset 0 0 42px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12%;
+}
+
+.slab-3d-back-label {
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.13);
+}
+
+.slab-3d-edge {
+  position: absolute;
+  /* Clear polished acrylic edge (Nov 3, 2026): brighter and
+     clearer than the first pass, with the fine molded ridges
+     running along it and a hard light line down its middle —
+     the way a real slab's thick edge catches light as it
+     turns. */
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.26) 0 2px, rgba(20, 28, 45, 0.13) 2px 4px),
+    linear-gradient(180deg, rgba(240, 246, 253, 0.96), rgba(168, 188, 216, 0.9) 34%, rgba(226, 236, 248, 0.94) 52%, rgba(148, 168, 200, 0.9) 78%, rgba(214, 226, 242, 0.94));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    inset 0 0 6px rgba(255, 255, 255, 0.35);
+}
+
+.slab-3d-edge-right {
+  top: 3px;
+  bottom: 3px;
+  left: calc(100% - var(--slab-depth) / 2);
+  width: var(--slab-depth);
+  transform: rotateY(90deg);
+  border-radius: 3px;
+}
+
+.slab-3d-edge-left {
+  top: 3px;
+  bottom: 3px;
+  left: calc(0px - var(--slab-depth) / 2);
+  width: var(--slab-depth);
+  transform: rotateY(90deg);
+  border-radius: 3px;
+}
+
+.slab-3d-edge-top {
+  left: 3px;
+  right: 3px;
+  top: calc(0px - var(--slab-depth) / 2);
+  height: var(--slab-depth);
+  transform: rotateX(90deg);
+  border-radius: 3px;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.22) 0 2px, rgba(20, 28, 45, 0.16) 2px 4px),
+    linear-gradient(90deg, rgba(235, 242, 252, 0.92), rgba(148, 166, 196, 0.88) 48%, rgba(205, 218, 238, 0.9));
+}
+
+.slab-3d-edge-bottom {
+  left: 3px;
+  right: 3px;
+  top: calc(100% - var(--slab-depth) / 2);
+  height: var(--slab-depth);
+  transform: rotateX(90deg);
+  border-radius: 3px;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.22) 0 2px, rgba(20, 28, 45, 0.16) 2px 4px),
+    linear-gradient(90deg, rgba(205, 218, 238, 0.9), rgba(120, 140, 172, 0.88) 48%, rgba(235, 242, 252, 0.92));
 }
 
 @keyframes card-bob {
@@ -593,69 +1147,12 @@ section[id^="settings-"] {
   }
 }
 
-/* Page-to-page tab transitions (Anthony, Nov 3, 2026, ~3:13 AM,
-   reworked ~10:03 AM): when moving between bottom-menu tabs —
-   by swipe OR by tapping the bar — the incoming tab slides in
-   from the direction of travel (from the right when moving to
-   the next tab, from the left when moving back) and crossfades
-   in as it settles. Anthony's on-device verdict on the first
-   version: 240ms ease-out over 44px still felt too sharp and
-   too fast, like a cut. This version is deliberately slower
-   and softer: 480ms on a gentle ease-out curve (fast at the
-   very start, long soft landing), a longer 72px travel, and a
-   full fade from transparent so the two pages blend instead
-   of snapping. Returning from Search (no direction of travel)
-   uses the plain fade. Reduced-motion still disables it.
-   Third pass (~10:15 AM, same day): Anthony confirmed the
-   Home→Search bleed-through is FIXED and the smoothness is
-   "definitely improving" — and directed it be improved EVEN
-   MORE. The slides now run 680ms on a softer symmetric-feel
-   ease (slow in, long glide, feathered landing) with an 84px
-   travel and a deeper fade, and the plain fade runs 560ms
-   from 25% opacity, so page changes read as one continuous
-   drift rather than a quick slide. */
-.tab-slide-next {
-  animation: tab-slide-next 0.68s cubic-bezier(0.25, 0.9, 0.3, 1);
-}
-
-.tab-slide-prev {
-  animation: tab-slide-prev 0.68s cubic-bezier(0.25, 0.9, 0.3, 1);
-}
-
-.tab-fade {
-  animation: tab-fade 0.56s cubic-bezier(0.25, 0.9, 0.3, 1);
-}
-
-@keyframes tab-slide-next {
-  from {
-    opacity: 0;
-    transform: translateX(84px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes tab-slide-prev {
-  from {
-    opacity: 0;
-    transform: translateX(-84px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes tab-fade {
-  from {
-    opacity: 0.25;
-  }
-  to {
-    opacity: 1;
-  }
-}
+/* Page-to-page tab transitions REMOVED (Anthony, Nov 3,
+   2026, ~4:44 PM): the swipe-between-tabs navigation and
+   its slide/crossfade transition were removed at his
+   direction — tab changes are instant cuts again. The
+   Library binder's own finger-swipe page flipping is a
+   separate feature and is untouched. */
 
 /* The Library's floating peek window (Anthony, Nov 3, 2026,
    ~10:18 AM): tapping a spine pops a small window in beside
@@ -683,24 +1180,198 @@ section[id^="settings-"] {
   }
 }
 
-/* The floating up/down scroll arrows (Anthony, Nov 3, 2026,
-   ~10:16 AM): they showed in the right places but still read
-   as SOLID buttons — he directed them TRANSLUCENT. The fill
-   is now a true see-through mix of the surface color at 18%
-   over a strong backdrop blur, so page content visibly
-   ghosts through them as they float. */
-.scroll-arrow-btn {
-  background: color-mix(in srgb, var(--surface) 18%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  backdrop-filter: blur(14px) saturate(1.3);
+/* The flip-through binder (Anthony, Nov 3, 2026, ~11:52 AM):
+   page turns in the Library's table-scene binder swing in
+   from the side the turn comes from, and the cover swings
+   open on its left hinge before fading away. */
+.binder-page-next,
+.binder-page-prev {
+  position: relative;
+  overflow: hidden;
+  will-change: transform, opacity;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
-
+.binder-page-next {
+  animation: binder-page-next 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: left center;
+}
+.binder-page-prev {
+  animation: binder-page-prev 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: right center;
+}
+/* While the finger is dragging, the page follows the finger —
+   no keyframe animation fights it. */
+.binder-page-drag {
+  animation: none !important;
+  will-change: transform;
+  transform-style: preserve-3d;
+}
+/* A soft light sweep across the incoming page, so the turn
+   reads as a sheet settling rather than a panel cutting in. */
+.binder-page-next::after,
+.binder-page-prev::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.14) 48%,
+    transparent 72%
+  );
+  animation: binder-page-sheen 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.binder-page-prev::after {
+  background: linear-gradient(
+    260deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.14) 48%,
+    transparent 72%
+  );
+}
+@keyframes binder-page-sheen {
+  from {
+    opacity: 0.9;
+    transform: translateX(-18%);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(18%);
+  }
+}
+@keyframes binder-page-next {
+  0% {
+    opacity: 0;
+    transform: perspective(1200px) rotateY(-42deg) translateX(36px)
+      scale(0.97);
+    filter: brightness(0.9);
+    box-shadow: -22px 0 36px rgba(0, 0, 0, 0.5);
+  }
+  42% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(-9deg) translateX(7px)
+      scale(0.995);
+    filter: brightness(0.97);
+    box-shadow: -10px 0 22px rgba(0, 0, 0, 0.32);
+  }
+  76% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(2.2deg) translateX(-2px)
+      scale(1);
+    filter: brightness(1.01);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(0deg) translateX(0) scale(1);
+    filter: brightness(1);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+@keyframes binder-page-prev {
+  0% {
+    opacity: 0;
+    transform: perspective(1200px) rotateY(42deg) translateX(-36px)
+      scale(0.97);
+    filter: brightness(0.9);
+    box-shadow: 22px 0 36px rgba(0, 0, 0, 0.5);
+  }
+  42% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(9deg) translateX(-7px)
+      scale(0.995);
+    filter: brightness(0.97);
+    box-shadow: 10px 0 22px rgba(0, 0, 0, 0.32);
+  }
+  76% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(-2.2deg) translateX(2px)
+      scale(1);
+    filter: brightness(1.01);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(0deg) translateX(0) scale(1);
+    filter: brightness(1);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+.binder-cover-opening {
+  animation: binder-cover-open 0.65s ease-in forwards;
+  transform-origin: left center;
+}
+@keyframes binder-cover-open {
+  from {
+    transform: perspective(1100px) rotateY(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: perspective(1100px) rotateY(-103deg);
+    opacity: 0.15;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .tab-slide-next,
-  .tab-slide-prev,
-  .tab-fade {
+  .binder-page-next,
+  .binder-page-prev,
+  .binder-page-next::after,
+  .binder-page-prev::after,
+  .binder-cover-opening {
     animation: none;
   }
+}
+
+/* The cartridge deck box opening (Anthony, Nov 3, 2026,
+   ~12:00 PM): tapping a closed box flips its lid up on the
+   back hinge while the deck inside rises a little, then
+   the full deck page follows. */
+.deck-lid-open {
+  animation: deck-lid-open 0.7s ease-in forwards;
+  transform-origin: center bottom;
+}
+@keyframes deck-lid-open {
+  from {
+    transform: perspective(700px) rotateX(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: perspective(700px) rotateX(-97deg);
+    opacity: 0.9;
+  }
+}
+.deck-card-rise {
+  animation: deck-card-rise 0.7s ease-out forwards;
+}
+@keyframes deck-card-rise {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: translateY(-36px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck-lid-open,
+  .deck-card-rise {
+    animation: none;
+  }
+}
+
+/* The floating up/down scroll arrows (Anthony, Nov 3, 2026,
+   ~10:16 AM): they showed in the right places but still read
+   as SOLID buttons — he directed them TRANSLUCENT. Faded
+   further at 1:50 PM the same day — "I want them to be there
+   but I want them to hardly be there": the fill is now a
+   barely-there see-through mix of the surface color at 8%
+   over a strong backdrop blur, so the arrows are a faint
+   ghost presence, still fully tappable at their full size. */
+.scroll-arrow-btn {
+  background: color-mix(in srgb, var(--surface) 8%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
 }
 
 /* Welcome page intro (Anthony, Nov 3, 2026): the "Welcome to

@@ -23,7 +23,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Turntable } from "./turntable";
+import { SearchScanRow } from "./searchScanRow";
 import { OwnedLocationBar } from "./whereItLives";
+import { PriceAlertBox } from "./priceAlerts";
 import {
 Area,
 AreaChart,
@@ -500,7 +502,10 @@ function CertBarcode({ cert }: { cert: string }) {
     bars.push({ w: 1 + ((d + next) % 2), gap: 1 + ((d + 1) % 3 === 0 ? 1 : 0) });
   }
   return (
-    <span aria-hidden="true" className="mx-auto flex h-[9px] w-[64px] items-stretch justify-center overflow-hidden">
+    <span
+      aria-hidden="true"
+      className="mx-auto flex h-[5px] w-[44px] items-stretch justify-center overflow-hidden"
+    >
       {bars.map((b, i) => (
         <span
           key={i}
@@ -525,20 +530,22 @@ function CgcHologram({ comic }: { comic: Comic }) {
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center gap-1 self-center">
       {isAliens ? (
-        <span className="flex h-[24px] w-[34px] flex-col items-center justify-center rounded-[4px] bg-gradient-to-br from-[#f6dc7d] via-[#dfae35] to-[#c1912a] shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/25">
-          <span className="text-[4.5px] font-bold italic leading-none text-[#6b4e08]">
+        <span
+          className="flex h-[14px] w-[20px] flex-col items-center justify-center rounded-[3px] bg-gradient-to-br from-[#f6dc7d] via-[#dfae35] to-[#c1912a] shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/25"
+        >
+          <span className="text-[2.8px] font-bold italic leading-none text-[#6b4e08]">
             Celebrity
           </span>
-          <span className="text-[4.5px] font-bold italic leading-none text-[#6b4e08]">
+          <span className="text-[2.8px] font-bold italic leading-none text-[#6b4e08]">
             Authentics
           </span>
-          <span className="mt-0.5 text-[5px] font-semibold leading-none tracking-wide text-black/80">
+          <span className="mt-px text-[3.2px] font-semibold leading-none tracking-wide text-black/80">
             C12447
           </span>
         </span>
       ) : null}
       <span
-        className={`flex h-[38px] w-[30px] flex-col items-center justify-between overflow-hidden rounded-[5px] py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),inset_0_-1px_2px_rgba(0,0,0,0.25)] ring-1 ring-black/30 ${
+        className={`flex h-[21px] w-[17px] flex-col items-center justify-between overflow-hidden rounded-[4px] py-px shadow-[inset_0_1px_0_rgba(255,255,255,0.65),inset_0_-1px_2px_rgba(0,0,0,0.25)] ring-1 ring-black/30 ${
           isAliens
             ? "bg-gradient-to-br from-[#8fb4ec] via-[#5b84cc] to-[#3c63a8] text-white"
             : isSignature
@@ -547,14 +554,17 @@ function CgcHologram({ comic }: { comic: Comic }) {
         }`}
       >
         {isAliens ? (
-          <svg viewBox="0 0 24 24" className="h-[11px] w-[11px] fill-current opacity-90">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-[6px] w-[6px] fill-current opacity-90"
+          >
             <path d="M11 3h2v2.2l5.6 1.9-2.9 6.1a3.9 3.9 0 0 1-7.2 0l-.9-1.9H5.7l-.9 1.9a3.9 3.9 0 0 1-7.2 0L.7 7.1 6.3 5.2V4H4V2h7v1zm-4.8 4.4L4 12h4.4L6.2 7.4zm11.6 0L15.6 12H20l-2.2-4.6zM11 13h2v6h4v2H7v-2h4v-6z" transform="scale(0.92) translate(1 -1)" />
           </svg>
         ) : (
-          <span className="h-[9px]" />
+          <span className="h-[5px]" />
         )}
         <span
-          className={`text-[9px] font-black leading-none tracking-tight ${
+          className={`text-[6px] font-black leading-none tracking-tight ${
             isAliens || !isSignature
               ? "drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]"
               : ""
@@ -563,7 +573,7 @@ function CgcHologram({ comic }: { comic: Comic }) {
           CGC
         </span>
         <span
-          className={`block h-[5px] w-full ${
+          className={`block h-[3px] w-full ${
             isAliens ? "bg-black/25" : isSignature ? "bg-black/20" : "bg-black/30"
           }`}
         />
@@ -584,39 +594,86 @@ function CgcHologram({ comic }: { comic: Comic }) {
     Rebuilt Nov 2, 2026 (v1.13.0) at Anthony's direction — "rebuild
     the slab label to match your actual labels, as best as
     possible" — because the first mock-up read as generic stacked
-    text with the grade on the right. The label now follows the
+    text with the grade on the right. The label follows the
     anatomy of his real CGC labels: a top banner naming the grade
     type (CGC UNIVERSAL GRADE in white on the dark blue band;
     CGC Signature SERIES in script on the gold band); the grade
-    9.8 huge in a white rounded box on the LEFT with WHITE Pages
-    under it (Aliens #1's older label instead prints WHITE Pages
-    in the middle, like his photo); the title and publisher/date
-    centered and bold; the signed and edition lines centered under
-    them; the credits small at the bottom-left; the cert number
-    centered over a drawn barcode; the label's right-side note
-    beside it; the holographic CGC sticker at the right end (plus
-    Aliens' gold Celebrity Authentics sticker); and the faint CGC
-    watermark washed behind the middle, as printed. The band stays
-    tight — about 15% of the slab, a real holder's proportions —
-    with the molded ridge and seam under it separating the label
-    compartment from the comic compartment, and the cover inset
-    inside the case like a real holder. The flip view pairs this
-    slab front with his real label close-up photo. */
-function SlabFront({ comic }: { comic: Comic }) {
+    9.8 alone in a solid square white box on the LEFT (Anthony,
+    Nov 3, 2026: the box is an equal square, and "WHITE Pages"
+    does not sit under the grade on Universal labels — Aliens
+    #1's older label and the Signature Series books print it on
+    the centered line instead); the title and
+    publisher/date centered and bold, with the signed / edition
+    lines sharing the title block's second line; the credits run
+    as one wrapping small-print line at the bottom-left; the
+    cert number centered over a drawn barcode; the label's
+    right-side note beside it; the holographic CGC sticker at
+    the right end (plus Aliens' gold Celebrity Authentics
+    sticker); and the faint CGC watermark washed behind the
+    middle, as printed.
+
+    Slimmed again Nov 3, 2026 (~2:08 PM) at Anthony's direction:
+    the band is now a true slim strip — roughly a tenth of the
+    slab's height, inside the 15%-or-less a real holder runs —
+    for EVERY slab, and the case around it carries the full
+    clear-acrylic treatment the Sealed cases use: beveled rim
+    rings, a molded ridge and sonic-weld seam under the label,
+    the cover recessed behind the front face with its own
+    shading and sheen, and light streaks down the thick case
+    walls. The molded ridge and seam separate the label
+    compartment from the comic compartment, and the cover sits
+    inset inside the case like a real holder. The flip view
+    pairs this slab front with his real label close-up photo. */
+export function SlabFront({ comic }: { comic: Comic }) {
   const isSignature = comic.label === "Signature Series";
   const isAliens = comic.id === "aliens-1";
+  // Anthony, Nov 3, 2026, ~2:08 PM: the label band STILL reads
+  // too tall — on a real CGC slab the label is a SLIM band at
+  // the top of the case, roughly 15% or less of the total
+  // height, with compact small print. The condensed layout is
+  // now the ONE layout for every slab (it used to apply only
+  // to the two Signature Series books): a hairline banner, the
+  // title block compressed to two tight lines (publisher/date
+  // shares a line with the signed / edition / WHITE Pages
+  // line), and ALL of the small print — credits, cert over its
+  // barcode, the label's note — run together in a single
+  // shallow strip under the title instead of stacking in
+  // their own rows. Every word of label information is still
+  // there (grade 9.8, signed line, cert, credits,
+  // notes); it is simply set at true small-print size, and all
+  // of it is repeated in the text below the slab anyway, so
+  // realistic proportion wins over readability.
+  // Mandalorian #4 keeps its one approved tweak (Nov 3, 2026,
+  // 1:33 PM): its grade sits a touch lower than the rest.
+  const isMandalorian = comic.id === "mandalorian-4";
   const longTitle = comic.labelTitle.length > 24;
+  // The label's second centered line: the signed line when the
+  // book is signed, plus the edition line and the WHITE Pages
+  // line on the labels that print it there — Aliens #1's older
+  // label, and the Signature Series books (whose grade box
+  // carries no page line). Universal labels carry no WHITE
+  // Pages line anywhere on the band (Anthony, Nov 3, 2026:
+  // it does not belong under the grade there).
+  const labelSubLine = [
+    comic.labelSigned,
+    comic.labelEdition,
+    isAliens || isSignature ? "WHITE Pages" : null,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
   return (
     <div
-      className="relative rounded-[14px] bg-gradient-to-br from-white/40 via-white/10 to-white/25 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_6px_rgba(255,255,255,0.12)] ring-1 ring-white/50"
+      className="relative rounded-[16px] bg-[linear-gradient(135deg,rgba(255,255,255,0.55)_0%,rgba(210,226,248,0.14)_28%,rgba(160,185,220,0.10)_55%,rgba(255,255,255,0.30)_82%,rgba(190,210,238,0.38)_100%)] p-2 shadow-[0_24px_60px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.75),inset_0_-3px_8px_rgba(255,255,255,0.20),inset_3px_0_6px_rgba(255,255,255,0.24),inset_-3px_0_6px_rgba(0,0,0,0.20),inset_0_0_0_2px_rgba(238,246,255,0.50),inset_0_0_0_4px_rgba(12,18,32,0.28),inset_0_0_0_6px_rgba(205,226,255,0.16)] ring-1 ring-white/60"
       aria-label={`${comic.title} shown as its CGC slab — a mock-up built from the real cover art and the real label details`}
       role="img"
     >
-      <div className="overflow-hidden rounded-[7px] bg-[#0c0d12] shadow-[inset_0_2px_12px_rgba(0,0,0,0.85)]">
+      <div className="relative overflow-hidden rounded-[8px] bg-[#0c0d12] shadow-[inset_0_2px_12px_rgba(0,0,0,0.85),inset_0_0_0_1px_rgba(255,255,255,0.28)] ring-1 ring-black/50">
         {/* The CGC label, rebuilt to the real labels' layout (see
             the note above): pale blue body for Universal, pale
             gold-cream for Signature Series, black print throughout,
-            in a slim compartment of its own. */}
+            in a slim compartment of its own — a thin band across
+            the top of the case, about a tenth of the slab's
+            height, the way a real holder's label sits. */}
         <div
           className={`relative overflow-hidden text-black ${
             isSignature
@@ -627,24 +684,29 @@ function SlabFront({ comic }: { comic: Comic }) {
           {/* Top banner: the grade type, exactly where CGC prints
               it — white spaced caps on the dark blue band for
               Universal; CGC + script "Signature" + SERIES on the
-              gold band for Signature Series. */}
+              gold band for Signature Series. A hairline band now:
+              no vertical padding to speak of. */}
           <div
-            className={`flex items-center justify-center px-2 py-[3px] ${
+            className={`flex items-center justify-center px-2 py-px ${
               isSignature
                 ? "bg-gradient-to-b from-[#eed887] via-[#e3c95c] to-[#d4af37] text-[#221a04]"
                 : "bg-gradient-to-b from-[#3d6dc0] to-[#2c56a3] text-white"
             }`}
           >
             {isSignature ? (
-              <p className="flex items-baseline gap-1.5 leading-none">
-                <span className="text-[9px] font-black tracking-[0.08em]">CGC</span>
-                <span className="font-serif text-[11px] font-bold italic leading-none">
+              <p className="flex items-baseline gap-1 leading-none">
+                <span className="text-[6px] font-black tracking-[0.08em]">
+                  CGC
+                </span>
+                <span className="font-serif text-[7.5px] font-bold italic leading-none">
                   Signature
                 </span>
-                <span className="text-[9px] font-black tracking-[0.22em]">SERIES</span>
+                <span className="text-[6px] font-black tracking-[0.22em]">
+                  SERIES
+                </span>
               </p>
             ) : (
-              <p className="text-[9px] font-bold leading-none tracking-[0.3em]">
+              <p className="text-[6px] font-bold leading-none tracking-[0.3em]">
                 CGC&nbsp;UNIVERSAL&nbsp;GRADE
               </p>
             )}
@@ -653,105 +715,118 @@ function SlabFront({ comic }: { comic: Comic }) {
               label's middle, as printed on the real labels. */}
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-[22px] select-none text-center text-[44px] font-black tracking-tight text-white/25"
+            className="pointer-events-none absolute inset-x-0 top-[9px] select-none text-center text-[24px] font-black tracking-tight text-white/25"
           >
             CGC
           </span>
-          <div className="relative flex gap-1 px-1.5 pb-1.5 pt-1">
-            {/* Grade box: white, rounded, full label height — 9.8
-                huge with WHITE Pages under it. Aliens #1's older
-                label carries no page line in the box (it prints
-                WHITE Pages in the middle instead). */}
+          {/* Plastic sheen over the label paper: the label sits
+              UNDER the case's clear front, so a faint diagonal
+              light wash crosses it just like the cover below. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-white/25 via-white/5 to-transparent"
+          />
+          <div className="relative flex gap-1 px-1 pb-[3px] pt-[2px]">
+            {/* Grade box: a solid EQUAL SQUARE around the 9.8
+                alone (Anthony, Nov 3, 2026, ~4:05–4:06 PM: the
+                box was a tall vertical rectangle — on his real
+                CGC labels the white grade box is a square, on
+                every slab), and NO "WHITE Pages" line under the
+                grade on the non-signature (Universal) labels —
+                those words do not belong there. Signature
+                Series books and Aliens #1's older label print
+                WHITE Pages on the centered line instead (see
+                labelSubLine), so the fact stays on those
+                labels without sitting under the grade.
+                Mandalorian #4: the box is nudged a pixel DOWN
+                (its one approved tweak) via a transform, so
+                the label's layout height does not change. */}
             <div
-              className={`flex w-[48px] shrink-0 flex-col items-center justify-center self-stretch rounded-[7px] bg-white px-0.5 py-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
+              className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center self-center rounded-[4px] bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
                 isSignature
-                  ? "border-b-[3px] border-[#d4af37]"
-                  : "border-b-[3px] border-[#2c56a3]"
+                  ? "border-b-2 border-[#d4af37]"
+                  : "border-b-2 border-[#2c56a3]"
               }`}
+              style={
+                isMandalorian
+                  ? { transform: "translateY(1px)" }
+                  : undefined
+              }
             >
-              <span className="text-[26px] font-black leading-none tracking-tight">
+              <span className="text-[14px] font-black leading-none tracking-tight">
                 9.8
               </span>
-              {!isAliens ? (
-                <span className="mt-1 text-[6px] font-bold leading-none">
-                  WHITE <span className="font-semibold">Pages</span>
-                </span>
-              ) : null}
             </div>
             {/* Right of the grade box: the centered title block
-                with the holographic sticker at its right on top,
-                and below it — spanning the full remaining width,
-                the way the real labels run their small print edge
-                to edge — credits at the bottom-left, the cert
-                number centered over its barcode, and the label's
-                note at the bottom-right. */}
+                with the holographic sticker at its right, and
+                beneath it — spanning the full remaining width,
+                the way the real labels run their small print
+                edge to edge — ONE shallow small-print strip:
+                credits at the left, the cert number centered
+                over its barcode, and the label's note at the
+                right, each allowed to wrap inside its own third
+                so nothing is cut off. Joining the credits onto
+                one wrapping line (and the signed / edition /
+                WHITE Pages lines onto the title block's second
+                line) is what lets the whole band stay slim. */}
             <div className="relative flex min-w-0 flex-1 flex-col">
-              <div className="flex items-start gap-1">
+              <div className="flex items-center gap-1">
                 <div className="min-w-0 flex-1">
                   <p
-                    className={`text-center font-extrabold leading-[1.08] ${
-                      longTitle ? "text-[10.5px]" : "text-[12px]"
+                    className={`text-center font-extrabold leading-[1.05] ${
+                      longTitle ? "text-[7.5px]" : "text-[8.5px]"
                     }`}
                   >
                     {comic.labelTitle}
                   </p>
-                  <p className="mt-px text-center text-[8px] font-bold leading-tight">
+                  <p className="mt-px text-center text-[5px] font-bold leading-[1.1]">
                     {comic.labelPublisher}, {comic.date}
                   </p>
-                  {comic.labelSigned ? (
-                    <p className="mt-px text-center text-[6px] font-semibold leading-tight">
-                      {comic.labelSigned}
-                    </p>
-                  ) : null}
-                  {isAliens ? (
-                    <p className="mt-px text-center text-[7px] font-semibold italic leading-tight">
-                      WHITE Pages
-                    </p>
-                  ) : null}
-                  {comic.labelEdition ? (
-                    <p className="mt-0.5 text-center text-[7px] font-bold leading-tight">
-                      {comic.labelEdition}
+                  {labelSubLine ? (
+                    <p className="mt-px text-center text-[4.3px] font-semibold leading-[1.1]">
+                      {labelSubLine}
                     </p>
                   ) : null}
                 </div>
                 <CgcHologram comic={comic} />
               </div>
-              <div className="mt-auto flex items-end justify-between gap-1 pt-1">
-                <div className="min-w-0">
-                  {comic.labelLeftNote ? (
-                    <p className="text-[6.3px] font-bold italic leading-[1.3]">
-                      {comic.labelLeftNote}
-                    </p>
-                  ) : null}
-                  {comic.labelCredits.map((line) => (
-                    <p key={line} className="whitespace-nowrap text-[6.3px] leading-[1.3]">
-                      {line}
-                    </p>
-                  ))}
+              <div className="mt-auto flex items-end justify-between gap-1 pt-px">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[4px] leading-[1.2]">
+                    {comic.labelLeftNote ? (
+                      <span className="font-bold italic">
+                        {comic.labelLeftNote}.{" "}
+                      </span>
+                    ) : null}
+                    {comic.labelCredits.join("  ·  ")}
+                  </p>
                 </div>
                 <div className="shrink-0 px-0.5 text-center">
-                  <p className="text-[8.5px] font-medium leading-none tracking-[0.06em]">
+                  <p className="text-[6px] font-medium leading-none tracking-[0.06em]">
                     {comic.cert}
                   </p>
-                  <div className="mt-[3px]">
+                  <div className="mt-px">
                     <CertBarcode cert={comic.cert} />
                   </div>
                 </div>
-                <div className="min-w-0 text-right">
-                  {comic.labelNote
-                    ? comic.labelNote.map((line, i) => (
-                        <p
+                <div className="min-w-0 flex-1 text-right">
+                  {comic.labelNote ? (
+                    <p className="text-[4px] leading-[1.2]">
+                      {comic.labelNote.map((line, i) => (
+                        <span
                           key={line}
-                          className={`whitespace-nowrap text-[6.3px] leading-[1.3] ${
+                          className={
                             i === 0 && comic.labelNote!.length > 1
                               ? "font-bold"
                               : ""
-                          }`}
+                          }
                         >
+                          {i > 0 ? " " : ""}
                           {line}
-                        </p>
-                      ))
-                    : null}
+                        </span>
+                      ))}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -759,26 +834,112 @@ function SlabFront({ comic }: { comic: Comic }) {
         </div>
         {/* The molded ridge under the label compartment, then the
             cover inset inside the case — a real holder's seam and
-            clear border around the book. */}
+            clear border around the book. Every slab gets the
+            full treatment now (Anthony, Nov 3, 2026, ~2:08 PM:
+            the case must read as clear rigid acrylic like the
+            Sealed cases — beveled edges, seams, realistic light
+            and reflection — not a flat frame): a bright molded
+            ridge, the dark sonic-weld seam line under it, and
+            the book recessed behind the case front with its own
+            inner shadow and a sheen that stops at the recess,
+            so the cover reads as UNDER plastic. */}
         <div
           aria-hidden="true"
-          className="h-[5px] bg-gradient-to-b from-white/50 via-white/10 to-black/60 shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+          className="h-[6px] bg-gradient-to-b from-white/55 via-white/12 to-black/60 shadow-[0_1px_2px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.5)]"
         />
-        <div className="p-1.5">
-          <img
-            src={comic.cover}
-            alt=""
-            className="block w-full select-none rounded-[3px]"
-            draggable={false}
-          />
+        <div
+          aria-hidden="true"
+          className="h-[2px] bg-black/70 shadow-[0_1px_0_rgba(255,255,255,0.28)]"
+        />
+        <div className="p-1.5 pt-1">
+          <div className="relative overflow-hidden rounded-[3px] shadow-[0_0_0_1px_rgba(255,255,255,0.22),0_2px_10px_rgba(0,0,0,0.5)]">
+            <img
+              src={comic.cover}
+              alt=""
+              className="block w-full select-none"
+              draggable={false}
+            />
+            {/* The recess shading + a soft diagonal reflection
+                confined to the cover compartment, so the book
+                sits visibly behind the case's front face. */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 shadow-[inset_0_0_16px_rgba(0,0,0,0.38),inset_0_2px_6px_rgba(0,0,0,0.45)]"
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/14 via-transparent to-transparent"
+            />
+          </div>
         </div>
+        {/* Inner case-wall shading: light pooled along the left
+            and right walls of the comic compartment and a darker
+            well at its base — the depth cue of a thick clear
+            holder around the book. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 shadow-[inset_3px_0_7px_rgba(255,255,255,0.14),inset_-3px_0_7px_rgba(0,0,0,0.22),inset_0_-10px_18px_rgba(0,0,0,0.30)]"
+        />
       </div>
-      {/* Glassy slab reflections over the case. */}
+      {/* Glassy slab reflections over the case, for EVERY slab:
+          the broad diagonal sheen, a sharper secondary streak,
+          and the acrylic-style vertical light streaks down the
+          thick case walls plus the light catch along the base —
+          the same language as the Sealed acrylic cases. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 rounded-[14px] bg-gradient-to-br from-white/25 via-transparent to-transparent"
+        className="pointer-events-none absolute inset-0 rounded-[16px] bg-gradient-to-br from-white/25 via-transparent to-transparent"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 rounded-[16px] bg-[linear-gradient(112deg,transparent_38%,rgba(255,255,255,0.13)_47%,rgba(255,255,255,0.03)_53%,transparent_62%)]"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-2 left-[3px] w-[3px] rounded-full bg-gradient-to-b from-white/60 via-white/20 to-white/35 blur-[0.5px]"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-2 right-[3px] w-[3px] rounded-full bg-gradient-to-b from-white/45 via-white/12 to-white/28 blur-[0.5px]"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-2 bottom-[3px] h-[3px] rounded-full bg-gradient-to-r from-white/10 via-white/30 to-white/10 blur-[0.5px]"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-2 top-[3px] h-[2px] rounded-full bg-gradient-to-r from-white/15 via-white/45 to-white/15 blur-[0.5px]"
       />
       <span aria-hidden="true" className="card-glare" />
+    </div>
+  );
+}
+
+/** The slab in its turn view, with REAL THICKNESS (Anthony,
+    Nov 3, 2026, 1:34 PM): turning a comic side to side must
+    SHOW the slab's thick rigid edge, not a flat card flipping.
+    This wraps SlabFront in a CSS 3D box (the .slab-3d classes
+    in theme.css): the front face sits half the depth forward,
+    a plain case back sits half the depth behind it, and four
+    clear molded edges — left, right, top, bottom, 18px deep
+    with ridged plastic shading — join them, so as the
+    Turntable sways or is dragged the side profile reads as a
+    thick holder turning in space. Used only in the detail
+    turn view; the Library flip-binder pages keep the flat
+    SlabFront so their page-flip animation is unchanged. */
+export function SlabTurnSlab({ comic }: { comic: Comic }) {
+  return (
+    <div className="slab-3d">
+      <div className="slab-3d-face slab-3d-front">
+        <SlabFront comic={comic} />
+      </div>
+      <div className="slab-3d-face slab-3d-back" aria-hidden="true">
+        <span className="slab-3d-back-label">CGC</span>
+      </div>
+      <div className="slab-3d-edge slab-3d-edge-right" aria-hidden="true" />
+      <div className="slab-3d-edge slab-3d-edge-left" aria-hidden="true" />
+      <div className="slab-3d-edge slab-3d-edge-top" aria-hidden="true" />
+      <div className="slab-3d-edge slab-3d-edge-bottom" aria-hidden="true" />
     </div>
   );
 }
@@ -792,7 +953,10 @@ function SlabFront({ comic }: { comic: Comic }) {
     its basis, and its confidence from the Oct 29, 2026 check —
     there is no paid amount or price history recorded for the
     slabs, so none is shown. */
-function ComicSheet({
+/** A comic's full slab detail page. Exported so the
+    Library's comics flip-binder can open a slab into this
+    same detail view (Anthony, Nov 3, 2026, ~12:08 PM). */
+export function ComicSheet({
   comic,
   onClose,
 }: {
@@ -800,7 +964,22 @@ function ComicSheet({
   onClose: () => void;
 }) {
   const [photo, setPhoto] = useState<"slabfront" | "label">("slabfront");
-  const [sheetTab, setSheetTab] = useState<"comic" | "performance">("comic");
+  // A refresh with the Price alerts page open over this comic
+  // reopens on the Performance tab — the alerts box lives there,
+  // and the box reopens the alerts page from the same surviving
+  // history entry, so the refresh stays in place.
+  const [sheetTab, setSheetTab] = useState<"comic" | "performance">(() => {
+    try {
+      return (
+          (window.history.state as { lorcanaPriceAlerts?: unknown } | null)
+            ?.lorcanaPriceAlerts === true
+        )
+        ? "performance"
+        : "comic";
+    } catch {
+      return "comic";
+    }
+  });
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
@@ -855,7 +1034,7 @@ function ComicSheet({
           }
         >
           {photo === "slabfront" ? (
-            <SlabFront comic={comic} />
+            <SlabTurnSlab comic={comic} />
           ) : (
             <div className="relative overflow-hidden rounded-xl shadow-[0_24px_60px_rgba(0,0,0,0.65)]">
               <img
@@ -1174,6 +1353,18 @@ function ComicSheet({
               was recorded for the slabs, so there is no gain/loss figure
               here.
             </p>
+            {/* Price alerts — every item detail carries the box
+                (Anthony's rule), graded comics included: its
+                heading opens the all-alerts management page. The
+                alert watches the slab's checked value above. */}
+            <PriceAlertBox
+              targetKind="comic"
+              cardId={null}
+              sealedName={null}
+              comicId={comic.id}
+              currentValue={comic.value}
+              comicCoverFor={(id) => COMICS.find((c) => c.id === id)?.cover}
+            />
             {/* No standalone "Where it lives" section at the
                 bottom anymore (Anthony's placement change,
                 Nov 2, 2026): it is merged into the Copies owned
@@ -1284,7 +1475,22 @@ const COMICS_AREAS: { key: ComicsArea; label: string }[] = [
     Comic detail opens with the same one-history-entry trap as the
     card sheet, so the device Back button closes it onto the grid
     he was viewing. */
-export function ComicsPanel() {
+export function ComicsPanel({ onScan }: { onScan?: () => void }) {
+  // Section search (Nov 3, 2026, ~11:14 PM): the search bar
+  // in the section's Search + Scan row filters his graded
+  // comics by title, issue, or publisher right here.
+  const [comicQuery, setComicQuery] = useState("");
+  const comicMatches =
+    comicQuery.trim().length >= 2
+      ? COMICS.filter((c) => {
+          const q = comicQuery.trim().toLowerCase();
+          return (
+            c.title.toLowerCase().includes(q) ||
+            c.labelTitle.toLowerCase().includes(q) ||
+            c.publisher.toLowerCase().includes(q)
+          );
+        })
+      : [];
   // Comics areas (Anthony approved the researched CLZ-style areas,
   // Nov 2, 2026): Slabs (the binder itself), Cover Wall, Key Issues,
   // Signed, and Wish List — switched by the pill row, one page each,
@@ -1357,10 +1563,21 @@ export function ComicsPanel() {
     if (selectedId === id) return;
     setSelectedId(id);
     try {
+      // Merge the underlying entry's state (the useHistorySheet
+      // pattern in App.tsx): pages layered over this sheet — the
+      // Price alerts management page — push their own merged
+      // entry on top, and Back has to unwind one layer at a time,
+      // so this sheet's entry must carry the whole stack beneath
+      // it (the Comics area/group entry included).
+      const cur = window.history.state as Record<
+        string,
+        unknown
+      > | null;
+      const next = { ...(cur ?? {}), comicsSheet: id };
       if (sheetPushedRef.current) {
-        window.history.replaceState({ comicsSheet: id }, "");
+        window.history.replaceState(next, "");
       } else {
-        window.history.pushState({ comicsSheet: id }, "");
+        window.history.pushState(next, "");
         sheetPushedRef.current = true;
       }
     } catch {
@@ -1376,7 +1593,15 @@ export function ComicsPanel() {
   };
   useEffect(() => {
     const onPopState = () => {
-      if (sheetPushedRef.current) {
+      // Close ONLY when the entry Back landed on no longer
+      // names this sheet — a pop that merely closes a page
+      // layered over it (e.g. Price alerts) still carries
+      // comicsSheet and must leave the sheet open.
+      if (
+        sheetPushedRef.current &&
+        typeof (window.history.state as { comicsSheet?: unknown } | null)
+          ?.comicsSheet !== "string"
+      ) {
         sheetPushedRef.current = false;
         setSelectedId(null);
       }
@@ -1432,6 +1657,58 @@ export function ComicsPanel() {
         Your graded comics, covers first — tap any cover to see the slab
         up close.
       </p>
+
+      {/* Search + Scan row (Anthony, Nov 3, 2026, ~11:14 PM):
+          the same top row every collection section carries.
+          The bar searches his graded comics (title, issue,
+          publisher); a match opens that slab. */}
+      <div className="mt-4">
+        <SearchScanRow
+          inputId="comics-section-search"
+          label="Search your graded comics by title, issue, or publisher"
+          placeholder="Search title, issue, publisher…"
+          value={comicQuery}
+          onChange={setComicQuery}
+          onScan={onScan}
+        />
+      </div>
+      {comicQuery.trim().length >= 2 ? (
+        <div className="mt-3">
+          {comicMatches.length === 0 ? (
+            <p className="text-sm text-[var(--dim)]">
+              No graded comics match that search.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
+              {comicMatches.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => openComic(c.id)}
+                    aria-label={`Open ${c.title}`}
+                    className="flex w-full items-center gap-3 py-2.5 text-left"
+                  >
+                    <img
+                      src={c.cover}
+                      alt=""
+                      loading="lazy"
+                      className="h-14 w-10 shrink-0 rounded-md object-cover"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-[var(--text)]">
+                        {c.title}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--dim)]">
+                        {c.publisher}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
 
       {/* Collection statistics strip — the CLZ Statistics pattern:
           the collection's headline numbers as three tidy stat

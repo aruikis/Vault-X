@@ -10,6 +10,39 @@
       "action": "refreshFinance",
       "schedule": "daily 06:30 America/Chicago",
       "purpose": "Daily re-pricing of the collection's market values; appends one point per day to the value-over-time history. Paid amounts stay as recorded."
+    },
+    {
+      "id": "lorcana-binder-daily-catalog-audit",
+      "action": "refreshCatalogAudit",
+      "schedule": "daily 07:15 America/Chicago",
+      "purpose": "Daily audit of the card catalog against the complete Lorcana card universe (LorcanaJSON, Lorcast, DL Promos): inserts newly released or newly sourced printings so every card can be scanned, searched, and added. Existing cards, ownership, and prices are never touched."
+    },
+    {
+      "id": "lorcana-binder-game-import-pokemon",
+      "action": "importGameCatalog",
+      "args": {
+        "game": "pokemon"
+      },
+      "schedule": "daily 05:40 America/Chicago",
+      "purpose": "Continues the resumable Pok\u00e9mon catalog download (official Pok\u00e9mon TCG API) a chunk per day until the catalog is complete; no-ops as a light re-check once complete."
+    },
+    {
+      "id": "lorcana-binder-game-import-magic",
+      "action": "importGameCatalog",
+      "args": {
+        "game": "magic"
+      },
+      "schedule": "daily 05:50 America/Chicago",
+      "purpose": "Continues the resumable Magic: The Gathering catalog download (Scryfall) a chunk per day until complete."
+    },
+    {
+      "id": "lorcana-binder-game-import-starwars",
+      "action": "importGameCatalog",
+      "args": {
+        "game": "starwars"
+      },
+      "schedule": "daily 06:00 America/Chicago",
+      "purpose": "Continues the resumable Star Wars: Unlimited catalog download (Fantasy Flight official card API) a chunk per day until complete."
     }
   ]
 }

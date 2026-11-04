@@ -267,6 +267,104 @@
       "when": 1793695968657,
       "tag": "0038_inbox_deletions_table",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793727267094,
+      "tag": "0039_add_hide_collection_value_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1793729535986,
+      "tag": "0040_add_deck_box_color_and_featured_card",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793736023980,
+      "tag": "0041_admin_metric_seen_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793737140997,
+      "tag": "0042_add_muse_invite_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1793739342046,
+      "tag": "0043_admin_stats_cache_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1793740583491,
+      "tag": "0044_add_comic_id_to_price_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1793741176588,
+      "tag": "0045_add_deck_copy_attribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1793745091586,
+      "tag": "0046_catalog_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1793748087728,
+      "tag": "0047_add_settlement_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1793766273666,
+      "tag": "0048_add_collection_order_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1793767078081,
+      "tag": "0049_username_change_flag_and_game_catalogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1793769226507,
+      "tag": "0050_add_archived_at_to_deals",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1793771747310,
+      "tag": "0051_add_profile_bio",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1793776548574,
+      "tag": "0052_add_grid_cols_preference",
+      "breakpoints": true
     }
   ]
 }
