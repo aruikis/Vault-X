@@ -22,6 +22,9 @@
 // of a count editor.
 
 import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "./api";
+import { hapticTick } from "./haptics";
 import {
   pushWindowState,
   readNavState,
@@ -750,12 +753,14 @@ export function SlabFront({
             className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-white/25 via-white/5 to-transparent"
           />
           <div className="relative px-1 pb-[3px] pt-[2px]">
-            {/* Label body (Anthony, Nov 4, 2026): the GRADE sits
-                in the MIDDLE of the label — a three-column grid
-                (title block | grade box | hologram) puts the
-                grade square dead center instead of off at the
-                left edge, as he directed. The grade box itself
-                is unchanged: a solid EQUAL SQUARE around the
+            {/* Label body (Anthony, Nov 4, 2026, evening —
+                supersedes the same day's "grade in the middle"
+                placement): the GRADE sits at the LEFT end of
+                the label band, where it sits on a real CGC
+                label — a three-column grid (grade box | title
+                block | hologram). The title block's text stays
+                centered in its column. The grade box itself is
+                unchanged: a solid EQUAL SQUARE around the
                 9.8 alone (Anthony, Nov 3, 2026, ~4:05–4:06 PM:
                 on his real CGC labels the white grade box is a
                 square, on every slab), no "WHITE Pages" line
@@ -772,7 +777,23 @@ export function SlabFront({
                 number centered over its barcode, and the
                 label's note at the right, each allowed to wrap
                 inside its own third so nothing is cut off. */}
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-1">
+              <div
+                className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[4px] bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
+                  isSignature
+                    ? "border-b-2 border-[#d4af37]"
+                    : "border-b-2 border-[#2c56a3]"
+                }`}
+                style={
+                  isMandalorian
+                    ? { transform: "translateY(1px)" }
+                    : undefined
+                }
+              >
+                <span className="text-[14px] font-black leading-none tracking-tight">
+                  9.8
+                </span>
+              </div>
               <div className="min-w-0">
                   <p
                     className={`text-center font-extrabold leading-[1.05] ${
@@ -789,22 +810,6 @@ export function SlabFront({
                       {labelSubLine}
                     </p>
                   ) : null}
-              </div>
-              <div
-                className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[4px] bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)] ${
-                  isSignature
-                    ? "border-b-2 border-[#d4af37]"
-                    : "border-b-2 border-[#2c56a3]"
-                }`}
-                style={
-                  isMandalorian
-                    ? { transform: "translateY(1px)" }
-                    : undefined
-                }
-              >
-                <span className="text-[14px] font-black leading-none tracking-tight">
-                  9.8
-                </span>
               </div>
               <div className="flex items-center justify-end">
                 <CgcHologram comic={comic} />
@@ -1061,7 +1066,7 @@ export function ComicSheet({
           {photo === "slabfront" ? (
             <SlabTurnSlab comic={comic} />
           ) : (
-            <div className="relative overflow-hidden rounded-xl shadow-[0_24px_60px_rgba(0,0,0,0.65)]">
+            <div className="relative overflow-hidden rounded-xl shadow-[0_24px_60px_rgba(0,0,0,0.65)] ring-1 ring-white/15">
               <img
                 src={comic.slab}
                 alt={`${comic.title} CGC slab label photo`}
@@ -1512,13 +1517,147 @@ const COMICS_AREAS: { key: ComicsArea; label: string }[] = [
     Comic detail opens with the same one-history-entry trap as the
     card sheet, so the device Back button closes it onto the grid
     he was viewing. */
+/** Library display wall picker (MOVED here Nov 5, 2026):
+    choosing which graded slabs (max five) hang on the
+    Library's Comics display wall used to live ON the
+    Library page itself, under an "Edit display" button —
+    Anthony did not like the control sitting there, so the
+    Library wall is display-only now and the picker lives
+    here in the Comics section, where the slabs themselves
+    live. Same setting underneath (getLibraryComicDisplay /
+    setLibraryComicDisplay), same default when never chosen
+    (his two signed comics: Aliens #1 and Batman #136), so
+    the Library wall shows exactly what is picked here. */
+export function LibraryDisplayPicker() {
+  const queryClient = useQueryClient();
+  const display = useQuery({
+    queryKey: ["libraryComicDisplay"],
+    queryFn: () => api.getLibraryComicDisplay({}),
+  });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string[]>([]);
+  const saveDisplay = useMutation({
+    mutationFn: (ids: string[]) =>
+      api.setLibraryComicDisplay({ ids }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["libraryComicDisplay"],
+      });
+      setEditing(false);
+    },
+  });
+  const DEFAULT_WALL = ["aliens-1", "batman-136"];
+  const chosen = display.data?.ids ?? DEFAULT_WALL;
+  const chosenTitles = chosen
+    .map((id) => COMICS.find((c) => c.id === id)?.title)
+    .filter((t): t is string => Boolean(t));
+  const toggleDraft = (id: string) => {
+    setDraft((d) =>
+      d.includes(id)
+        ? d.filter((x) => x !== id)
+        : d.length >= 5
+          ? d
+          : [...d, id],
+    );
+  };
+  return (
+    <section
+      aria-label="Library display wall"
+      className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-album text-base text-[var(--text)]">
+            Library display wall
+          </h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+            {chosenTitles.length > 0
+              ? `On the wall now: ${chosenTitles.join(" · ")}`
+              : "Nothing on the Library wall right now."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            hapticTick();
+            setDraft(chosen);
+            setEditing((v) => !v);
+          }}
+          aria-expanded={editing}
+          className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3.5 py-1.5 text-xs font-semibold text-[var(--gold-soft)]"
+        >
+          {editing ? "Close the display picker" : "Edit display"}
+        </button>
+      </div>
+      {editing ? (
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
+          <p className="text-sm font-semibold text-[var(--text)]">
+            On the wall — {draft.length} of 5
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--dim)]">
+            Tap your comics to add or remove them. The wall holds
+            at most five.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {COMICS.map((comic) => {
+              const on = draft.includes(comic.id);
+              const full = !on && draft.length >= 5;
+              return (
+                <button
+                  key={comic.id}
+                  type="button"
+                  disabled={full}
+                  onClick={() => toggleDraft(comic.id)}
+                  aria-pressed={on}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                    on
+                      ? "bg-[var(--gold)] text-black"
+                      : "border border-[var(--border)] text-[var(--text)] disabled:opacity-40"
+                  }`}
+                >
+                  {comic.title}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={saveDisplay.isPending}
+              onClick={() => saveDisplay.mutate(draft)}
+              className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
+            >
+              {saveDisplay.isPending ? "Saving…" : "Save display"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)]"
+            >
+              Cancel
+            </button>
+          </div>
+          {saveDisplay.isError ? (
+            <p role="alert" className="mt-2 text-xs text-red-400">
+              That didn&rsquo;t save — try again.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function ComicsPanel({ onScan }: { onScan?: () => void }) {
   // Section search (Nov 3, 2026, ~11:14 PM): the search bar
   // in the section's Search + Scan row filters his graded
   // comics by title, issue, or publisher right here.
   const [comicQuery, setComicQuery] = useState("");
+  // First-letter filtering (standing search rule, Anthony,
+  // Nov 5, 2026): matches start at the first typed letter,
+  // never a two-character minimum.
   const comicMatches =
-    comicQuery.trim().length >= 2
+    comicQuery.trim().length >= 1
       ? COMICS.filter((c) => {
           const q = comicQuery.trim().toLowerCase();
           return (
@@ -1686,7 +1825,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
           onScan={onScan}
         />
       </div>
-      {comicQuery.trim().length >= 2 ? (
+      {comicQuery.trim().length >= 1 ? (
         <div className="mt-3">
           {comicMatches.length === 0 ? (
             <p className="text-sm text-[var(--dim)]">
@@ -1766,6 +1905,11 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
           </p>
         </div>
       </section>
+
+      {/* The Library display wall is managed HERE, in the
+          Comics section (moved off the Library page,
+          Anthony, Nov 5, 2026). */}
+      <LibraryDisplayPicker />
 
       <div
         className="mt-4 flex flex-wrap gap-2"

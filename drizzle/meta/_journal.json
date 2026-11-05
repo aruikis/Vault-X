@@ -421,6 +421,62 @@
       "when": 1793824292574,
       "tag": "0060_add_mail_messages_table",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1793830561768,
+      "tag": "0061_funko_upc_and_library_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1793830561768,
+      "tag": "0062_game_card_price_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1793836745674,
+      "tag": "0063_lego_set_details_ownership_notes_and_game_locations",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1793858956816,
+      "tag": "0064_add_graded_slabs_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1793860954925,
+      "tag": "0065_graded_slab_photos_and_qty",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1793862265384,
+      "tag": "0066_add_only_mine_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1793864684567,
+      "tag": "0067_add_reorder_prefs",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1793869304663,
+      "tag": "0068_ticket_completion_stamps_version_live_stamps_section_art_tumbler_photo",
+      "breakpoints": true
     }
   ]
 }

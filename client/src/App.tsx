@@ -14,8 +14,6 @@ import { SafeAreaTopScrim } from "@hatch/space-sdk/client";
 import {
 Area,
 AreaChart,
-Bar,
-BarChart,
 CartesianGrid,
 ResponsiveContainer,
 Tooltip,
@@ -30,11 +28,17 @@ ComicSheet,
 SlabFront,
 COMICS,
 COMICS_TOTAL_VALUE,
-COMICS_VALUE_CHECKED,
 type Comic,
 } from "./comics";
 import { LegoPanel } from "./lego";
-import { GamePanel } from "./games";
+import { GamePanel, GAME_TITLES } from "./games";
+import { TcgUniversePage } from "./tcgUniverse";
+import { useDragReorder } from "./dragReorder";
+import {
+  ToppsAlternateUniversePage,
+  type AuAreaView,
+} from "./toppsUniverse";
+import { SportsCardsPage } from "./sports";
 import {
 collectionToCsv,
 collectionToJson,
@@ -74,6 +78,11 @@ adoptServerGridCols,
 GridColsToggle,
 useGridCols,
 } from "./gridCols";
+import {
+  ONLY_MINE_THRESHOLD,
+  OnlyMineToggle,
+  useOnlyMine,
+} from "./onlyMine";
 import { VxSelect } from "./vxSelect";
 import {
   LANGUAGES,
@@ -86,6 +95,8 @@ import {
   type LangId,
 } from "./i18n";
 import { SearchScanRow } from "./searchScanRow";
+import { SlabCapturePanel, SlabDetailView } from "./gradedScan";
+import { GraderSupportRow } from "./graderLogos";
 import {
 manualSaveCount,
 setManualSaveCount,
@@ -102,9 +113,11 @@ import {
   readNavState,
   replaceNavState,
   scrubWindowKeys,
+  useOwnEntryWindow,
   useWindowHistory,
 } from "./historyNav";
 import { LetterAvatar } from "./letterAvatar";
+import { CutoutImg } from "./cutoutImg";
 import {
 evaluateBadges,
 type BadgeState,
@@ -140,16 +153,22 @@ import questArtQ3 from "./assets/set-logos/quest-q3.png";
 import questTileQ1 from "./assets/set-logos/quest-q1-keyart.webp";
 import questTileQ2 from "./assets/set-logos/quest-q2-keyart.webp";
 import questTileQ3 from "./assets/set-logos/quest-q3-keyart.webp";
-import collectionLorcana from "./assets/media-generation-collection-lorcana-storybook-0-ce9f8aac-6d85-4014-8b24-b93a46fdc1ed.webp";
-import collectionPokemon from "./assets/collection-pokemon.webp";
-import collectionMagic from "./assets/collection-magic.webp";
 import collectionLego from "./assets/media-generation-collection-lego-vault-0-0b76b99c-9f54-455c-bdae-f96c740684be.webp";
 import collectionComics from "./assets/collection-comics.webp";
-import collectionStarwars from "./assets/collection-starwars.webp";
 // Funko tile artwork: Option 2 "The Crown" — Anthony's pick (Nov 4, 2026,
 // superseding the Option 1 shelf art). Minimal glowing crown over a
 // figure, dark Vault theme.
 import collectionFunko from "./assets/collection-funko-crown.webp";
+// TCG Universe tile artwork (Anthony, Nov 4, 2026): the
+// approved Portal — the four TCG realms around the glowing
+// vault portal — in its FINAL version with the "Vault X"
+// wording removed from the top of the art, as he directed.
+import collectionTcgUniverse from "./assets/collection-tcg-universe-calm.webp";
+// Sports Cards tile artwork (Anthony, Nov 4, 2026): his
+// approved Option 2, "The Slab Wall" — graded sports slabs
+// in a row, gold rookie slab in the center.
+import collectionSportsCards from "./assets/collection-sports-cards-calm.webp";
+import collectionToppsAu from "./assets/collection-toppsau-calm.webp";
 import sealedBoosterFront from "./assets/sealed/sealed-booster-front.webp";
 import sealedHyperiaBox from "./assets/sealed/item-hyperia-box.webp";
 import sealedHyperiaPrerelease from "./assets/sealed/item-hyperia-prerelease.webp";
@@ -1767,62 +1786,6 @@ function CardFinanceTab({ card }: { card: CardDetail }) {
   );
 }
 
-const CHART_TICK = { fill: "#8b9bb8", fontSize: 11 } as const;
-
-function ValueBarChart({
-  data,
-  nameKey,
-  label,
-}: {
-  data: { name: string; value: number }[];
-  nameKey: string;
-  label: string;
-}) {
-  return (
-    <div
-      role="img"
-      aria-label={label}
-      style={{ height: Math.max(220, data.length * 30) }}
-    >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ top: 0, right: 12, bottom: 0, left: 0 }}
-        >
-          <XAxis
-            type="number"
-            domain={[0, "dataMax"]}
-            tick={CHART_TICK}
-            tickFormatter={(v: number) => `$${v.toLocaleString("en-US")}`}
-            axisLine={{ stroke: "#24365e" }}
-            tickLine={false}
-          />
-          <YAxis
-            type="category"
-            dataKey={nameKey}
-            width={86}
-            tick={CHART_TICK}
-            axisLine={false}
-            tickLine={false}
-          />
-          <Tooltip
-            cursor={{ fill: "rgba(110,155,255,0.10)" }}
-            contentStyle={{
-              backgroundColor: "#0e1526",
-              border: "1px solid #24365e",
-              borderRadius: 8,
-              color: "#eef2ff",
-              fontSize: 13,
-            }}
-          />
-          <Bar dataKey="value" name="Market value" fill="var(--accent)" radius={[0, 4, 4, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
 /** Small thumbnail for a most-valuable row: the card's real art for binder
     cards; for sealed products, the item's own product photo from the
     Sealed shelf (Anthony asked for the picture, not a "Sealed" label). */
@@ -1983,14 +1946,6 @@ function FinancePanel({
   const refresh = useMutation({
     mutationFn: (force: boolean) => api.refreshFinance({ force }),
   });
-  const groupChart = finance.setsChart.map((g) => ({
-    name: g.name,
-    value: g.value,
-  }));
-  const rarityChart = finance.byRarity.map((r) => ({
-    name: r.rarity,
-    value: r.value,
-  }));
   const netColor = finance.net >= 0 ? "text-emerald-400" : "text-red-400";
   const netPct =
     finance.paid > 0 ? (finance.net / finance.paid) * 100 : 0;
@@ -2005,19 +1960,12 @@ function FinancePanel({
   // range pills + value chart, the Collection Distribution
   // (moved here from Home, Nov 3, 2026 late — graph, then
   // distribution, then Movers, his final order), Movers,
-  // breakdown pills (one
-  // visualization at a time, in place), the per-set table, and
-  // the footnote. ONE range selector drives the header's
-  // period-change line, the chart's window, and the Movers list
-  // together. This replaces the older design where each
-  // breakdown opened on its own pushed page.
-  type FinanceSub =
-    | "bySet"
-    | "paidBySet"
-    | "byRarity"
-    | "tiers"
-    | "byType"
-    | "top";
+  // Most Valuable, and the footnote. (The breakdown pill
+  // group and the per-set table that used to sit below
+  // Movers were DELETED Nov 5, 2026 at Anthony's direction;
+  // Most Valuable stayed as its own section.) ONE range
+  // selector drives the header's period-change line, the
+  // chart's window, and the Movers list together.
   type RangeKey = "7d" | "30d" | "90d" | "1y" | "all";
   const RANGE_PILLS: { key: RangeKey; label: string; days: number | null }[] = [
     { key: "7d", label: "7d", days: 7 },
@@ -2026,19 +1974,10 @@ function FinancePanel({
     { key: "1y", label: "1y", days: 365 },
     { key: "all", label: "All", days: null },
   ];
-  const [pill, setPill] = useState<FinanceSub>("bySet");
   const [range, setRange] = useState<RangeKey>("30d");
   const [moversTab, setMoversTab] = useState<"gainers" | "losers">("gainers");
   const [showPaidLine, setShowPaidLine] = useState(false);
   const [hideVals, setHideVals] = useState(false);
-  const [setSort, setSetSort] = useState<{
-    key: "net" | "complete";
-    dir: 1 | -1;
-  } | null>(null);
-  const binderQ = useQuery({
-    queryKey: ["binder"],
-    queryFn: () => api.getBinder({}),
-  });
   // Money formatter honoring the hide-values eye: money figures
   // render as dots while hidden; counts and percentages stay.
   const fmtM = (n: number): string => (hideVals ? "••••••" : fmtUSD(n));
@@ -2086,62 +2025,6 @@ function FinancePanel({
   );
   const chartLo = Math.floor((chartMin - 120) / 100) * 100;
   const chartHi = Math.ceil((chartMax + 120) / 100) * 100;
-  // Per-set table rows: the export per-set figures joined with
-  // the binder's live completion figures (owned/total and cost
-  // to complete) by set name. ONLY main-set groups join here:
-  // every Puzzle group carries its parent set's name too, and
-  // the puzzle groups sit after the sets in the groups list,
-  // so an unfiltered name map kept the puzzle row (0 owned,
-  // $0 to finish) for every set — the table then showed 0.0%
-  // complete and "Complete — nothing to buy" for sets that
-  // are nowhere near complete (Anthony's device check,
-  // Nov 3, 2026: the Portfolio table did not match the
-  // approved layout's figures).
-  const binderByName = new Map(
-    (binderQ.data?.groups ?? [])
-      .filter((g) => g.kind === "set")
-      .map((g) => [g.name, g]),
-  );
-  // The export's per-set figures aggregate two rows differently
-  // than the binder groups: "Disney Lorcana Promos" spans every
-  // promo family, and "D23 Promos" is the binder's "D23
-  // Collection" — aggregate/remap those two joins explicitly.
-  const promoAgg = (binderQ.data?.groups ?? [])
-    .filter((g) => g.kind === "promo")
-    .reduce(
-      (acc, g) => ({
-        owned: acc.owned + g.owned,
-        total: acc.total + g.total,
-        costToComplete: acc.costToComplete + g.costToComplete,
-      }),
-      { owned: 0, total: 0, costToComplete: 0 },
-    );
-  const d23Group = (binderQ.data?.groups ?? []).find(
-    (g) => g.key === "promo:D23",
-  );
-  const setRows = finance.bySet.map((s) => {
-    const g =
-      s.name === "Disney Lorcana Promos"
-        ? promoAgg
-        : s.name === "D23 Promos"
-          ? d23Group
-          : binderByName.get(s.name);
-    return {
-      ...s,
-      completePct:
-        g && g.total > 0 ? Math.round((g.owned / g.total) * 1000) / 10 : null,
-      toFinish: g ? g.costToComplete : null,
-    };
-  });
-  const sortedSetRows =
-    setSort == null
-      ? [...setRows].sort((a, b) => b.value - a.value)
-      : [...setRows].sort((a, b) => {
-          const av = setSort.key === "net" ? a.net : (a.completePct ?? -1);
-          const bv = setSort.key === "net" ? b.net : (b.completePct ?? -1);
-          return (av - bv) * setSort.dir;
-        });
-
   const topItemsList = (
     <ol className="mt-2 divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
       {finance.topItems.map((item, i) => {
@@ -2216,170 +2099,6 @@ function FinancePanel({
         );
       })}
     </ol>
-  );
-
-  const valueBySetContent = (
-    <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <ValueBarChart
-        data={groupChart}
-        nameKey="name"
-        label={`Bar chart of market value by set. Highest: ${finance.setsChart[0]?.name ?? ""} at ${fmtUSD(finance.setsChart[0]?.value ?? 0)}.`}
-      />
-    </div>
-  );
-
-  const valuePaidBySetContent = (
-    <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <p className="text-xs leading-relaxed text-[var(--dim)]">
-        Grouped as in your Nov 1, 2026 export. In the live figures
-        elsewhere in this view, the foil reprints inside the
-        Illumineer&rsquo;s Quest decks count with their original sets
-        instead of the quests, so a few sets differ by a few dollars
-        between the two.
-      </p>
-      <ul className="mt-2 divide-y divide-[var(--border)]">
-        {finance.bySet.map((s) => (
-          <li
-            key={s.name}
-            className="flex items-baseline justify-between gap-2 py-1.5 text-sm"
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-[var(--text)]">{s.name}</span>
-              <span className="block text-xs text-[var(--dim)]">
-                {s.cards.toLocaleString()} cards · from the Nov 1, 2026 export
-              </span>
-            </span>
-            <span className="shrink-0 text-right">
-              <span className="block font-semibold text-[var(--text)]">
-                {fmtM(s.value)}{" "}
-                <span className="font-normal text-[var(--dim)]">
-                  / paid {fmtM(s.paid)}
-                </span>
-              </span>
-              <span
-                className={`block text-xs font-semibold ${
-                  s.net >= 0 ? "text-emerald-400" : "text-red-400"
-                }`}
-              >
-                {s.net < 0 ? "−" : "+"}
-                {fmtM(Math.abs(s.net))}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-
-  const valueByRarityContent = (
-    <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <ValueBarChart
-        data={rarityChart}
-        nameKey="name"
-        label="Bar chart of market value by card rarity."
-      />
-      <ul className="mt-2 divide-y divide-[var(--border)]">
-        {finance.byRarity.map((r) => (
-          <li
-            key={r.rarity}
-            className="flex items-baseline justify-between gap-2 py-1.5 text-sm"
-          >
-            <span className="text-[var(--text)]">
-              {r.rarity}
-              <span className="block text-xs text-[var(--dim)]">
-                {r.distinct.toLocaleString()} printings ·{" "}
-                {r.ownedQty.toLocaleString()} cards
-              </span>
-            </span>
-            <span className="shrink-0 font-semibold text-[var(--text)]">
-              {fmtM(r.value)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-
-  const priceTiersContent = (
-    <ul className="mt-2 divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
-      {finance.tiers.map((tier) => (
-        <li
-          key={tier.label}
-          className="flex items-baseline justify-between gap-2 py-2 text-sm"
-        >
-          <span className="text-[var(--text)]">
-            {tier.label}
-            <span className="block text-xs text-[var(--dim)]">
-              per-item market price
-            </span>
-          </span>
-          <span className="shrink-0 text-right">
-            <span className="block font-semibold text-[var(--text)]">
-              {tier.copies.toLocaleString()} cards
-            </span>
-            <span className="block text-xs text-[var(--dim)]">
-              {fmtM(tier.value)} total
-            </span>
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-
-  // By Type breakdown (new pill in the approved layout):
-  // Singles (binder cards) / Graded (comics) / Sealed, each with
-  // its share of the grand total.
-  const byTypeContent = (
-    <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <ul className="divide-y divide-[var(--border)]">
-        {[
-          {
-            label: "Singles",
-            value: finance.binderValue,
-            detail: `${finance.binderCards.toLocaleString()} cards · ${finance.distinctOwned.toLocaleString()} printings`,
-          },
-          {
-            label: "Graded comics",
-            value: comicsValue,
-            detail: `${COMICS.length} graded comics`,
-          },
-          {
-            label: "Sealed",
-            value: finance.sealedValue,
-            detail: `${finance.sealedDistinct} products · ${finance.sealedQty.toLocaleString()} items`,
-          },
-        ].map((t) => (
-          <li key={t.label} className="py-2">
-            <div className="flex items-baseline justify-between gap-2 text-sm">
-              <span className="text-[var(--text)]">
-                {t.label}
-                <span className="block text-xs text-[var(--dim)]">
-                  {t.detail}
-                </span>
-              </span>
-              <span className="shrink-0 text-right">
-                <span className="block font-semibold text-[var(--text)]">
-                  {fmtM(t.value)}
-                </span>
-                <span className="block text-xs text-[var(--dim)]">
-                  {grandValue > 0
-                    ? `${((t.value / grandValue) * 100).toFixed(1)}% of total`
-                    : ""}
-                </span>
-              </span>
-            </div>
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
-              <div
-                className="h-full rounded-full bg-[var(--accent)]"
-                style={{
-                  width: `${grandValue > 0 ? Math.min(100, (t.value / grandValue) * 100) : 0}%`,
-                }}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 
   return (
@@ -2788,8 +2507,16 @@ function FinancePanel({
 
       {/* Movers — top gainers/losers among YOUR cards for the
           selected range, under the Collection Distribution.
-          Nothing else lives in this section. */}
-      <section aria-label="Top movers in your collection">
+          Nothing else lives in this section. Boxed like the
+          page's other sections (Anthony, Nov 5, 2026): the
+          whole Movers area — header, tabs, and list — sits
+          inside one bordered section matching Track &
+          Research and the Portfolio Value box; the list
+          inside no longer carries its own second frame. */}
+      <section
+        aria-label="Top movers in your collection"
+        className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-album text-xl text-[var(--text)]">Movers</h2>
           <div
@@ -2833,7 +2560,7 @@ function FinancePanel({
         {rangeData &&
         (moversTab === "gainers" ? rangeData.gainers : rangeData.losers)
           .length > 0 ? (
-          <ol className="mt-2 divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
+          <ol className="mt-2 divide-y divide-[var(--border)] px-1">
             {(moversTab === "gainers"
               ? rangeData.gainers
               : rangeData.losers
@@ -2879,7 +2606,7 @@ function FinancePanel({
             ))}
           </ol>
         ) : (
-          <p className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm text-[var(--dim)]">
+          <p className="mt-2 px-1 py-2 text-sm text-[var(--dim)]">
             No tracked {moversTab === "gainers" ? "gainers" : "losers"} in
             this range yet — per-card prices are tracked from Oct 25, 2026
             and refresh with each daily re-pricing.
@@ -2887,201 +2614,29 @@ function FinancePanel({
         )}
       </section>
 
-      {/* Breakdowns — the pill group, one visualization at a
-          time, in place on the one scroll (approved layout).
-          Default pill: Value by Set. */}
-      <section aria-label="Breakdowns">
-        <nav
-          aria-label="Choose a breakdown"
-          className="flex flex-wrap gap-1.5"
-        >
-          {(
-            [
-              ["bySet", "Value by Set"],
-              ["paidBySet", "Value & Paid by Set"],
-              ["byRarity", "Value by Rarity"],
-              ["tiers", "Price Buckets"],
-              ["byType", "By Type"],
-              ["top", "Most Valuable"],
-            ] as [FinanceSub, string][]
-          ).map(([view, label]) => (
-            <button
-              key={view}
-              type="button"
-              aria-pressed={pill === view}
-              aria-label={`Show the ${label} breakdown`}
-              onClick={() => setPill(view)}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                pill === view
-                  ? "bg-[var(--accent)] text-black"
-                  : "border border-[var(--accent)]/50 text-[var(--gold-soft)]"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-        {pill === "bySet"
-          ? valueBySetContent
-          : pill === "paidBySet"
-            ? valuePaidBySetContent
-            : pill === "byRarity"
-              ? valueByRarityContent
-              : pill === "tiers"
-                ? priceTiersContent
-                : pill === "byType"
-                  ? byTypeContent
-                  : topItemsList}
-        {pill === "top" ? (
-          <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-            Your top 10 items hold {finance.top10SharePct}% of the Lorcana
-            total.
-          </p>
-        ) : null}
-      </section>
-
-      {/* Per-set table — value / paid / net, extended with
-          Complete % and $ to Finish from the binder's live
-          completion figures. Sortable by net and by completion. */}
-      <section aria-label="Per-set figures">
+      {/* Most Valuable — the ONE survivor of the deleted
+          breakdowns block (Anthony, Nov 5, 2026): the whole
+          below-Movers breakdown area is DELETED at his
+          direction — the pill group (Value by Set, Value &
+          Paid by Set, Value by Rarity, Price Buckets, By
+          Type) and the per-set table under it (value / paid /
+          Complete % / $ to Finish) are gone entirely, not
+          hidden or collapsed. Most Valuable, which lived as
+          one of the pills, stays as its own plain section:
+          he named it among the Portfolio parts that stay. */}
+      <section aria-label="Most valuable items">
         <h2 className="font-album text-xl text-[var(--text)]">
-          Sets — value, paid, completion
+          Most Valuable
         </h2>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-          <div className="flex items-baseline justify-between gap-2 border-b border-[var(--border)] px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--dim)]">
-            <span className="min-w-0 flex-1">Set</span>
-            <span className="hidden shrink-0 text-right sm:block sm:w-28">
-              Value / Paid
-            </span>
-            <button
-              type="button"
-              aria-label="Sort sets by net"
-              aria-pressed={setSort?.key === "net"}
-              onClick={() =>
-                setSetSort((s) =>
-                  s?.key === "net"
-                    ? { key: "net", dir: s.dir === 1 ? -1 : 1 }
-                    : { key: "net", dir: -1 },
-                )
-              }
-              className={`shrink-0 text-right uppercase tracking-wider sm:w-20 ${
-                setSort?.key === "net"
-                  ? "text-[var(--gold-soft)]"
-                  : "text-[var(--dim)]"
-              }`}
-            >
-              Net {setSort?.key === "net" ? (setSort.dir === 1 ? "↑" : "↓") : ""}
-            </button>
-            <button
-              type="button"
-              aria-label="Sort sets by completion"
-              aria-pressed={setSort?.key === "complete"}
-              onClick={() =>
-                setSetSort((s) =>
-                  s?.key === "complete"
-                    ? { key: "complete", dir: s.dir === 1 ? -1 : 1 }
-                    : { key: "complete", dir: -1 },
-                )
-              }
-              className={`shrink-0 text-right uppercase tracking-wider sm:w-24 ${
-                setSort?.key === "complete"
-                  ? "text-[var(--gold-soft)]"
-                  : "text-[var(--dim)]"
-              }`}
-            >
-              Complete{" "}
-              {setSort?.key === "complete" ? (setSort.dir === 1 ? "↑" : "↓") : ""}
-            </button>
-          </div>
-          <ul className="divide-y divide-[var(--border)] px-3">
-            {sortedSetRows.map((s) => (
-              <li
-                key={s.name}
-                className="flex items-baseline justify-between gap-2 py-2 text-sm"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[var(--text)]">
-                    {s.name}
-                  </span>
-                  <span className="block text-xs text-[var(--dim)]">
-                    {s.toFinish != null
-                      ? s.toFinish > 0
-                        ? `${fmtM(s.toFinish)} to finish`
-                        : "Complete — nothing to buy"
-                      : "Completion not tracked here"}
-                  </span>
-                </span>
-                <span className="hidden shrink-0 text-right sm:block sm:w-28">
-                  <span className="block font-semibold tabular-nums text-[var(--text)]">
-                    {fmtM(s.value)}
-                  </span>
-                  <span className="block text-xs tabular-nums text-[var(--dim)]">
-                    paid {fmtM(s.paid)}
-                  </span>
-                </span>
-                <span
-                  className={`shrink-0 text-right font-semibold tabular-nums sm:w-20 ${
-                    s.net >= 0 ? "text-emerald-400" : "text-red-400"
-                  }`}
-                >
-                  {s.net < 0 ? "−" : "+"}
-                  {fmtM(Math.abs(s.net))}
-                </span>
-                <span className="shrink-0 text-right tabular-nums text-[var(--text)] sm:w-24">
-                  {s.completePct != null ? `${s.completePct.toFixed(1)}%` : "—"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
-          Per-set value and paid are grouped as in your Nov 1, 2026 export;
-          completion and cost to finish are live from the binder.
-        </p>
+        {topItemsList}
       </section>
 
-      {/* Foil / spare-copies note — pre-redesign content that
-          used to sit inside the header box; it lives at the
-          bottom of the page now so the header matches the
-          approved mockup (v1.57.3 alignment pass). */}
-      <p className="text-xs leading-relaxed text-[var(--dim)]">
-        Foil-family printings hold {fmtM(finance.foilValue)} of the
-        binder&rsquo;s value ({finance.foilSharePct}%). In spare copies
-        beyond your first of each card: {fmtM(finance.spareValue)} across{" "}
-        {finance.spareCopies.toLocaleString()} copies
-        {finance.beyondPlaysetCopies > 0 ? (
-          <>
-            {" "}— and {fmtM(finance.beyondPlaysetValue)} of that sits in{" "}
-            {finance.beyondPlaysetCopies.toLocaleString()} copies beyond a
-            playset of four, the natural stock for selling lots
-          </>
-        ) : null}
-        .
-      </p>
-
-      {/* Pricing provenance — the page's footnote (kept from the
-          earlier layout): where the prices come from and what the
-          headline covers. */}
-      <p className="text-xs leading-relaxed text-[var(--dim)]">
-        Prices started from your Shiny export of Nov 1, 2026 and are
-        re-priced daily from current market prices; what you paid stays as
-        recorded in Shiny. The headline total covers everything cataloged:
-        the Lorcana figures (which include sealed products, Ink Drop
-        tokens, and puzzle pieces at their export values) plus your{" "}
-        {COMICS.length} graded comics at their recorded values (
-        {fmtM(comicsValue)}, checked {COMICS_VALUE_CHECKED}). Paid and
-        gain/loss cover the Lorcana collection — no purchase amounts are
-        recorded for the comics. Binder-only
-        totals are {fmtM(finance.binderValue)} value /{" "}
-        {fmtM(finance.binderPaid)} paid across{" "}
-        {finance.binderCards.toLocaleString()} cards. Figures recalculate
-        whenever you change a card&rsquo;s count. Range changes and movers
-        measure from the first tracked day (Oct 25, 2026) whenever a range
-        reaches back past it, and say so where they appear.
-        {finance.unpricedOwnedQty > 0
-          ? ` ${finance.unpricedOwnedQty.toLocaleString()} owned cards have no recorded price and count as $0.`
-          : ""}
-      </p>
+      {/* The bottom explanatory verbiage is DELETED (Anthony,
+          Nov 5, 2026): the "Your top 10 items hold…" line, the
+          foil-family / spare-copies note, and the pricing
+          provenance footnote that used to sit under this list
+          are gone entirely. The Top 10 list itself stays —
+          only the explanatory text block was removed. */}
     </div>
   );
 }
@@ -3259,14 +2814,13 @@ function SetTile({
         className={`relative flex aspect-[21/11] w-full items-center justify-center overflow-hidden rounded-xl border bg-[var(--surface)] shadow-[inset_0_1px_0_rgba(255,255,255,0.07),inset_0_-10px_18px_rgba(0,0,0,0.35),0_4px_14px_rgba(0,0,0,0.35)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
           selected
             ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
-            : group.kind === "set"
-              ? // Chapter tiles ALL carry the purple accent
-                // border (Anthony, Nov 4, 2026): only the
-                // selected chapter had it and he likes the
-                // look — every chapter tile matches now; the
-                // selected one still stands out by its ring.
-                "border-[var(--accent)]"
-              : "border-[#26314d]"
+            : // EVERY set tile carries the purple accent
+              // border (Anthony, Nov 4, 2026): chapters first,
+              // then broadened to promos, Illumineer's Quests,
+              // and every other set tile in every collection —
+              // one universal treatment; the selected tile
+              // still stands out by its ring.
+              "border-[var(--accent)]"
         }`}
         style={{
           // The premium finish (Anthony, Nov 3, 2026,
@@ -3445,10 +2999,23 @@ function SetPicker({
       return next;
     });
 
+  // "Only mine" (Anthony, Nov 5, 2026): this page displays
+  // one tile per non-puzzle group — 30 today (14 chapters,
+  // 13 promo binders, 3 Quests) — which is over the
+  // 15-entry threshold, so the toggle shows here; ON keeps
+  // only the tiles he owns at least one pocket in. The
+  // switch is this page's own ("lorcana"), independent of
+  // every other section's.
+  const onlyMine = useOnlyMine("lorcana");
+  const tileCount = groups.filter((g) => g.kind !== "puzzle").length;
+  const shownGroups = onlyMine
+    ? groups.filter((g) => g.kind === "puzzle" || g.owned > 0)
+    : groups;
+
   const byYear = new Map<number, Group[]>();
   const promos: Group[] = [];
   const quests: Group[] = [];
-  for (const g of groups) {
+  for (const g of shownGroups) {
     // Puzzle groups get no tile of their own: they render as
     // a section inside their set's page (Anthony, Nov 3, 2026).
     if (g.kind === "puzzle") continue;
@@ -3484,6 +3051,17 @@ function SetPicker({
 
   return (
     <div className="mt-5 space-y-6">
+      {tileCount > ONLY_MINE_THRESHOLD ? (
+        <div className="flex items-center justify-end">
+          <OnlyMineToggle section="lorcana" />
+        </div>
+      ) : null}
+      {onlyMine && sections.length === 0 ? (
+        <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center text-sm text-[var(--dim)]">
+          Nothing here is in your collection yet — turn off
+          Only mine to browse every set.
+        </p>
+      ) : null}
       {sections.map((section) => {
         const isCollapsed = collapsed.has(section.id);
         return (
@@ -4130,6 +3708,10 @@ function OwnProfilePage({
   // Nov 3, 2026, ~11:37 AM; the stored copy added ~4:04 PM
   // after the history seed alone proved not to survive his
   // pull-to-refresh reload).
+  const binderQ = useQuery({
+    queryKey: ["binder"],
+    queryFn: () => api.getBinder({}),
+  });
   const [libraryOpen, setLibraryOpen] = useState(
     () =>
       readHistoryState()?.lorcanaLibrary === true ||
@@ -4264,47 +3846,75 @@ function OwnProfilePage({
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-  const binderQ = useQuery({
-    queryKey: ["binder"],
-    queryFn: () => api.getBinder({}),
-  });
   // Library shelves for Funko and Legos (Anthony, Nov 4, 2026,
-  // ~12:12 PM — PROVISIONAL, revisit after his first items):
-  // a spine per line/theme he owns at least one item in, from
-  // the same catalog queries the sections use.
-  const funkoCatalogQ = useQuery({
-    queryKey: ["gameCatalog", "funko"],
-    queryFn: () => api.getGameCatalog({ game: "funko" }),
+  // ~12:12 PM; Lego corrected the same night — see
+  // legoLibraryEntries below): per owned item, from the same
+  // owned-items queries the sections use.
+  // Funko Library entries come from his OWNED items (Anthony,
+  // Nov 4, 2026): the Funko shelf shows the actual product —
+  // the real photo of each figure he owns — not a book spine.
+  const funkoOwnedQ = useQuery({
+    queryKey: ["gameOwnedItems", "funko"],
+    queryFn: () => api.getGameOwnedItems({ game: "funko" }),
   });
-  const legoCatalogQ = useQuery({
-    queryKey: ["gameCatalog", "lego"],
-    queryFn: () => api.getGameCatalog({ game: "lego" }),
+  const funkoLibraryEntries: LibraryEntry[] = (
+    funkoOwnedQ.data?.items ?? []
+  ).map((item) => ({
+    id: `game:funko:item:${item.id}`,
+    spineLabel: "F",
+    title: item.name,
+    detail: "Funko figure",
+    owned: item.ownedQty + item.ownedSealedQty,
+    total: null,
+    canOpen: true,
+    section: "funko" as const,
+    imageUrl: item.imageUrl,
+    gameSectionKey: item.sectionKey,
+    gameCardId: item.id,
+  }));
+  // Lego Library entries come from his OWNED sets, per set
+  // (Anthony, Nov 4, 2026, late — the book defect): the
+  // Legos shelf showed his TIE Fighter as a binder spine
+  // because entries were built per theme. Legos are not
+  // books: like the Funko shelf, each owned set stands on
+  // the shelf as its actual set/box photo, and opening the
+  // tile goes straight to that set's detail page (the card
+  // payload rides the open-game-section handoff).
+  const legoOwnedQ = useQuery({
+    queryKey: ["gameOwnedItems", "lego"],
+    queryFn: () => api.getGameOwnedItems({ game: "lego" }),
   });
-  const gameLibraryEntries: LibraryEntry[] = (
-    [
-      { game: "funko" as const, data: funkoCatalogQ.data },
-      { game: "lego" as const, data: legoCatalogQ.data },
-    ]
-  ).flatMap(({ game, data }) =>
-    (data?.sections ?? [])
-      .filter((s) => s.owned > 0)
-      .map((s) => ({
-        id: `game:${game}:${s.key}`,
-        spineLabel:
-          s.name
-            .split(/\s+/)
-            .slice(0, 2)
-            .map((w) => w.charAt(0))
-            .join("")
-            .toUpperCase() || "•",
-        title: s.name,
-        detail: game === "funko" ? "Funko line" : "Lego theme",
-        owned: s.owned,
-        total: s.total,
-        canOpen: true,
-        section: game,
-      })),
-  );
+  const legoLibraryEntries: LibraryEntry[] = (
+    legoOwnedQ.data?.items ?? []
+  ).map((item) => ({
+    id: `game:lego:item:${item.id}`,
+    spineLabel: "L",
+    title: item.name,
+    detail: "Lego set",
+    owned: item.ownedQty + item.ownedSealedQty,
+    total: null,
+    canOpen: true,
+    section: "lego" as const,
+    imageUrl: item.imageUrl,
+    gameSectionKey: item.sectionKey,
+    gameCardId: item.id,
+    gameCard: {
+      id: item.id,
+      name: item.name,
+      printed: item.printed,
+      sectionName: item.sectionName,
+      rarity: item.rarity,
+      finish: null,
+      imageUrl: item.imageUrl,
+      price: null,
+      ownedQty: item.ownedQty,
+      ownedSealedQty: item.ownedSealedQty,
+    },
+  }));
+  const gameLibraryEntries: LibraryEntry[] = [
+    ...funkoLibraryEntries,
+    ...legoLibraryEntries,
+  ];
   const shelfBinderGroups = (binderQ.data?.groups ?? []).filter(
     (g) => g.kind !== "puzzle",
   );
@@ -4865,6 +4475,7 @@ function OwnProfilePage({
           <LibraryPage
             ownerName={username}
             entries={libraryEntries}
+            arrangeable
             comicsWall={<LibraryComicWall />}
             onClose={librarySheet.closeSheet}
             onOpenEntry={(entry) => {
@@ -4877,7 +4488,17 @@ function OwnProfilePage({
                 const parts = entry.id.split(":");
                 window.dispatchEvent(
                   new CustomEvent("vaultx:open-game-section", {
-                    detail: { game: parts[1], sectionKey: parts[2] },
+                    detail: {
+                      game: parts[1],
+                      sectionKey: entry.gameSectionKey ?? parts[2],
+                      // Per-item entries that carry a card
+                      // payload (Lego sets) open that item's
+                      // detail page directly, not just its
+                      // section.
+                      ...(entry.gameCard
+                        ? { card: entry.gameCard }
+                        : {}),
+                    },
                   }),
                 );
                 return;
@@ -5107,12 +4728,30 @@ function CollectorIdCard({
   // His own profile page (the Shiny-style layout) opens
   // DIRECTLY above Home — the Home pill's target (Anthony,
   // Nov 3, 2026, late reversal): it does NOT sit on the full
-  // ID view. Three-back rule (Anthony, Nov 4, 2026): the
-  // profile is main-flow navigation — it REPLACES the single
-  // app entry, never pushes; the on-screen back closes it in
-  // place and the device Back exits the app. Seeded (on a
-  // restore mount only) like before; a surviving Library or
-  // My Decks entry implies the profile below it.
+  // ID view. Seeded (on a restore mount only) like before; a
+  // surviving Library or My Decks entry implies the profile
+  // below it.
+  // BACK ROOT-CAUSE FIX (Anthony, Nov 5, 2026 — "back is
+  // broken on the profile page… we really need to hone down
+  // on this back button issue"): the old text here said the
+  // quiet part out loud — the profile REPLACED the single
+  // app entry and "the device Back exits the app". That
+  // replace-with-no-trap shape is the root cause of the
+  // whole back-bug family: any screen that sits ABOVE
+  // another screen but replaces the only app entry gives
+  // the device Back nothing in-app to land on, so one Back
+  // exits (or a sync listener dumps the user on Home). The
+  // profile now follows the app's proven window discipline
+  // (the Library / Admin / Search pattern): opening takes
+  // ONE pushed history entry over the Home entry, a
+  // popstate trap closes the profile when Back pops that
+  // entry, and the on-screen back consumes the same entry
+  // through history.back(). One Back on the profile now
+  // returns to Home; the next Back exits — and windows
+  // opened over the profile (Collector ID, Library, My
+  // Decks) layer and peel exactly as they did when the
+  // profile was the base entry, because the pushed entry
+  // carries the same merged state they already read.
   const [profileOpen, setProfileOpen] = useState(() => {
     if (!mayRestoreStack) return false;
     return (
@@ -5123,14 +4762,48 @@ function CollectorIdCard({
       readStoredProfileNav().decksOpen
     );
   });
+  const profilePushedRef = useRef(
+    mayRestoreStack &&
+      readHistoryState()?.lorcanaOwnProfile === true,
+  );
+  const profileHeldRef = useRef(profilePushedRef.current);
   const openProfile = () => {
     hapticTick();
+    if (profileHeldRef.current) {
+      setProfileOpen(true);
+      return;
+    }
     setProfileOpen(true);
-    replaceNavState({ lorcanaOwnProfile: true });
+    const pushed = pushWindowState(
+      { ...(readNavState() ?? {}), lorcanaOwnProfile: true },
+      "lorcanaOwnProfile",
+    );
+    profilePushedRef.current = pushed;
+    profileHeldRef.current = true;
   };
   const closeProfile = () => {
-    setProfileOpen(false);
+    if (profilePushedRef.current) {
+      window.history.back();
+    } else {
+      scrubWindowKeys(["lorcanaOwnProfile"]);
+      profileHeldRef.current = false;
+      setProfileOpen(false);
+    }
   };
+  useEffect(() => {
+    const onPopState = () => {
+      if (
+        profileHeldRef.current &&
+        readNavState()?.lorcanaOwnProfile !== true
+      ) {
+        profileHeldRef.current = false;
+        profilePushedRef.current = false;
+        setProfileOpen(false);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   // Non-restore mounts heal the stored copy back to closed
   // (see the Home-tab guard): a stack left open by a tab
   // switch can never greet the next Home mount.
@@ -5159,8 +4832,12 @@ function CollectorIdCard({
       // The ID window closes through its window close so its
       // history entry is consumed/scrubbed, not left stale —
       // three-back rule: no phantom entries in the stack.
+      // The profile closes through its own window close for
+      // the same reason (back root-cause fix, Nov 5, 2026):
+      // it may hold the pushed entry, and that entry must be
+      // consumed, never left stale above Home.
       closeExpanded();
-      setProfileOpen(false);
+      closeProfile();
     };
     window.addEventListener("vaultx:go-home", onGoHome);
     return () =>
@@ -6751,12 +6428,11 @@ let homeBootRevealedOnce = false;
 
 function HomePanel({
   value,
-  onOpenBinder,
+  onOpenTcgUniverse,
+  onOpenSportsCards,
+  onOpenToppsAlternateUniverse,
   onOpenComics,
   onOpenLego,
-  onOpenPokemon,
-  onOpenMagic,
-  onOpenStarwars,
   onOpenFunko,
   onOpenCard,
   onOpenSealed,
@@ -6773,13 +6449,16 @@ function HomePanel({
   onOpenOrderMail,
 }: {
   value: number | null;
-  onOpenBinder: () => void;
+  /** The condensed TCG Universe tile (Nov 4, 2026): the
+      four TCG games live behind it now. */
+  onOpenTcgUniverse: () => void;
+  /** The Sports Cards tile (Nov 4, 2026): the fifth main
+      area, beside TCG Universe, Comics, Legos, and Funko. */
+  onOpenSportsCards: () => void;
+  onOpenToppsAlternateUniverse: () => void;
   onOpenComics: () => void;
   onOpenLego: () => void;
   onOpenFunko: () => void;
-  onOpenPokemon: () => void;
-  onOpenMagic: () => void;
-  onOpenStarwars: () => void;
   onOpenCard: (cardId: number) => void;
   onOpenSealed: (name: string) => void;
   onOpenBinderGroup: (key: string) => void;
@@ -6994,13 +6673,15 @@ function HomePanel({
     mutationFn: (order: string[]) =>
       api.setCollectionOrder({
         order: order as (
+          | "tcg"
+          | "comics"
+          | "lego"
+          | "funko"
+          | "sports"
           | "lorcana"
           | "pokemon"
-          | "magic"
-          | "lego"
-          | "comics"
           | "starwars"
-          | "funko"
+          | "magic"
         )[],
       }),
     onSuccess: () => {
@@ -7009,10 +6690,17 @@ function HomePanel({
       });
     },
   });
-  const displayTileOrder =
+  // Home renders ONLY the main areas (TCG Universe
+  // condensation, Nov 4, 2026): the stored order still
+  // carries the TCG game keys for the TCG Universe page,
+  // and the drag machinery swaps within the visible main
+  // subsequence of that full order, leaving the game keys'
+  // places untouched.
+  const displayTileOrder = (
     tileOrder.length > 0
       ? tileOrder
-      : COLLECTION_TILE_OPTIONS.map((c) => c.key as string);
+      : COLLECTION_TILE_OPTIONS.map((c) => c.key as string)
+  ).filter((k) => (MAIN_TILE_KEYS as readonly string[]).includes(k));
   // No FLIP effect on tileOrder anymore (Nov 4, 2026,
   // smoothness pass): the old one re-measured every tile's
   // rect and forced a React re-render of the whole Home
@@ -8023,58 +7711,22 @@ function HomePanel({
                       : ""
                 }`}
               >
-                {key === "lorcana" ? (
+                {key === "tcg" ? (
                   <button
                     type="button"
-                    onClick={tileClickGuarded(onOpenBinder)}
-                    aria-label="Open your Lorcana binder"
+                    onClick={tileClickGuarded(onOpenTcgUniverse)}
+                    aria-label="Open the TCG Universe — your four trading-card games"
                     className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                   >
                     <img
-                      src={collectionLorcana}
-                      alt="Lorcana collection artwork: an open storybook with illustrated cards around it and golden magical light rising off the pages"
+                      src={collectionTcgUniverse}
+                      alt="TCG Universe artwork: a glowing vault portal with a wizard, an electric mouse, a space soldier, and a hooded mage from the four trading-card game realms around it"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
-                      Lorcana
-                    </span>
-                  </button>
-                ) : key === "pokemon" ? (
-                  <button
-                    type="button"
-                    onClick={tileClickGuarded(onOpenPokemon)}
-                    aria-label="Open your Pokémon collection"
-                    className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                  >
-                    <img
-                      src={collectionPokemon}
-                      alt="Pokémon collection artwork: a glossy red-and-white capture ball in tall grass at sunset with fireflies"
-                      loading="lazy"
-                      draggable={false}
-                      className="block aspect-square w-full object-cover"
-                    />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
-                      Pokémon
-                    </span>
-                  </button>
-                ) : key === "magic" ? (
-                  <button
-                    type="button"
-                    onClick={tileClickGuarded(onOpenMagic)}
-                    aria-label="Open your Magic: The Gathering collection"
-                    className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                  >
-                    <img
-                      src={collectionMagic}
-                      alt="Magic: The Gathering collection artwork: a flame vortex over a rune-carved stone altar in a dark arcane landscape"
-                      loading="lazy"
-                      draggable={false}
-                      className="block aspect-square w-full object-cover"
-                    />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
-                      Magic: The Gathering
+                    <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
+                      TCG Universe
                     </span>
                   </button>
                 ) : key === "lego" ? (
@@ -8091,7 +7743,7 @@ function HomePanel({
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
+                    <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
                       Legos
                     </span>
                   </button>
@@ -8109,29 +7761,65 @@ function HomePanel({
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
+                    <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
                       Comics
                     </span>
                   </button>
-                ) : key === "starwars" ? (
+                ) : key === "sports" ? (
                   <button
                     type="button"
-                    onClick={tileClickGuarded(onOpenStarwars)}
-                    aria-label="Open your Star Wars Unlimited collection"
+                    onClick={tileClickGuarded(onOpenSportsCards)}
+                    aria-label="Open your Sports Cards"
                     className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                   >
                     <img
-                      src={collectionStarwars}
-                      alt="Star Wars Unlimited collection artwork: starfighters in a deep-space battle over a glowing planet, laser fire and a space station"
+                      src={collectionSportsCards}
+                      alt="Sports Cards artwork: two graded card slabs standing on a shelf — a baseball batter silhouette and a basketball player silhouette — under the words Sports Cards"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="block px-1 py-2 text-center text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
-                      Star Wars Unlimited
+                    <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
+                      Sports Cards
                     </span>
                   </button>
-                ) : (
+                ) : key === "toppsau" ? (
+                  <button
+                    type="button"
+                    onClick={tileClickGuarded(
+                      onOpenToppsAlternateUniverse,
+                    )}
+                    aria-label="Open your Topps Alternate Universe"
+                    className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  >
+                    {/* Tile art (Anthony's pick, Nov 5, 2026):
+                        his chosen Option 3 — one elegant dark
+                        Topps card standing upright in
+                        blue-purple glow, "Topps Alternate
+                        Universe" in large lettering underneath
+                        with "Disney • Star Wars • Garbage Pail
+                        Kids • WWE" below it. The pick's small
+                        "VAULT X" corner wording was cropped
+                        off the top before install (his standing
+                        direction: Vault X wording comes off
+                        tile art), and the image renders at
+                        exactly the same aspect-square size as
+                        every other tile — no zoom — with every
+                        tile's label in the same fixed-height
+                        (h-11) row, so all Home tiles are
+                        identical in dimensions. */}
+                    <img
+                      src={collectionToppsAu}
+                      alt="Topps Alternate Universe artwork: a single elegant dark Topps card standing upright in blue-purple glow, with Topps Alternate Universe and Disney, Star Wars, Garbage Pail Kids, WWE underneath"
+                      loading="lazy"
+                      draggable={false}
+                      className="block aspect-square w-full object-cover"
+                    />
+                    <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
+                      Topps Alternate Universe
+                    </span>
+                  </button>
+                ) : key === "funko" ? (
                   <button
                     type="button"
                     onClick={tileClickGuarded(onOpenFunko)}
@@ -8145,7 +7833,7 @@ function HomePanel({
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
-                    <span className="flex items-baseline justify-center gap-1.5 px-1 py-2 text-center">
+                    <span className="flex h-11 items-center justify-center gap-1.5 px-1 text-center">
                       <span className="whitespace-nowrap text-xs font-semibold text-[var(--text)] sm:text-sm">
                         Funko
                       </span>
@@ -8156,7 +7844,7 @@ function HomePanel({
                       )}
                     </span>
                   </button>
-                )}
+                ) : null}
               </div>
             ))}
         </div>
@@ -8179,9 +7867,14 @@ function HomePanel({
 /** Missing-cards sheet for one section: every missing printing of
     the COMPLETE set (Enchanteds and Iconics included) with its
     current price, the total cost to complete, and a direct
-    click-only TCGplayer product link per card — Vault X never
-    sends the list anywhere or buys anything itself; shopping
-    happens on TCGplayer, in the browser, by hand. */
+    TCGplayer product link per card for shopping by hand. Plus
+    (restored Nov 4, 2026, at Anthony's explicit direction) the
+    "Send buy list to my Muse" hand-off: one tap, one in-app
+    confirmation, and the server hands just this list — the
+    missing cards' TCGplayer product IDs and quantities, nothing
+    else from the collection — to his Muse, which builds the
+    cart on TCGplayer under his sign-in and never checks out;
+    final payment approval stays his. */
 function MissingSheet({
   groupKey,
   onClose,
@@ -8196,6 +7889,56 @@ function MissingSheet({
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   });
   const data = detail.data;
+  // Buy-list hand-off state (restored Nov 4, 2026): idle →
+  // confirm (the panel states exactly what will be sent) →
+  // sending → sent / error.
+  const [buyStep, setBuyStep] = useState<
+    "idle" | "confirm" | "sending" | "sent" | "error"
+  >("idle");
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [buySent, setBuySent] = useState<{
+    products: number;
+    copies: number;
+    skippedNoId: number;
+  } | null>(null);
+  const sendableCopies = data
+    ? data.missing.filter((m) => m.tcgplayerId != null).length
+    : 0;
+  const sendableProducts = data
+    ? new Set(
+        data.missing
+          .map((m) => m.tcgplayerId)
+          .filter((id) => id != null),
+      ).size
+    : 0;
+  const skippedNoId = data ? data.missingCount - sendableCopies : 0;
+  const sendBuyList = async () => {
+    setBuyStep("sending");
+    setBuyError(null);
+    try {
+      const res = await api.requestBuyList({
+        groupKey,
+        confirmed: true,
+      });
+      if (res.ok) {
+        hapticConfirm();
+        setBuySent({
+          products: res.products,
+          copies: res.copies,
+          skippedNoId: res.skippedNoId,
+        });
+        setBuyStep("sent");
+      } else {
+        setBuyError(res.error ?? "The hand-off didn't start — try again.");
+        setBuyStep("error");
+      }
+    } catch {
+      setBuyError(
+        "The hand-off didn't start — your Muse couldn't be reached. Nothing was sent; try again in a moment.",
+      );
+      setBuyStep("error");
+    }
+  };
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
@@ -8259,13 +8002,118 @@ function MissingSheet({
                   : ""}
               </p>
               {data.missingCount > 0 ? (
-                <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
-                  Every card below links straight to its TCGplayer
-                  product page — tap the TCGplayer link on a card
-                  to open it there and shop for it yourself.
-                  Vault X never sends this list anywhere and
-                  never buys anything itself.
-                </p>
+                <>
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+                    Shop either way: tap a card's TCGplayer link
+                    below to open it there and shop for it
+                    yourself — or send this whole list to your
+                    Muse and have it build the cart for you.
+                  </p>
+                  {sendableCopies > 0 ? (
+                    <div className="mt-3 border-t border-[var(--border)] pt-3">
+                      {buyStep === "idle" || buyStep === "error" ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setBuyStep("confirm")}
+                            className="w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)]"
+                          >
+                            Send buy list to my Muse
+                          </button>
+                          {buyStep === "error" ? (
+                            <p
+                              role="alert"
+                              className="mt-2 text-xs leading-relaxed text-red-300"
+                            >
+                              {buyError}
+                            </p>
+                          ) : null}
+                        </>
+                      ) : buyStep === "confirm" ||
+                        buyStep === "sending" ? (
+                        <div className="rounded-xl border border-[var(--accent)]/50 bg-[var(--bg)] p-3">
+                          <p className="text-sm font-semibold text-[var(--text)]">
+                            Send this buy list to your Muse?
+                          </p>
+                          <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
+                            Your Muse gets just the cards missing
+                            from {data.groupName} — their TCGplayer
+                            product IDs and quantities (
+                            {sendableProducts}{" "}
+                            {sendableProducts === 1
+                              ? "product"
+                              : "products"}
+                            , {sendableCopies}{" "}
+                            {sendableCopies === 1 ? "card" : "cards"}
+                            ). Nothing else from your collection
+                            is sent. Your Muse builds the cart on
+                            TCGplayer under your sign-in — Near
+                            Mint, keeping single-card shipping at
+                            $3 or under where it can — and never
+                            checks out or pays. You review the
+                            cart and approve payment yourself.
+                          </p>
+                          {skippedNoId > 0 ? (
+                            <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
+                              {skippedNoId}{" "}
+                              {skippedNoId === 1
+                                ? "card on this list has"
+                                : "cards on this list have"}{" "}
+                              no TCGplayer product ID, so{" "}
+                              {skippedNoId === 1
+                                ? "it can't"
+                                : "they can't"}{" "}
+                              be sent.
+                            </p>
+                          ) : null}
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void sendBuyList()}
+                              disabled={buyStep === "sending"}
+                              className="flex-1 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)] disabled:opacity-50"
+                            >
+                              {buyStep === "sending"
+                                ? "Sending…"
+                                : "Send to my Muse"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBuyStep("idle")}
+                              disabled={buyStep === "sending"}
+                              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+                            >
+                              Not now
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p
+                          role="status"
+                          className="rounded-xl border border-emerald-400/40 bg-[var(--bg)] px-3 py-2.5 text-sm leading-relaxed text-emerald-300"
+                        >
+                          Sent ✓ — your Muse is on it:{" "}
+                          {buySent
+                            ? `${buySent.copies} ${buySent.copies === 1 ? "card" : "cards"} on its way to a TCGplayer cart. `
+                            : ""}
+                          It will check in with you in chat with
+                          the cart ready for your review. Nothing
+                          gets checked out without your approval.
+                          {buySent && buySent.skippedNoId > 0
+                            ? ` ${buySent.skippedNoId} ${buySent.skippedNoId === 1 ? "card has" : "cards have"} no TCGplayer product ID and ${buySent.skippedNoId === 1 ? "wasn't" : "weren't"} sent.`
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+                      None of these cards carry a TCGplayer
+                      product ID, so there is no list to send
+                      your Muse — the cards stay listed below
+                      with everything the app knows about them.
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="mt-3 text-sm font-semibold text-emerald-400">
                   This set is complete — nothing missing.
@@ -8666,7 +8514,28 @@ const SCAN_HARD_CEILING_MS = 5_000;
     with what it has — half a second inside the hard ceiling so
     the landing itself renders before the ceiling fires. */
 const SCAN_LAND_AT_MS = 4_500;
-function ScanPanel({ onClose }: { onClose: () => void }) {
+type DeviceMatch = NonNullable<
+  ReturnType<typeof matchPhotoOnDevice>
+>;
+
+function ScanPanel({
+  onClose,
+  initialMode = "card",
+  onSlabSaved,
+}: {
+  onClose: () => void;
+  /** Which mode the scanner opens in (Nov 5, 2026): ONE
+      scanner, two modes — "card" runs the artwork matcher,
+      "slab" reads cert codes only. The Search tab's and
+      Sports Cards' slab shortcuts open this same scanner
+      straight into slab mode. */
+  initialMode?: "card" | "slab";
+  /** A slab saved (or an already-saved slab chosen) in slab
+      mode: the app closes the scanner and lands on that
+      slab's Card / Slab View. */
+  onSlabSaved?: (slabId: number) => void;
+}) {
+  const [mode, setMode] = useState<"card" | "slab">(initialMode);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -8760,7 +8629,11 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
   const fixSearch = useQuery({
     queryKey: ["searchCards", fixQuery.trim()],
     queryFn: () => api.searchCards({ query: fixQuery.trim() }),
-    enabled: fixQuery.trim().length >= 2,
+    // First-letter typeahead (standing search rule, Nov 5,
+    // 2026): every search box in the app starts matching at
+    // the first typed letter, results held while typing.
+    enabled: fixQuery.trim().length >= 1,
+    placeholderData: (prev) => prev,
   });
   /** Generation counter: every new identify, cancel, and timeout
       bumps it, and a mutation result only lands when its
@@ -8815,6 +8688,10 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => {
+    // Slab mode runs its own code camera inside the slab
+    // panel; the card camera (and its artwork matcher) never
+    // starts there (Nov 5, 2026 — mode separation rule).
+    if (mode !== "card") return;
     let cancelled = false;
     const start = async () => {
       try {
@@ -8846,7 +8723,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [mode]);
 
   // The result view unmounts the video element; when the user
   // comes back to scan another, re-attach the still-running
@@ -8902,7 +8779,12 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
       // matches when it has them (V3) — never a bare empty list
       // while the index held near matches for the photo.
       setResult(closestFallbackRef.current ?? EMPTY_SCAN_RESULT);
-    }, SCAN_HARD_CEILING_MS);
+      // The ceiling is five seconds from the SHUTTER, not
+      // from whenever identification got going: a multi-frame
+      // burst (foil insurance) spends part of the budget
+      // before beginIdentify runs, and startRef carries the
+      // shutter moment so the deadline never drifts past it.
+    }, Math.max(0, SCAN_HARD_CEILING_MS - (Date.now() - startRef.current)));
   };
 
   /** On-device fingerprint match (the scanner rebuild, Nov 3,
@@ -8939,14 +8821,27 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
     finalistIds: number[];
   };
 
-  const matchOnDevice = async (preview: string): Promise<DeviceScan> => {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("photo unreadable"));
-      el.src = preview;
-    });
-    const matched = matchPhotoOnDevice(img);
+  const matchOnDevice = async (
+    preview: string,
+    preMatched?: DeviceMatch | null,
+  ): Promise<DeviceScan> => {
+    // A multi-frame burst may already hold this photo's
+    // on-device match (the winning frame's) — reuse it
+    // instead of matching the same photo twice.
+    const matched =
+      preMatched !== undefined
+        ? preMatched
+        : matchPhotoOnDevice(
+            await new Promise<HTMLImageElement>(
+              (resolve, reject) => {
+                const el = new Image();
+                el.onload = () => resolve(el);
+                el.onerror = () =>
+                  reject(new Error("photo unreadable"));
+                el.src = preview;
+              },
+            ),
+          );
     if (!matched)
       return {
         scan: null,
@@ -9115,9 +9010,14 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
     };
   };
 
-  const beginIdentify = (base64: string, preview: string) => {
+  const beginIdentify = (
+    base64: string,
+    preview: string,
+    preMatched?: DeviceMatch | null,
+    startedAt?: number,
+  ) => {
     const gen = ++genRef.current;
-    startRef.current = Date.now();
+    startRef.current = startedAt ?? Date.now();
     lastPhotoRef.current = { base64, preview };
     setSnapshot(preview);
     setScanning(true);
@@ -9189,7 +9089,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
     void (async () => {
       let device: DeviceScan | null = null;
       try {
-        device = await matchOnDevice(preview);
+        device = await matchOnDevice(preview, preMatched);
       } catch {
         device = null;
       }
@@ -9333,18 +9233,89 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
     clearSnapshot();
   };
 
+  /** How strong one frame's on-device match is, for picking
+      the burst's winning frame: a definite printing beats a
+      candidate list beats the closest-matches landing. */
+  const burstScore = (m: DeviceMatch | null): number => {
+    if (!m) return 0;
+    if (m.outcome.kind === "definite") return 100;
+    if (m.outcome.kind === "candidates") return 50;
+    return m.closestIds.length > 0 ? 20 : 10;
+  };
+
+  const loadShotImage = (
+    dataUrl: string,
+  ): Promise<HTMLImageElement | null> =>
+    new Promise((resolve) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => resolve(null);
+      el.src = dataUrl;
+    });
+
+  /** The shutter (Nov 5, 2026 — multi-frame capture for
+      foils, the last open homework item): the first frame is
+      matched on-device immediately, and a definite printing
+      goes straight to identification exactly as before — the
+      common path gains nothing and loses nothing. Only when
+      the first frame is NOT definite (the foil case: glare
+      and the rainbow shift make one angle's fingerprint
+      unreliable) does the shutter take up to two more frames
+      ~120ms apart while the card is still in hand, match
+      each, and identify from the strongest — a foil that
+      reads clean from any one angle lands. The whole burst
+      lives inside the scan's 5-second budget: beginIdentify
+      is handed the shutter moment, so the hard ceiling is
+      still five seconds from the first frame. */
   const captureFrame = () => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return;
+    const shutterAt = Date.now();
+    let first: { base64: string; dataUrl: string };
     try {
-      const shot = drawToJpeg(video, video.videoWidth, video.videoHeight);
-      hapticConfirm();
-      setFlash(true);
-      window.setTimeout(() => setFlash(false), 180);
-      beginIdentify(shot.base64, shot.dataUrl);
+      first = drawToJpeg(video, video.videoWidth, video.videoHeight);
     } catch {
       setScanError("Couldn't grab that frame — try the photo button.");
+      return;
     }
+    hapticConfirm();
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 180);
+    void (async () => {
+      const img1 = await loadShotImage(first.dataUrl);
+      const m1 = img1 ? matchPhotoOnDevice(img1) : null;
+      if (m1 && m1.outcome.kind === "definite") {
+        beginIdentify(first.base64, first.dataUrl, m1, shutterAt);
+        return;
+      }
+      let best = {
+        shot: first,
+        matched: m1,
+        score: burstScore(m1),
+      };
+      for (let i = 0; i < 2; i++) {
+        await new Promise((r) => window.setTimeout(r, 120));
+        const v = videoRef.current;
+        if (!v || v.videoWidth === 0 || !streamRef.current) break;
+        let shot: { base64: string; dataUrl: string };
+        try {
+          shot = drawToJpeg(v, v.videoWidth, v.videoHeight);
+        } catch {
+          break;
+        }
+        const im = await loadShotImage(shot.dataUrl);
+        const mm = im ? matchPhotoOnDevice(im) : null;
+        const sc = burstScore(mm);
+        if (sc > best.score) best = { shot, matched: mm, score: sc };
+        if (mm && mm.outcome.kind === "definite") break;
+      }
+      beginIdentify(
+        best.shot.base64,
+        best.shot.dataUrl,
+        best.matched,
+        shutterAt,
+      );
+    })();
   };
 
   // Auto capture loop: while the viewfinder is live and idle,
@@ -9369,6 +9340,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
   captureFrameRef.current = captureFrame;
   useEffect(() => {
     if (
+      mode !== "card" ||
       !autoCapture ||
       cameraState !== "live" ||
       snapshot != null ||
@@ -9519,7 +9491,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
     };
     const id = window.setInterval(tick, 200);
     return () => window.clearInterval(id);
-  }, [autoCapture, cameraState, snapshot, scanning, result]);
+  }, [mode, autoCapture, cameraState, snapshot, scanning, result]);
 
   const onPhotoPicked = (file: File | undefined) => {
     if (!file) return;
@@ -9585,7 +9557,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
       <div className="relative mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-start justify-between gap-3">
           <h2 className="font-album pt-2 text-xl font-bold text-white">
-            Scan a card
+            {mode === "slab" ? "Scan a slab" : "Scan a card"}
           </h2>
           <button
             type="button"
@@ -9596,12 +9568,57 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
             Close
           </button>
         </div>
-        <p className="mt-1 text-sm leading-snug text-[var(--dim)]">
-          Fill the frame with one card, straight-on — or photograph a
-          whole binder page.
+        {/* The one scanner's mode switch (Anthony, Nov 5,
+            2026): card mode matches artwork; slab mode reads
+            cert codes only — the two never run each other's
+            machinery. */}
+        <div
+          className="mt-2.5 flex gap-1.5"
+          role="group"
+          aria-label="Scanner mode"
+        >
+          {(
+            [
+              ["card", "Scan a card"],
+              ["slab", "Scan a slab (cert)"],
+            ] as const
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                hapticTick();
+                setMode(m);
+              }}
+              aria-pressed={mode === m}
+              className={`rounded-full px-4 py-1.5 text-xs font-bold transition active:scale-95 ${
+                mode === m
+                  ? "bg-[var(--gold)] text-black"
+                  : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-sm leading-snug text-[var(--dim)]">
+          {mode === "slab"
+            ? "Point the camera at the slab's QR code or barcode — or photograph its label. The cert opens the company's record and imports its slab photo."
+            : "Fill the frame with one card, straight-on — or photograph a whole binder page."}
         </p>
 
-        {result == null ? (
+        {mode === "slab" ? (
+          <div className="mt-1 min-h-0 flex-1 overflow-y-auto pb-2">
+            <SlabCapturePanel
+              embedded
+              game="any"
+              fixedCard={null}
+              onClose={onClose}
+              onSavedSlab={(slab) => onSlabSaved?.(slab.id)}
+              onOpenExistingSlab={(slab) => onSlabSaved?.(slab.id)}
+            />
+          </div>
+        ) : result == null ? (
           <>
             <div className="relative mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl border border-[var(--border)] bg-black">
               <video
@@ -9949,7 +9966,7 @@ function ScanPanel({ onClose }: { onClose: () => void }) {
                 aria-label="Search the catalog for the right card"
                 className="mt-2.5 w-full rounded-full border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm text-[var(--text)] placeholder:text-[var(--dim)]"
               />
-              {fixQuery.trim().length >= 2 ? (
+              {fixQuery.trim().length >= 1 ? (
                 fixSearch.isPending ? (
                   <p className="mt-2 text-sm text-[var(--dim)]">
                     Searching…
@@ -10458,8 +10475,8 @@ function SealedSheet({
     ~9:50 AM, as a destination only): the acrylic shelf of
     every sealed product — booster boxes, prerelease box,
     troves, packs, gift sets, starter decks — with the
-    Owned vs All toggle, a set filter, and sorting the old
-    page carried. It was deleted with the Sealed bottom
+    owned filter (the shared Only mine toggle since Nov 5,
+    2026), a set filter, and sorting the old page carried. It was deleted with the Sealed bottom
     tab on Nov 3, 2026 and sealed products moved inside
     the Lorcana set pages (they still live there too);
     Anthony directed the page itself restored as the one
@@ -10485,7 +10502,12 @@ function SealedPanel({
     refetchOnWindowFocus: true,
   });
   const intro = useSectionIntro("sealed");
-  const [ownedOnly, setOwnedOnly] = useState(true);
+  // "Only mine" (Anthony, Nov 5, 2026): this page's old
+  // local Owned/All switch runs on the Only mine toggle —
+  // and since later that day the toggle is per-section, so
+  // this is the Sealed shelf's own switch ("sealed"),
+  // independent of every other list's.
+  const onlyMine = useOnlyMine("sealed");
   const [sort, setSort] = useState<
     "value" | "date" | "name" | "set"
   >("value");
@@ -10515,7 +10537,7 @@ function SealedPanel({
     new Set(items.map((i) => typeOf(i.name))),
   ).sort((a, b) => a.localeCompare(b));
   const shown = items
-    .filter((i) => !ownedOnly || i.qty > 0)
+    .filter((i) => !onlyMine || i.qty > 0)
     .filter((i) => setFilter === "all" || i.setName === setFilter)
     .filter((i) => typeFilter === "all" || typeOf(i.name) === typeFilter)
     .slice()
@@ -10577,39 +10599,9 @@ function SealedPanel({
         </HideableIntroWindow>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <div
-          className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
-          role="group"
-          aria-label="Show owned products or all products"
-        >
-          {(
-            [
-              ["owned", "Owned"],
-              ["all", "All"],
-            ] as const
-          ).map(([value, label]) => {
-            const active =
-              (value === "owned") === ownedOnly;
-            return (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  hapticTick();
-                  setOwnedOnly(value === "owned");
-                }}
-                className={`rounded-full px-3.5 py-1.5 text-sm ${
-                  active
-                    ? "bg-[var(--gold)] font-bold text-black"
-                    : "text-[var(--text)]"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        {items.length > ONLY_MINE_THRESHOLD ? (
+          <OnlyMineToggle section="sealed" />
+        ) : null}
         <VxSelect
           ariaLabel="Sort sealed products"
           value={sort}
@@ -10662,8 +10654,8 @@ function SealedPanel({
         </p>
       ) : shown.length === 0 ? (
         <p className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-10 text-center text-sm text-[var(--dim)]">
-          {ownedOnly
-            ? "No sealed products in your vault match those filters — switch to All to see every product, owned or not."
+          {onlyMine
+            ? "No sealed products in your vault match those filters — turn off Only mine to see every product, owned or not."
             : "No sealed products match those filters."}
         </p>
       ) : (
@@ -11298,24 +11290,25 @@ function SettingsSectionIcon({ id }: { id: string }) {
     ~2:10 PM): honest about how installing works — Vault X
     runs inside the Muse app, in each person's OWN Muse
     account, and there is NO one-tap install link. The Muse
-    disclaimer leads, with the sharer's own invite link right
-    under it; then the steps: ask the sharer for the install
-    file (or GitHub access), hand it to their Muse, pick a
-    username and take the quick required first-open tour,
-    with the approvals reassurance at the end. The invite
-    link is always the sharer's own pasted link — nothing
-    here is invented or hard-coded. */
+    disclaimer leads; then the steps: get the Muse app,
+    ask the sharer for the install file (no GitHub, no
+    extra accounts — Muse is the only requirement),
+    hand it to their Muse, pick a username and take the
+    quick required first-open tour, with the approvals
+    reassurance at the end.
+    Muse invite link REMOVED (Anthony, Nov 4, 2026): the
+    message used to carry the sharer's own Muse invite
+    link — but what Muse's Invite button actually copies
+    is a whole block of text, not a clean link, so the
+    link is gone. Nothing here is invented or hard-coded. */
 function buildShareMessage(
-  inviteLink: string,
   inviteCode?: string | null,
 ): string {
   const lines = [
-    "First: you'll need the Muse app — Vault X runs inside Muse. Download Muse with my invite link below, then I'll get you the Vault X install file.",
-    "",
-    inviteLink,
+    "First: you'll need the Muse app — Vault X runs inside Muse. Get Muse from your app store, then I'll get you the Vault X install file.",
     "",
     "I'm collecting with Vault X — want to try it? Once you're in Muse:",
-    "1) Ask me for the Vault X install file (or your GitHub username so you can be granted access).",
+    "1) Ask me for the Vault X install file — I'll send it to you; there's nothing else to sign up for.",
     '2) Give that file to your Muse and say: "Please install Vault X following the instructions in this file."',
     "3) Pick your username — there's a quick required tour the first time you open it.",
     "Heads-up: Muse will ask your approval for a couple of steps — nothing you approve touches your personal data.",
@@ -11334,89 +11327,372 @@ function buildShareMessage(
   return lines.join("\n");
 }
 
+/** Formats a recorded go-live instant the way Anthony
+    reads it (Nov 5, 2026): "Went live: November 5, 2026 ·
+    14:32 CT" — full date, 24-hour military time, Central
+    (America/Chicago) no matter where the phone is. */
+function formatWentLive(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const datePart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(d);
+  const timeParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const hh = timeParts.find((p) => p.type === "hour")?.value ?? "00";
+  const mm = timeParts.find((p) => p.type === "minute")?.value ?? "00";
+  return `Went live: ${datePart} · ${hh}:${mm} CT`;
+}
+
+/** The go-live stamp line (Anthony, Nov 5, 2026): sits
+    directly under the green "You're up to date" line in
+    the About update area, in the same green. Asks the
+    server for the running version's stamp; the server
+    records the moment the first time a copy of that
+    version confirms it is the version being served, so
+    every future version stamps its own go-live in this
+    same spot. Renders nothing until a stamp exists. */
+function VersionLiveStampLine({
+  servedVersion,
+}: {
+  servedVersion: string | null;
+}) {
+  const stamp = useQuery({
+    queryKey: ["versionLiveStamp", APP_VERSION, servedVersion],
+    queryFn: () =>
+      api.versionLiveStamp({ version: APP_VERSION, servedVersion }),
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+  const wentLiveAt = stamp.data?.wentLiveAt ?? null;
+  if (!wentLiveAt) return null;
+  const text = formatWentLive(wentLiveAt);
+  if (!text) return null;
+  return (
+    <p className="mt-1 text-sm font-semibold text-emerald-400" role="status">
+      {text}
+    </p>
+  );
+}
+
 /** Share Vault X (Anthony, Nov 3, 2026, ~2:10 PM; moved
     ~2:24 PM the same day): the Settings entry directly
     underneath Send a change request, nothing between them.
-    The Muse
-    disclaimer is shown on this screen BEFORE sharing, the
-    user pastes their own Muse invite link once (stored on
-    their profile; Share includes it automatically so a new
-    sign-up is credited to them), and tapping Share opens
-    the device share sheet with the ready-made invite —
-    falling back to copying it, confirmed with "Copied —
-    paste it to a friend." With no invite link saved yet,
-    Share prompts for the link first (how to find it is
-    spelled out) instead of sending a message without it. */
+    The Muse disclaimer is shown on this screen BEFORE
+    sharing, and tapping Share opens the device share sheet
+    with the ready-made invite.
+    The Muse invite link field is REMOVED (Anthony,
+    Nov 4, 2026): what Muse's Invite button copies is a
+    whole block of text, not a link, so nothing asks for
+    it and the shared message carries no invite link.
+    Share-sheet repair #3 (Anthony, Nov 5, 2026) deleted
+    the in-app share MENU repair #2 had shipped (rejected
+    on-device option by option) and chased the phone's
+    NATIVE share sheet through the one channel proven to
+    reach it on his phone — a generated FILE handed to
+    navigator.share, the mechanism the Settings → About
+    "Save the icon artwork" button proves works.
+    Speed repair (Anthony, Nov 5, 2026): the sheet DID
+    open — through the Muse app's own share sheet, which
+    he accepts — but it took about seven seconds from the
+    tap, and he wants it inside one second. The seven
+    seconds were stacked up by repair #3's design: the
+    tap first fired a text share, and when that was
+    refused the fallback chain rendered the invite card
+    on the spot and then fired up to THREE more share
+    calls in a row (card+text, card alone, .txt file) —
+    in a webview each refused share call costs seconds
+    of host round-trip before the next attempt even
+    starts, so the sheet that finally opened arrived
+    last and late. The fix moves ALL of that work off
+    the tap: the invite card is rendered in the
+    background as soon as this section mounts (and again
+    when the invite code lands), the one payload shape
+    the phone accepts is probed ONCE at that same
+    moment, and the tap itself makes exactly ONE
+    synchronous navigator.share call with the ready-made
+    payload — nothing renders, nothing probes, nothing
+    retries in a chain after the tap. If that one call
+    is genuinely refused, the invite is saved as a file
+    with the browser's reason shown (the old last
+    resort, now reached immediately instead of after
+    three more share attempts). A tap while the card is
+    still being drawn (the first instant after Settings
+    opens) shares the plain text invite instead, which
+    is likewise a single synchronous call. */
 function ShareVaultXSection() {
-  const queryClient = useQueryClient();
-  const info = useQuery({
-    queryKey: ["museInviteLink"],
-    queryFn: () => api.getMuseInviteLink({}),
-  });
   const collectorId = useQuery({
     queryKey: ["collectorId"],
     queryFn: () => api.getCollectorId({}),
   });
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [needLink, setNeedLink] = useState(false);
   const [shareState, setShareState] = useState<
-    "idle" | "copied" | "error"
+    "idle" | "shared" | "cancelled" | "saved" | "error"
   >("idle");
-  const linkInputRef = useRef<HTMLInputElement | null>(null);
-  const save = useMutation({
-    mutationFn: (link: string) => api.setMuseInviteLink({ link }),
-    onSuccess: (res) => {
-      if (res.ok) {
-        setSaveError(null);
-        setSaved(true);
-        setDraft(null);
-        setNeedLink(false);
-        void queryClient.invalidateQueries({
-          queryKey: ["museInviteLink"],
-        });
-        window.setTimeout(() => setSaved(false), 2500);
-      } else {
-        setSaveError(res.error ?? "That didn't save.");
-      }
-    },
-    onError: () => setSaveError("That didn't save — try again."),
-  });
-  const current = info.data?.museInviteLink ?? null;
-  const value = draft ?? current ?? "";
+  // Why the save fallback ran, in plain sight (Anthony,
+  // Nov 5, 2026): when the share sheet does not open, the
+  // section says exactly what the browser reported
+  // instead of quietly presenting a download as if that
+  // were the plan.
+  const [shareDiag, setShareDiag] = useState<string | null>(null);
 
-  const doShare = async () => {
-    if (!current) {
-      // No invite link saved yet: prompt for it first rather
-      // than sharing a message without the credit link.
-      setNeedLink(true);
-      linkInputRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-      linkInputRef.current?.focus();
+  type ShareNav = Navigator & {
+    share?: (data: {
+      title?: string;
+      text?: string;
+      files?: File[];
+    }) => Promise<void>;
+    canShare?: (data: {
+      title?: string;
+      text?: string;
+      files?: File[];
+    }) => boolean;
+  };
+
+  const describeCause = (cause: unknown): string =>
+    cause == null
+      ? "This browser did not offer a share sheet at all (the Web Share API is not available in it)."
+      : cause instanceof Error
+        ? `The share sheet did not open: ${cause.name}${cause.message ? ` — ${cause.message}` : ""}`
+        : "The share sheet did not open for an unknown reason.";
+
+  const isAbort = (e: unknown): boolean =>
+    e instanceof DOMException && e.name === "AbortError";
+
+  // The invite drawn onto a picture card (Anthony, Nov 5,
+  // 2026): a dark card, the Vault X name in gold, the full
+  // invite text, and the invite code large at the bottom.
+  // Sharing THIS as an image file is the payload shape the
+  // "Save the icon artwork" flow proves his phone's share
+  // sheet accepts. Since the speed repair it is rendered
+  // in the BACKGROUND when this section mounts — never
+  // inside the tap.
+  const buildInviteCardFile = (
+    message: string,
+    inviteCode?: string | null,
+  ): Promise<File | null> =>
+    new Promise((resolve) => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1080;
+        canvas.height = 1350;
+        const g = canvas.getContext("2d");
+        if (!g) {
+          resolve(null);
+          return;
+        }
+        g.fillStyle = "#101322";
+        g.fillRect(0, 0, 1080, 1350);
+        g.strokeStyle = "#c9a86a";
+        g.lineWidth = 6;
+        g.strokeRect(36, 36, 1008, 1278);
+        g.fillStyle = "#e8c87e";
+        g.font = "700 92px Georgia, 'Times New Roman', serif";
+        g.textAlign = "center";
+        g.fillText("Vault X", 540, 190);
+        g.fillStyle = "#f2f0e9";
+        g.font = "400 38px system-ui, sans-serif";
+        g.textAlign = "left";
+        const words = message.split(/\s+/).filter(Boolean);
+        const lines: string[] = [];
+        let line = "";
+        for (const w of words) {
+          const next = line ? `${line} ${w}` : w;
+          if (g.measureText(next).width > 880 && line) {
+            lines.push(line);
+            line = w;
+          } else {
+            line = next;
+          }
+        }
+        if (line) lines.push(line);
+        let y = 300;
+        for (const l of lines.slice(0, 21)) {
+          g.fillText(l, 100, y);
+          y += 54;
+        }
+        if (inviteCode) {
+          g.textAlign = "center";
+          g.fillStyle = "#e8c87e";
+          g.font = "700 52px system-ui, sans-serif";
+          g.fillText(`Invite code: ${inviteCode}`, 540, 1252);
+        }
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            resolve(null);
+            return;
+          }
+          try {
+            resolve(
+              new File([blob], "vault-x-invite.png", {
+                type: "image/png",
+              }),
+            );
+          } catch {
+            resolve(null);
+          }
+        }, "image/png");
+      } catch {
+        resolve(null);
+      }
+    });
+
+  // The pre-built share payload (speed repair, Nov 5,
+  // 2026): the rendered card file plus the ONE payload
+  // shape probed as acceptable, staged by the effect
+  // below so the tap handler only has to hand it over.
+  const stagedShareRef = useRef<{
+    code: string | null;
+    data: { title?: string; text?: string; files?: File[] };
+  } | null>(null);
+  // A share call is in flight (the sheet is open or
+  // opening): extra taps are ignored, so a second call
+  // can never queue behind the first and double the wait.
+  const shareInFlightRef = useRef(false);
+
+  // Stage the share payload in the background: render the
+  // invite card and probe the payload shape ONCE, as soon
+  // as the section mounts and again when the invite code
+  // arrives (the card carries the code, so it is redrawn
+  // for it). All of this happens long before the tap in
+  // the normal case — Settings is open, read, and scrolled
+  // before Share is ever tapped.
+  useEffect(() => {
+    let cancelled = false;
+    const code = collectorId.data?.inviteCode ?? null;
+    if (stagedShareRef.current?.code === code) return;
+    const message = buildShareMessage(code);
+    void buildInviteCardFile(message, code).then((cardFile) => {
+      if (cancelled || !cardFile) return;
+      const nav = navigator as ShareNav;
+      let data: { title?: string; text?: string; files?: File[] } | null =
+        null;
+      if (typeof nav.canShare === "function") {
+        const full = { title: "Vault X", text: message, files: [cardFile] };
+        try {
+          if (nav.canShare(full)) data = full;
+        } catch {
+          data = null;
+        }
+        if (!data) {
+          try {
+            if (nav.canShare({ files: [cardFile] })) {
+              data = { files: [cardFile] };
+            }
+          } catch {
+            data = null;
+          }
+        }
+      } else if (typeof nav.share === "function") {
+        // No canShare to probe with: the card file alone
+        // is the proven shape on his phone.
+        data = { files: [cardFile] };
+      }
+      if (data) stagedShareRef.current = { code, data };
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [collectorId.data?.inviteCode]);
+
+  // Last resort when the one share call is refused: save
+  // the invite as a downloaded file, exactly like the
+  // app's other file exports, so it can still be sent
+  // from the phone's own apps.
+  const downloadInviteFile = (message: string): boolean => {
+    try {
+      const blob = new Blob([message], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "vault-x-invite.txt";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const onShareClick = () => {
+    hapticTick();
+    if (shareInFlightRef.current) return;
+    const message = buildShareMessage(collectorId.data?.inviteCode);
+    const nav = navigator as ShareNav;
+    if (typeof nav.share !== "function") {
+      // No share sheet exists in this browser at all:
+      // save the file immediately and say why.
+      if (downloadInviteFile(message)) {
+        setShareDiag(describeCause(null));
+        setShareState("saved");
+      } else {
+        setShareState("error");
+      }
       return;
     }
-    const message = buildShareMessage(current, collectorId.data?.inviteCode);
-    if (typeof navigator !== "undefined" && "share" in navigator) {
-      try {
-        await navigator.share({ title: "Vault X", text: message });
-        setShareState("idle");
-        return;
-      } catch (e) {
-        // The user closing the share sheet is not an error —
-        // and not a cue to copy behind their back.
-        if (e instanceof DOMException && e.name === "AbortError")
-          return;
-      }
+    // THE tap path (speed repair): exactly one share
+    // call, made synchronously inside the tap's own task
+    // so the user-gesture (transient activation) is
+    // intact — the pre-staged card payload when it is
+    // ready, otherwise the plain text invite. No canvas
+    // work, no canShare probing, and no chained retries
+    // after this: those were the stacked seconds.
+    const staged = stagedShareRef.current;
+    let data: { title?: string; text?: string; files?: File[] };
+    if (staged) {
+      data = staged.data;
+    } else {
+      const full = { title: "Vault X", text: message };
+      data =
+        typeof nav.canShare === "function" && !nav.canShare(full)
+          ? { text: message }
+          : full;
     }
+    shareInFlightRef.current = true;
+    let promise: Promise<void>;
     try {
-      await navigator.clipboard.writeText(message);
-      setShareState("copied");
-    } catch {
-      setShareState("error");
+      promise = nav.share(data);
+    } catch (e) {
+      shareInFlightRef.current = false;
+      if (downloadInviteFile(message)) {
+        setShareDiag(describeCause(e));
+        setShareState("saved");
+      } else {
+        setShareState("error");
+      }
+      return;
     }
+    promise.then(
+      () => {
+        shareInFlightRef.current = false;
+        setShareDiag(null);
+        setShareState("shared");
+      },
+      (e: unknown) => {
+        shareInFlightRef.current = false;
+        // The user closing the share sheet is not an
+        // error — and not a cue to copy behind their back.
+        if (isAbort(e)) {
+          setShareDiag(null);
+          setShareState("cancelled");
+          return;
+        }
+        if (downloadInviteFile(message)) {
+          setShareDiag(describeCause(e));
+          setShareState("saved");
+        } else {
+          setShareState("error");
+        }
+      },
+    );
   };
 
   return (
@@ -11431,8 +11707,8 @@ function ShareVaultXSection() {
       </h2>
       <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
         Invite a friend to collect with Vault X — send them a
-        ready-made message with your own Muse invite link in
-        it, so their Muse sign-up is credited to you.
+        ready-made message that walks them through getting
+        set up.
       </p>
       {/* The Muse-first disclaimer, shown before sharing:
           the recipient has to get Muse before Vault X can
@@ -11441,83 +11717,12 @@ function ShareVaultXSection() {
         First: your friend will need the <strong>Muse app</strong>{" "}
         — Vault X runs inside Muse, in their own Muse
         account. There&rsquo;s no one-tap install link: they
-        download Muse with your invite link first, then you
-        send them the Vault X install file.
+        get Muse from their app store first, then you send
+        them the Vault X install file.
       </p>
-      <label
-        htmlFor="settings-muse-invite-link"
-        className="mt-3 block text-xs font-semibold uppercase tracking-wider text-[var(--dim)]"
-      >
-        Your Muse invite link
-      </label>
-      <input
-        id="settings-muse-invite-link"
-        ref={linkInputRef}
-        type="url"
-        inputMode="url"
-        autoComplete="off"
-        placeholder="Paste your link from Muse's Invite button"
-        value={value}
-        onChange={(e) => setDraft(e.target.value)}
-        className="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--dim)]"
-      />
-      <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
-        Find it in the Muse app: tap the Invite button, copy
-        your invite link, and paste it here once. It&rsquo;s
-        saved and included in every share automatically.
-      </p>
-      {saveError ? (
-        <p className="mt-2 text-xs font-semibold leading-relaxed text-red-300">
-          {saveError}
-        </p>
-      ) : null}
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={
-            save.isPending ||
-            draft === null ||
-            draft.trim() === (current ?? "")
-          }
-          onClick={() => save.mutate(value)}
-          className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-        >
-          Save link
-        </button>
-        {current ? (
-          <button
-            type="button"
-            disabled={save.isPending}
-            onClick={() => save.mutate("")}
-            className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-          >
-            Remove
-          </button>
-        ) : null}
-        {saved ? (
-          <span role="status" className="text-xs font-medium text-emerald-400">
-            Saved ✓
-          </span>
-        ) : null}
-      </div>
-      {needLink && !current ? (
-        <p
-          role="alert"
-          className="mt-3 rounded-xl border border-amber-300/40 bg-amber-300/10 px-3 py-2.5 text-sm leading-relaxed text-[var(--text)]"
-        >
-          Add your Muse invite link first — your share
-          includes it, so the sign-up is credited to you. Open
-          the Muse app, tap the Invite button, copy your
-          invite link, and paste it in the field above. Then
-          tap Share.
-        </p>
-      ) : null}
       <button
         type="button"
-        onClick={() => {
-          hapticTick();
-          void doShare();
-        }}
+        onClick={onShareClick}
         className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)]"
       >
         <svg
@@ -11538,10 +11743,30 @@ function ShareVaultXSection() {
         </svg>
         Share Vault X
       </button>
-      {shareState === "copied" ? (
+      {shareState === "shared" ? (
         <p role="status" className="mt-2 text-center text-sm font-medium text-emerald-400">
-          Copied — paste it to a friend.
+          Sent through your phone&rsquo;s share sheet.
         </p>
+      ) : null}
+      {shareState === "cancelled" ? (
+        <p role="status" className="mt-2 text-center text-sm font-medium text-[var(--dim)]">
+          Share cancelled — nothing was sent or copied.
+        </p>
+      ) : null}
+      {shareState === "saved" ? (
+        <div className="mt-3">
+          <p role="status" className="text-center text-sm font-medium text-amber-300">
+            Your phone&rsquo;s share menu didn&rsquo;t open
+            here, so the invite was saved as a file
+            (vault-x-invite.txt) — you can send that file to
+            your friend from your downloads.
+          </p>
+          {shareDiag ? (
+            <p className="mt-1 text-center text-xs leading-relaxed text-[var(--dim)]">
+              {shareDiag}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {shareState === "error" ? (
         <p role="alert" className="mt-2 text-sm leading-relaxed text-red-300">
@@ -11550,16 +11775,12 @@ function ShareVaultXSection() {
           to copy it.
         </p>
       ) : null}
-      {current ? (
-        <>
-          <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">
-            Exactly what gets shared
-          </p>
-          <pre className="mt-1.5 whitespace-pre-wrap rounded-xl bg-[var(--bg)] px-3 py-2.5 font-sans text-xs leading-relaxed text-[var(--dim)]">
-            {buildShareMessage(current, collectorId.data?.inviteCode)}
-          </pre>
-        </>
-      ) : null}
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">
+        Exactly what gets shared
+      </p>
+      <pre className="mt-1.5 whitespace-pre-wrap rounded-xl bg-[var(--bg)] px-3 py-2.5 font-sans text-xs leading-relaxed text-[var(--dim)]">
+        {buildShareMessage(collectorId.data?.inviteCode)}
+      </pre>
     </section>
   );
 }
@@ -11666,15 +11887,68 @@ function PaymentInfoSection() {
   );
 }
 
+/** Home's main-area tile keys (Anthony, Nov 4, 2026 — the
+    TCG Universe condensation + Sports Cards): Home renders
+    ONLY these, in their stored relative order. The four TCG
+    games live inside the TCG Universe page now. */
+const MAIN_TILE_KEYS = [
+  "tcg",
+  "comics",
+  "lego",
+  "funko",
+  "sports",
+  "toppsau",
+] as const;
+
+/** The four TCG game tile keys, living inside TCG
+    Universe; they share the one stored order and hidden
+    list with Home's main areas. */
+const TCG_GAME_TILE_KEYS_CLIENT = [
+  "lorcana",
+  "pokemon",
+  "starwars",
+  "magic",
+] as const;
+
+/** The four Topps Alternate Universe sub-area tile keys,
+    living inside that page; they share the one stored
+    order and hidden list with everything else. */
+const AU_TILE_KEYS_CLIENT = [
+  "disneytopps",
+  "starwarstopps",
+  "gpk",
+  "wwetopps",
+] as const;
+
 const COLLECTION_TILE_OPTIONS = [
+  { key: "tcg", label: "TCG Universe" },
+  { key: "comics", label: "Comics" },
+  { key: "lego", label: "Legos" },
+  { key: "funko", label: "Funko" },
+  { key: "sports", label: "Sports Cards" },
+  { key: "toppsau", label: "Topps Alternate Universe" },
   { key: "lorcana", label: "Lorcana" },
   { key: "pokemon", label: "Pokémon" },
-  { key: "magic", label: "Magic: The Gathering" },
-  { key: "lego", label: "Legos" },
-  { key: "comics", label: "Comics" },
   { key: "starwars", label: "Star Wars Unlimited" },
-  { key: "funko", label: "Funko" },
+  { key: "magic", label: "Magic: The Gathering" },
+  { key: "disneytopps", label: "Disney Topps" },
+  { key: "starwarstopps", label: "Star Wars Topps" },
+  { key: "gpk", label: "Garbage Pail Kids" },
+  { key: "wwetopps", label: "WWE Topps" },
 ] as const;
+
+const HOME_TILE_OPTIONS = COLLECTION_TILE_OPTIONS.filter((c) =>
+  (MAIN_TILE_KEYS as readonly string[]).includes(c.key),
+);
+const TCG_GAME_TILE_OPTIONS = COLLECTION_TILE_OPTIONS.filter(
+  (c) =>
+    (TCG_GAME_TILE_KEYS_CLIENT as readonly string[]).includes(
+      c.key,
+    ),
+);
+const AU_TILE_OPTIONS = COLLECTION_TILE_OPTIONS.filter((c) =>
+  (AU_TILE_KEYS_CLIENT as readonly string[]).includes(c.key),
+);
 
 /** The Your Collections visibility switches: one per Home
     tile, all shown by default; the choice persists on the
@@ -11692,13 +11966,20 @@ function CollectionsVisibilitySwitches() {
   const toggle = useMutation({
     mutationFn: (args: {
       collection:
+        | "tcg"
+        | "comics"
+        | "lego"
+        | "funko"
+        | "sports"
+        | "toppsau"
         | "lorcana"
         | "pokemon"
-        | "magic"
-        | "lego"
-        | "comics"
         | "starwars"
-        | "funko";
+        | "magic"
+        | "disneytopps"
+        | "starwarstopps"
+        | "gpk"
+        | "wwetopps";
       hidden: boolean;
     }) => api.setCollectionHidden(args),
     onSuccess: () => {
@@ -11707,9 +11988,16 @@ function CollectionsVisibilitySwitches() {
       });
     },
   });
-  return (
-    <ul className="mt-3 divide-y divide-[var(--border)]">
-      {COLLECTION_TILE_OPTIONS.map((c) => {
+  // Two groups since the condensation (Nov 4, 2026): the
+  // main areas that sit on Home, and the four games inside
+  // TCG Universe — same switches, same stored list; a hidden
+  // game is hidden on the TCG Universe page.
+  const renderGroup = (
+    options: readonly { key: string; label: string }[],
+    place: string,
+  ) => (
+    <ul className="divide-y divide-[var(--border)]">
+      {options.map((c) => {
         const shown = !hidden.has(c.key);
         return (
           <li
@@ -11723,11 +12011,28 @@ function CollectionsVisibilitySwitches() {
               type="button"
               role="switch"
               aria-checked={shown}
-              aria-label={`Show the ${c.label} tile on Home`}
+              aria-label={`Show the ${c.label} tile ${place}`}
               disabled={toggle.isPending}
               onClick={() => {
                 hapticTick();
-                toggle.mutate({ collection: c.key, hidden: shown });
+                toggle.mutate({
+                  collection: c.key as
+                    | "tcg"
+                    | "comics"
+                    | "lego"
+                    | "funko"
+                    | "sports"
+                    | "toppsau"
+                    | "lorcana"
+                    | "pokemon"
+                    | "starwars"
+                    | "magic"
+                    | "disneytopps"
+                    | "starwarstopps"
+                    | "gpk"
+                    | "wwetopps",
+                  hidden: shown,
+                });
               }}
               className={`flex h-7 w-12 shrink-0 items-center rounded-full border px-1 transition ${
                 shown
@@ -11746,6 +12051,22 @@ function CollectionsVisibilitySwitches() {
         );
       })}
     </ul>
+  );
+  return (
+    <div className="mt-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+        On Home
+      </h3>
+      {renderGroup(HOME_TILE_OPTIONS, "on Home")}
+      <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+        Inside TCG Universe
+      </h3>
+      {renderGroup(TCG_GAME_TILE_OPTIONS, "in TCG Universe")}
+      <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+        Inside Topps Alternate Universe
+      </h3>
+      {renderGroup(AU_TILE_OPTIONS, "in Topps Alternate Universe")}
+    </div>
   );
 }
 
@@ -12183,11 +12504,35 @@ function ArtworkCacheLine() {
       )}
       {total != null && !complete ? (
         progress.running ? (
-          <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
-            Saving the rest in the background — your own cards first,
-            then set by set. You can keep using the app while it
-            works.
-          </p>
+          <>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+              Saving the rest in the background — your own cards first,
+              then set by set. You can keep using the app while it
+              works.
+            </p>
+            {/* App-wide download rule (Anthony, Nov 4, 2026):
+                every download control shows a progress bar while
+                it runs — here it tracks the live cache count. */}
+            <div
+              className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--bg)]"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round((cached / total) * 100)}
+              aria-label="Artwork save progress"
+            >
+              <div
+                className="h-full rounded-full bg-[var(--gold)] transition-[width] duration-500"
+                style={{
+                  width: `${Math.round((cached / total) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="mt-1 text-xs tabular-nums text-[var(--dim)]">
+              {cached.toLocaleString()} of {total.toLocaleString()}{" "}
+              images · {Math.round((cached / total) * 100)}%
+            </p>
+          </>
         ) : (
           <>
             <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
@@ -12466,6 +12811,11 @@ function SettingsPanel({
   const t = useT();
   const queryClient = useQueryClient();
   const [check, setCheck] = useState<UpdateCheckState>({ status: "idle" });
+  // The version the server is actually serving, as last
+  // probed by the update check — the go-live stamp under
+  // the up-to-date line records itself only once the
+  // served version matches the running one.
+  const [servedVersion, setServedVersion] = useState<string | null>(null);
   // Haptics (Anthony, Nov 2, 2026): on by default, switchable here;
   // the module owns the stored choice and every call site respects
   // it. Turning it on fires one tick so he feels what he enabled.
@@ -12726,6 +13076,7 @@ function SettingsPanel({
     } catch {
       // Network failure: found stays null and the error state shows.
     }
+    if (found != null) setServedVersion(found);
     if (found == null) {
       setCheck({ status: "error" });
     } else if (compareVersions(found, APP_VERSION) > 0) {
@@ -12920,6 +13271,13 @@ function SettingsPanel({
               latest.
             </p>
           ) : null}
+          {/* The go-live stamp (Anthony, Nov 5, 2026):
+              directly under the green up-to-date line, in
+              the same green — the date and 24-hour Central
+              time the running version actually went live,
+              recorded server-side the first time a copy of
+              that version confirms it is the served build. */}
+          <VersionLiveStampLine servedVersion={servedVersion} />
           {check.status === "error" ? (
             <p className="mt-2.5 text-sm text-red-400" role="status">
               Couldn&rsquo;t check for updates just now — check your
@@ -13004,8 +13362,8 @@ function SettingsPanel({
       {/* Share Vault X (Anthony, Nov 3, 2026, ~2:10 PM;
           placement corrected ~2:24 PM the same day): directly
           underneath Send a change request — nothing between
-          them — the invite entry with the Muse disclaimer and
-          the user's own Muse invite link. */}
+          them — the invite entry with the Muse disclaimer
+          and the ready-made share message. */}
       <ShareVaultXSection />
 
       {/* Theme — pick the app's look. Applies app-wide the moment
@@ -13680,6 +14038,53 @@ function fmtAdminWhen(iso: string): string {
     only Bug and Idea are selectable) — plus a text message
     (text only), sent to the developer through the server,
     stamped with the sender's username, Collector ID, and date. */
+/** One of the signed-in collector's own tickets, as a row.
+    Shared by the Your tickets list and the Completed
+    Tickets page so both render a ticket identically. */
+function MyTicketRow({
+  t,
+}: {
+  t: {
+    id: number;
+    kind: string;
+    message: string;
+    createdAt: string;
+    status: string;
+    assignee: string | null;
+    photoUrl: string | null;
+  };
+}) {
+  return (
+    <li className="py-2.5">
+      <span className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-bold text-[var(--text)]">
+          #{t.id}
+        </span>
+        <span className="rounded-full bg-[var(--gold)] px-2 py-0.5 text-[11px] font-bold text-black">
+          {ticketKindLabel(t.kind)}
+        </span>
+        <TicketStatusChip status={t.status} />
+        <span className="text-xs text-[var(--dim)]">
+          {fmtAdminWhen(t.createdAt)}
+        </span>
+      </span>
+      <span className="mt-0.5 block truncate text-sm text-[var(--dim)]">
+        {t.message}
+      </span>
+      {t.photoUrl ? (
+        <img
+          src={t.photoUrl}
+          alt="Screenshot attached to this ticket"
+          className="mt-1.5 max-h-32 w-auto rounded-lg border border-[var(--border)]"
+        />
+      ) : null}
+      <span className="mt-0.5 block text-xs text-[var(--dim)]">
+        {t.assignee ? `Assigned to ${t.assignee}` : "Not assigned yet"}
+      </span>
+    </li>
+  );
+}
+
 function ChangeRequestSection() {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<"bug" | "idea">("bug");
@@ -13721,6 +14126,30 @@ function ChangeRequestSection() {
   const myTickets = useQuery({
     queryKey: ["myTickets"],
     queryFn: () => api.getMyTickets({}),
+  });
+  // Completed tickets rule (Anthony, Nov 5, 2026): a ticket
+  // stays in Your tickets while open AND for one week after
+  // it is marked Completed; after that week it leaves the
+  // list and lives under the Completed tickets pill, which
+  // opens a dedicated page with the FULL completed history.
+  // Nothing is ever deleted — the record and the Admin
+  // audit view are untouched; this is only where tickets
+  // display. Before this rule, completed tickets stayed in
+  // Your tickets forever.
+  const [completedOpen, setCompletedOpen] = useState(false);
+  const completedWin = useWindowHistory(
+    "completedTickets",
+    setCompletedOpen,
+  );
+  const allMyTickets = myTickets.data?.tickets ?? [];
+  const completedTickets = allMyTickets.filter(
+    (t) => t.status === "completed",
+  );
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const visibleTickets = allMyTickets.filter((t) => {
+    if (t.status !== "completed") return true;
+    const doneAt = new Date(t.completedAt ?? t.createdAt).getTime();
+    return Number.isNaN(doneAt) || Date.now() - doneAt < WEEK_MS;
   });
   const send = useMutation({
     mutationFn: () =>
@@ -13901,50 +14330,97 @@ function ChangeRequestSection() {
           ) : null}
         </>
       )}
-      <h3 className="mt-5 font-album text-base text-[var(--text)]">
-        Your tickets
-      </h3>
-      {(myTickets.data?.tickets ?? []).length === 0 ? (
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <h3 className="font-album text-base text-[var(--text)]">
+          Your tickets
+        </h3>
+        {/* The Completed tickets pill (Anthony, Nov 5,
+            2026): immediately right of the Your tickets
+            heading, with the count. Completed tickets live
+            here once their week in the list below runs out. */}
+        {completedTickets.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => completedWin.open()}
+            aria-label={`Open your completed tickets page — ${completedTickets.length} completed`}
+            className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-xs font-bold text-emerald-300 transition active:scale-95"
+          >
+            Completed tickets · {completedTickets.length}
+          </button>
+        ) : null}
+      </div>
+      {allMyTickets.length === 0 ? (
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
           Tickets you send show up here with their status — Open,
           In Progress, Completed — and who they&rsquo;re assigned
           to, so you can follow them.
         </p>
+      ) : visibleTickets.length === 0 ? (
+        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+          Nothing open right now — your completed tickets live
+          under the Completed tickets pill above.
+        </p>
       ) : (
         <ul className="mt-2 divide-y divide-[var(--border)]">
-          {(myTickets.data?.tickets ?? []).map((t) => (
-            <li key={t.id} className="py-2.5">
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-bold text-[var(--text)]">
-                  #{t.id}
-                </span>
-                <span className="rounded-full bg-[var(--gold)] px-2 py-0.5 text-[11px] font-bold text-black">
-                  {ticketKindLabel(t.kind)}
-                </span>
-                <TicketStatusChip status={t.status} />
-                <span className="text-xs text-[var(--dim)]">
-                  {fmtAdminWhen(t.createdAt)}
-                </span>
-              </span>
-              <span className="mt-0.5 block truncate text-sm text-[var(--dim)]">
-                {t.message}
-              </span>
-              {t.photoUrl ? (
-                <img
-                  src={t.photoUrl}
-                  alt="Screenshot attached to this ticket"
-                  className="mt-1.5 max-h-32 w-auto rounded-lg border border-[var(--border)]"
-                />
-              ) : null}
-              <span className="mt-0.5 block text-xs text-[var(--dim)]">
-                {t.assignee
-                  ? `Assigned to ${t.assignee}`
-                  : "Not assigned yet"}
-              </span>
-            </li>
+          {visibleTickets.map((t) => (
+            <MyTicketRow key={t.id} t={t} />
           ))}
         </ul>
       )}
+      {/* The Completed Tickets page (Anthony, Nov 5, 2026):
+          a window over Settings holding this collector's
+          FULL completed history — every completed ticket,
+          however old. One Back press returns to Settings. */}
+      {completedOpen ? (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Completed tickets"
+        >
+          <div className="mx-auto w-full max-w-lg px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <button
+              type="button"
+              onClick={() => completedWin.close()}
+              aria-label="Back to Settings"
+              className="flex h-10 items-center gap-0.5 rounded-full bg-white/[0.07] py-0 pr-3.5 pl-2 text-sm font-semibold text-[var(--text)] ring-1 ring-white/15 transition active:scale-95"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M14.5 5.5 8 12l6.5 6.5" />
+              </svg>
+              Settings
+            </button>
+            <h3 className="mt-4 font-album text-xl text-[var(--text)]">
+              Completed tickets
+            </h3>
+            <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+              Every ticket you&rsquo;ve sent that&rsquo;s been
+              completed — your full history. A completed ticket
+              stays in Your tickets for a week, then lives here.
+            </p>
+            {completedTickets.length === 0 ? (
+              <p className="mt-3 text-sm text-[var(--dim)]">
+                No completed tickets yet.
+              </p>
+            ) : (
+              <ul className="mt-2 divide-y divide-[var(--border)]">
+                {completedTickets.map((t) => (
+                  <MyTicketRow key={t.id} t={t} />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -14265,6 +14741,65 @@ function AdminTicketBar({
   );
 }
 
+/** On-device copy of the last fully computed Admin stats
+    (Admin load speed — Anthony, Nov 5, 2026, re-report:
+    "the Admin page takes too long to load"). PROFILE of
+    what the page waited on: getAdminStats is the app's
+    slowest action by design — it pages every
+    collection_items row on Supabase (1,000 at a time),
+    bulk-reads profiles, connections and trust events, and
+    estimates storage table by table (a dozen-plus server
+    round trips). The Nov 3 fix (server snapshot +
+    instant shell) helped only when the snapshot call
+    itself returned quickly; on a cold Supabase path even
+    that round trip left the hub sitting on "Loading…".
+    THE FIX, the binder cache's proven pattern: the last
+    computed stats persist ON-DEVICE and seed both Admin
+    queries via initialData, so the hub paints INSTANTLY
+    with the last-known numbers (labeled with their real
+    as-of time from the payload's computedAt), the server
+    snapshot and the live recompute refresh behind them,
+    and nothing on the initial render blocks on the slowest
+    call. Heavy detail data was already lazy (each hub
+    detail view renders only when opened); the stats query
+    also stops re-running the full compute on every open
+    (two-minute stale window, shared with the Home badge). */
+const ADMIN_STATS_CACHE_KEY = "vaultx-admin-stats-v1";
+type AdminStatsPayload = ApiResponse<typeof api, "getAdminStats">;
+function readAdminStatsCache(): {
+  savedAt: number;
+  stats: AdminStatsPayload;
+} | null {
+  try {
+    const raw = window.localStorage.getItem(ADMIN_STATS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      savedAt?: unknown;
+      stats?: AdminStatsPayload;
+    };
+    if (
+      typeof parsed?.savedAt !== "number" ||
+      !parsed.stats ||
+      parsed.stats.isOwner !== true
+    )
+      return null;
+    return { savedAt: parsed.savedAt, stats: parsed.stats };
+  } catch {
+    return null;
+  }
+}
+function writeAdminStatsCache(stats: AdminStatsPayload) {
+  try {
+    window.localStorage.setItem(
+      ADMIN_STATS_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), stats }),
+    );
+  } catch {
+    // Storage full/blocked: the page still works, it just
+    // paints from the server snapshot next open instead.
+  }
+}
+
 /** The rebuilt Admin dashboard (Anthony, Nov 3, 2026, ~11:27
     AM — reconstructed from scratch on the analytics-panel
     model): headline stat tiles up top, then charts (donut,
@@ -14306,17 +14841,39 @@ function AdminDashboard({
   // them and swaps in when it lands. With no snapshot yet,
   // the tiles and sections show honest loading states —
   // never invented numbers.
+  // Instant first paint (Nov 5, 2026): the on-device copy
+  // of the last computed stats seeds both queries, so the
+  // hub opens on real last-known numbers at once; the
+  // server snapshot and the live recompute land behind
+  // them. See the cache note above AdminDashboard.
+  const [adminCache] = useState(readAdminStatsCache);
   const snapshot = useQuery({
     queryKey: ["adminStatsSnapshot"],
     queryFn: () => api.getAdminStatsSnapshot({}),
     retry: 1,
     staleTime: 30_000,
+    initialData: adminCache
+      ? {
+          isOwner: true,
+          computedAt: adminCache.stats.computedAt,
+          stats: adminCache.stats,
+        }
+      : undefined,
+    initialDataUpdatedAt: adminCache?.savedAt,
   });
   const stats = useQuery({
     queryKey: ["adminStats"],
     queryFn: () => api.getAdminStats({}),
     retry: 1,
+    staleTime: 120_000,
+    initialData: adminCache?.stats,
+    initialDataUpdatedAt: adminCache?.savedAt,
   });
+  // Keep the on-device copy current whenever a live
+  // computation lands.
+  useEffect(() => {
+    if (stats.data?.isOwner) writeAdminStatsCache(stats.data);
+  }, [stats.data]);
   // Admin change notifications (Anthony, Nov 3, 2026,
   // 1:51 PM): changedKeys from the server names every
   // metric whose value moved since it was last
@@ -14409,13 +14966,19 @@ function AdminDashboard({
   }, [collectorsOpen, scope]);
   // The Hub (Admin redesign — Concept B, Anthony's pick,
   // Nov 4, 2026): Admin opens as six tappable tiles; each
-  // opens its detail view. The view rides the same history
-  // pattern as the collectors page above it: opening a tile
-  // pushes { lorcanaAdminHub: view }, the phone back button
-  // pops it and lands on the hub (never out of the app), and
-  // the stored copy restores the same detail after a refresh
-  // in place. The collectors page stacks ABOVE a detail view
-  // exactly as it stacked above the dashboard before.
+  // opens its detail view. The detail view takes its OWN
+  // pushed history entry over the Admin window's entry —
+  // { lorcanaAdminHub: view } on a fresh entry, the Library
+  // flip-binder pattern — so the phone back button pops the
+  // detail and lands on the hub, never out of the app. (The
+  // first build REPLACED the Admin window's own entry with
+  // the detail key instead: one Back then popped the whole
+  // Admin window and landed on Home — Anthony's Nov 4,
+  // 2026 report, Admin > Users > Back. Fixed in the
+  // app-wide back audit the same night.) The stored copy
+  // restores the same detail after a refresh in place. The
+  // collectors page stacks ABOVE a detail view exactly as
+  // it stacked above the dashboard before.
   type HubView =
     | "hub"
     | "users"
@@ -14449,6 +15012,13 @@ function AdminDashboard({
       : "hub";
   };
   const [hubView, setHubView] = useState<HubView>(readHubSeed);
+  // True while a detail view's own pushed entry is the top
+  // entry (seeded for a refresh that lands mid-detail, when
+  // the entry still carries its lorcanaAdminHub key).
+  const hubPushedRef = useRef(
+    typeof (readHistoryState() as { lorcanaAdminHub?: unknown } | null)
+      ?.lorcanaAdminHub === "string",
+  );
   useEffect(() => {
     const onPop = () => {
       const st = readHistoryState() as { lorcanaAdminHub?: unknown } | null;
@@ -14457,6 +15027,7 @@ function AdminDashboard({
         hubViews.includes(st.lorcanaAdminHub as HubView)
           ? (st.lorcanaAdminHub as HubView)
           : "hub";
+      if (v === "hub") hubPushedRef.current = false;
       setHubView(v);
     };
     window.addEventListener("popstate", onPop);
@@ -14472,18 +15043,53 @@ function AdminDashboard({
   }, [hubView, scope]);
   const openHubView = (view: HubView) => {
     hapticTick();
-    if (view !== "hub") {
-      // Three-back rule (Anthony, Nov 4, 2026): admin detail
-      // views are main-flow navigation — replace, never push.
-      replaceNavState({
-        ...(readNavState() ?? {}),
-        lorcanaAdminHub: view,
-      });
+    if (view === "hub") {
+      closeHubView();
+      return;
     }
     setHubView(view);
+    const cur = readNavState() ?? {};
+    if (hubPushedRef.current) {
+      // Already on a detail entry (detail-to-detail hop):
+      // rename the view in place, no second push.
+      replaceNavState({ ...cur, lorcanaAdminHub: view });
+      return;
+    }
+    try {
+      window.history.pushState(
+        {
+          ...cur,
+          lorcanaAdminHub: view,
+          vxDepth:
+            (typeof cur.vxDepth === "number" &&
+            Number.isFinite(cur.vxDepth)
+              ? cur.vxDepth
+              : 0) + 1,
+        },
+        "",
+      );
+      hubPushedRef.current = true;
+    } catch {
+      replaceNavState({ ...cur, lorcanaAdminHub: view });
+    }
   };
   const closeHubView = () => {
     hapticTick();
+    if (hubPushedRef.current) {
+      // Pop the detail's own entry; the popstate listener
+      // above lands hubView back on "hub".
+      window.history.back();
+      return;
+    }
+    // No pushed entry (the detail was restored from the
+    // stored copy after a refresh): close in place and
+    // scrub any stale key off the current entry.
+    const cur = readNavState();
+    if (cur && "lorcanaAdminHub" in cur) {
+      const next = { ...cur };
+      delete next.lorcanaAdminHub;
+      replaceNavState(next);
+    }
     setHubView("hub");
   };
   // Photo review queue (Anthony, Nov 4, 2026): accessory
@@ -14493,8 +15099,62 @@ function AdminDashboard({
   const photoQueue = useQuery({
     queryKey: ["pendingListingPhotos"],
     queryFn: () => api.getPendingListingPhotos({}),
+    staleTime: 60_000,
   });
-  const [photoReviewOpen, setPhotoReviewOpen] = useState(false);
+  // The review screen takes its OWN pushed entry over the
+  // hub's (app-wide back audit, Nov 4, 2026): as plain state
+  // it rode the Admin window's entry, so the phone's Back
+  // popped the whole Admin window to Home instead of
+  // returning to the hub. Seeded from the entry so a refresh
+  // mid-review restores the screen on its own entry.
+  const [photoReviewOpen, setPhotoReviewOpen] = useState(
+    () => readHistoryState()?.lorcanaAdminPhotos === true,
+  );
+  const photoPushedRef = useRef(photoReviewOpen);
+  const openPhotoReview = () => {
+    setPhotoReviewOpen(true);
+    if (photoPushedRef.current) return;
+    const cur = readNavState() ?? {};
+    try {
+      window.history.pushState(
+        {
+          ...cur,
+          lorcanaAdminPhotos: true,
+          vxDepth:
+            (typeof cur.vxDepth === "number" &&
+            Number.isFinite(cur.vxDepth)
+              ? cur.vxDepth
+              : 0) + 1,
+        },
+        "",
+      );
+      photoPushedRef.current = true;
+    } catch {
+      replaceNavState({ ...cur, lorcanaAdminPhotos: true });
+      photoPushedRef.current = false;
+    }
+  };
+  const closePhotoReview = () => {
+    if (photoPushedRef.current) {
+      window.history.back();
+    } else {
+      scrubWindowKeys(["lorcanaAdminPhotos"]);
+      setPhotoReviewOpen(false);
+    }
+  };
+  useEffect(() => {
+    const onPop = () => {
+      if (
+        photoPushedRef.current &&
+        readNavState()?.lorcanaAdminPhotos !== true
+      ) {
+        photoPushedRef.current = false;
+        setPhotoReviewOpen(false);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // Binder totals for the Catalog hub tile (shared cache with
   // the binder views — no extra fetch when warm).
   const binderForHub = useQuery({
@@ -14690,7 +15350,7 @@ function AdminDashboard({
               type="button"
               onClick={() => {
                 hapticTick();
-                setPhotoReviewOpen(true);
+                openPhotoReview();
               }}
               aria-label={`Photos needed for approval — ${photoQueue.data?.pending.length ?? 0} waiting. Open the review screen.`}
               className="mt-3 flex w-full items-center gap-3 rounded-2xl vx-changed-panel p-3.5 text-left transition active:scale-[0.99]"
@@ -14923,7 +15583,7 @@ function AdminDashboard({
           accessory photos one by one, each with its listing
           context, Approve / Reject per photo. */}
       {photoReviewOpen ? (
-        <PhotoReviewScreen onClose={() => setPhotoReviewOpen(false)} />
+        <PhotoReviewScreen onClose={closePhotoReview} />
       ) : null}
 
       {/* The dedicated Registered Users page, opened
@@ -17388,42 +18048,122 @@ function DecksSheet({
     decksQuery.isSuccess,
     friendDecksQuery.isSuccess,
   ]);
-  // Three-back rule (Anthony, Nov 4, 2026): an opened deck —
-  // its detail view, the builder, the collection check — is
-  // main-flow navigation, so entering any non-list mode
-  // REPLACES the single app entry instead of pushing; the
-  // device Back exits the app, and the in-page back controls
-  // route through backToList to return to the boxes in place.
+  // Back discipline (app-wide back audit, Anthony,
+  // Nov 4, 2026): an opened deck — its detail view, the
+  // builder, the collection check — takes its OWN pushed
+  // entry over the decks page's window entry (the Library
+  // flip-binder pattern), so the phone's Back returns to
+  // the deck boxes, never tears the whole page down to the
+  // profile underneath. The earlier replace-the-flag
+  // version meant the Back that fired was the page's own
+  // entry pop, closing everything at once. Stack: profile
+  // entry + decks entry + deck entry is exactly the
+  // three-back budget. The entry names the deck
+  // (lorcanaDeckDetail: <id>; true for a brand-new deck in
+  // the builder), so a refresh on an open deck restores
+  // that deck's page in place.
+  const detailPushedRef = useRef(
+    readNavState()?.lorcanaDeckDetail != null,
+  );
   const backToList = () => {
     setShareOpen(false);
     setShareNote(null);
-    setDeckMode({ kind: "list" });
+    if (detailPushedRef.current) {
+      // Pop the deck's own entry; the popstate trap below
+      // drops the mode back to the list.
+      window.history.back();
+    } else {
+      setDeckMode({ kind: "list" });
+    }
   };
   useEffect(() => {
     if (deckMode.kind !== "list") {
-      replaceNavState({
-        ...(readNavState() ?? {}),
-        lorcanaDeckDetail: true,
-      });
-    } else {
+      const id =
+        deckMode.kind === "build"
+          ? (deckMode.deck?.id ?? true)
+          : deckMode.deck.id;
+      const cur = readNavState() ?? {};
+      if (!detailPushedRef.current) {
+        try {
+          window.history.pushState(
+            {
+              ...cur,
+              lorcanaDeckDetail: id,
+              vxDepth:
+                (typeof cur.vxDepth === "number" &&
+                Number.isFinite(cur.vxDepth)
+                  ? cur.vxDepth
+                  : 0) + 1,
+            },
+            "",
+          );
+          detailPushedRef.current = true;
+        } catch {
+          replaceNavState({ ...cur, lorcanaDeckDetail: id });
+        }
+      } else if (cur.lorcanaDeckDetail !== id) {
+        // Deck-to-deck hop on the same pushed entry (view
+        // to check, or another deck): rename in place.
+        replaceNavState({ ...cur, lorcanaDeckDetail: id });
+      }
+    } else if (!detailPushedRef.current) {
+      // List mode with no pushed entry of ours: scrub a
+      // stale flag (e.g. left by a deck deleted elsewhere).
       const cur = readNavState();
-      if (cur?.lorcanaDeckDetail) {
+      if (cur?.lorcanaDeckDetail != null) {
         const next = { ...cur };
         delete next.lorcanaDeckDetail;
         replaceNavState(next);
       }
     }
-  }, [deckMode.kind]);
+  }, [deckMode]);
   useEffect(() => {
     const onPopState = () => {
-      // The detail no longer holds its own entry (three-back
-      // rule): a pop here means the app is exiting, so drop
-      // back to the list for a clean unmount.
-      setDeckMode({ kind: "list" });
+      // Only OUR entry's pop returns to the list — when the
+      // decks page's own entry pops (the page is closing),
+      // the host's trap handles the unmount.
+      if (
+        detailPushedRef.current &&
+        readNavState()?.lorcanaDeckDetail == null
+      ) {
+        detailPushedRef.current = false;
+        setOpeningDeck(null);
+        setDeckMode({ kind: "list" });
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+  // Refresh-in-place for an open deck: seeded from the
+  // entry the same way the profile deep link works — once
+  // the decks land, open the named deck's page directly
+  // (no box animation; the check view's data is not
+  // restorable, so a check refresh lands on the deck page).
+  const detailRestoreRef = useRef(false);
+  useEffect(() => {
+    if (detailRestoreRef.current) return;
+    const st = readNavState()?.lorcanaDeckDetail;
+    if (typeof st !== "number" || deckMode.kind !== "list") {
+      detailRestoreRef.current = true;
+      return;
+    }
+    const deck = displayedDecks.find((d) => d.id === st);
+    if (deck) {
+      detailRestoreRef.current = true;
+      setDeckMode({ kind: "view", deck });
+      return;
+    }
+    const loaded = isOwn
+      ? decksQuery.isSuccess
+      : friendDecksQuery.isSuccess;
+    if (loaded) detailRestoreRef.current = true;
+  }, [
+    displayedDecks,
+    deckMode.kind,
+    isOwn,
+    decksQuery.isSuccess,
+    friendDecksQuery.isSuccess,
+  ]);
   const copyDeckMut = useMutation({
     mutationFn: (deck: DeckViewT) =>
       api.copyDeck({
@@ -18059,10 +18799,15 @@ type DeckCheckT = ApiResponse<typeof api, "checkDeck">["check"];
     prices, Cost-to-complete style: copies with no tracked
     price are counted and disclosed, never guessed.
     Each buy-list card links straight to its TCGplayer
-    product page (click-only, carrying just the card's public
-    product ID) so the collector can shop for it there by
-    hand; Vault X never sends the list anywhere and never
-    buys anything itself. Back returns to the deck this
+    product page so the collector can shop for it there by
+    hand — and (restored Nov 4, 2026, at Anthony's explicit
+    direction) the whole buy list can be sent to the
+    collector's Muse from here: one tap, one in-app
+    confirmation, and the server hands over just the missing
+    copies' TCGplayer product IDs and quantities; the Muse
+    builds the cart on TCGplayer under the collector's
+    sign-in and never checks out — final payment approval
+    stays the collector's. Back returns to the deck this
     check came from. */
 function DeckCheckView({
   deck,
@@ -18079,6 +18824,62 @@ function DeckCheckView({
   isOwnDeck: boolean;
   onBack: () => void;
 }) {
+  // Buy-list hand-off state (restored Nov 4, 2026): idle →
+  // confirm (the panel states exactly what will be sent) →
+  // sending → sent / error. The server re-runs the check and
+  // sends only the missing copies, so what goes out always
+  // matches the collection as it stands at send time.
+  const [buyStep, setBuyStep] = useState<
+    "idle" | "confirm" | "sending" | "sent" | "error"
+  >("idle");
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [buySent, setBuySent] = useState<{
+    products: number;
+    copies: number;
+    skippedNoId: number;
+  } | null>(null);
+  const sendableLines = check.buyList.filter(
+    (l) => l.tcgplayerId != null,
+  );
+  const sendableProducts = new Set(
+    sendableLines.map((l) => l.tcgplayerId),
+  ).size;
+  const sendableCopies = sendableLines.reduce(
+    (sum, l) => sum + l.shortfall,
+    0,
+  );
+  const skippedCopies =
+    check.needTotal - sendableCopies;
+  const sendBuyList = async () => {
+    setBuyStep("sending");
+    setBuyError(null);
+    try {
+      const res = await api.requestDeckBuyList({
+        lines: deck.cards.map((c) => ({
+          cardId: c.cardId,
+          qty: c.qty,
+        })),
+        confirmed: true,
+      });
+      if (res.ok) {
+        hapticConfirm();
+        setBuySent({
+          products: res.products,
+          copies: res.copies,
+          skippedNoId: res.skippedNoId,
+        });
+        setBuyStep("sent");
+      } else {
+        setBuyError(res.error ?? "The hand-off didn't start — try again.");
+        setBuyStep("error");
+      }
+    } catch {
+      setBuyError(
+        "The hand-off didn't start — your Muse couldn't be reached. Nothing was sent; try again in a moment.",
+      );
+      setBuyStep("error");
+    }
+  };
   return (
     <div className="mt-4">
       <button
@@ -18184,11 +18985,114 @@ function DeckCheckView({
             })}
           </ul>
           <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
-            Each card above links straight to its TCGplayer
-            product page — open one to shop for that card
-            there. Vault X never sends this list anywhere and
-            never buys anything itself.
+            Shop either way: each card above links straight to
+            its TCGplayer product page if you want to open it
+            and shop for it yourself — or send the whole list
+            to your Muse and have it build the cart for you.
           </p>
+          {sendableCopies > 0 ? (
+            <div className="mt-3">
+              {buyStep === "idle" || buyStep === "error" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setBuyStep("confirm")}
+                    className="w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)]"
+                  >
+                    Send buy list to my Muse
+                  </button>
+                  {buyStep === "error" ? (
+                    <p
+                      role="alert"
+                      className="mt-2 text-xs leading-relaxed text-red-300"
+                    >
+                      {buyError}
+                    </p>
+                  ) : null}
+                </>
+              ) : buyStep === "confirm" || buyStep === "sending" ? (
+                <div className="rounded-xl border border-[var(--accent)]/50 bg-[var(--bg)] p-3">
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    Send this buy list to your Muse?
+                  </p>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
+                    Your Muse gets just the cards you're
+                    missing for {deck.name} — their TCGplayer
+                    product IDs and quantities (
+                    {sendableProducts}{" "}
+                    {sendableProducts === 1
+                      ? "product"
+                      : "products"}
+                    , {sendableCopies}{" "}
+                    {sendableCopies === 1 ? "copy" : "copies"}
+                    ). Nothing else from your collection is
+                    sent. Your Muse builds the cart on
+                    TCGplayer under your sign-in — Near Mint,
+                    keeping single-card shipping at $3 or under
+                    where it can — and never checks out or
+                    pays. You review the cart and approve
+                    payment yourself.
+                  </p>
+                  {skippedCopies > 0 ? (
+                    <p className="mt-1.5 text-xs leading-relaxed text-[var(--dim)]">
+                      {skippedCopies}{" "}
+                      {skippedCopies === 1
+                        ? "missing copy has"
+                        : "missing copies have"}{" "}
+                      no TCGplayer product ID, so{" "}
+                      {skippedCopies === 1
+                        ? "it can't"
+                        : "they can't"}{" "}
+                      be sent.
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void sendBuyList()}
+                      disabled={buyStep === "sending"}
+                      className="flex-1 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-[var(--on-accent)] disabled:opacity-50"
+                    >
+                      {buyStep === "sending"
+                        ? "Sending…"
+                        : "Send to my Muse"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBuyStep("idle")}
+                      disabled={buyStep === "sending"}
+                      className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p
+                  role="status"
+                  className="rounded-xl border border-emerald-400/40 bg-[var(--bg)] px-3 py-2.5 text-sm leading-relaxed text-emerald-300"
+                >
+                  Sent ✓ — your Muse is on it:{" "}
+                  {buySent
+                    ? `${buySent.copies} ${buySent.copies === 1 ? "copy" : "copies"} on their way to a TCGplayer cart. `
+                    : ""}
+                  It will check in with you in chat with the
+                  cart ready for your review. Nothing gets
+                  checked out without your approval.
+                  {buySent && buySent.skippedNoId > 0
+                    ? ` ${buySent.skippedNoId} ${buySent.skippedNoId === 1 ? "copy has" : "copies have"} no TCGplayer product ID and ${buySent.skippedNoId === 1 ? "wasn't" : "weren't"} sent.`
+                    : ""}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed text-[var(--dim)]">
+              None of the missing cards carry a TCGplayer
+              product ID, so there is no list to send your
+              Muse — they stay listed above with everything
+              the app knows about them.
+            </p>
+          )}
         </>
       ) : (
         <p
@@ -18267,7 +19171,9 @@ function DeckBuilder({
   const candidates = useQuery({
     queryKey: ["deckCandidates", search],
     queryFn: () => api.getDeckCandidates({ search }),
-    enabled: search.trim().length >= 2,
+    // First-letter typeahead (standing search rule, Nov 5, 2026).
+    enabled: search.trim().length >= 1,
+    placeholderData: (prev) => prev,
   });
   const total = [...lines.values()].reduce((s, q) => s + q, 0);
   const nameCount = (fullName: string, exceptId?: number) => {
@@ -18462,7 +19368,7 @@ function DeckBuilder({
         placeholder="Search your cards by name…"
         className="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-base text-[var(--text)] placeholder:text-[var(--dim)]"
       />
-      {search.trim().length >= 2 ? (
+      {search.trim().length >= 1 ? (
         <ul className="mt-2 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
           {candidates.isPending ? (
             <li className="px-3 py-2.5 text-sm text-[var(--dim)]">
@@ -18725,25 +19631,36 @@ function CashIcon() {
 }
 
 /** The Zelle mark (Anthony, Nov 3, 2026; restyled the same
-    day, 2:04 PM): originally Zelle's brand treatment — a
-    solid purple rounded square with a white Z — but he
-    directed it toned down to an OUTLINED / line-art version
-    matching the cash (dollar bill) icon it sits beside:
-    a thin neutral outline in the current text color, no
-    fill at all, the Z drawn in the same color and weight.
-    Still reads as Zelle at a glance, at the same sizes,
-    everywhere it appears (the split button's cash segment,
-    the "Pay the seller" line on a purchase order,
-    Settings > Payment info). Decorative; the text next to
-    it carries the meaning. */
-function ZelleMark({ className = "h-4 w-4 text-[10px]" }: { className?: string }) {
+    day, 2:04 PM; RECONSTRUCTED Nov 4, 2026, evening): the
+    Nov 3 version toned Zelle's brand treatment down to a
+    thin outlined square with a text Z, matching the cash
+    (dollar bill) icon it sits beside. Anthony's Nov 4
+    direction: rebuild it BUBBLY like that cash icon — so it
+    is now drawn the same way, as stroke line art: a plump
+    squircle (generous corner radius, the cash icon's own
+    1.9 stroke weight, round caps) with the Z itself drawn
+    as a rounded stroke path inside it, a touch bolder.
+    Still line art in the current text color with no fill —
+    per his standing direction it must NOT come back as a
+    clashing solid block — and still reads as Zelle at a
+    glance, at the same sizes, everywhere it appears (the
+    split button's cash segment, the "Pay the seller" line
+    on a purchase order, Settings > Payment info).
+    Decorative; the text next to it carries the meaning. */
+function ZelleMark({ className = "h-4 w-4" }: { className?: string }) {
   return (
-    <span
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-current bg-transparent font-black leading-none ${className}`}
+      className={`shrink-0 ${className}`}
     >
-      Z
-    </span>
+      <rect x="2.6" y="2.6" width="18.8" height="18.8" rx="6.8" strokeWidth="1.9" />
+      <path d="M8.4 8.8h7.2l-7.2 6.4h7.2" strokeWidth="2.15" />
+    </svg>
   );
 }
 
@@ -19519,6 +20436,35 @@ type LibraryEntry = {
       its own signed shelf, a spine per line/theme he owns
       at least one item in. */
   section: "chapters" | "promos" | "quests" | "comics" | "funko" | "lego";
+  /** Funko entries carry the owned figure's real product
+      photo (Anthony, Nov 4, 2026): the Funko shelf displays
+      the actual item, never a book spine — books are for card
+      binders. When set, LibrarySpine renders the photo tile.
+      Lego entries carry their set's real photo the same way
+      (Anthony, Nov 4, 2026, late): a Lego set is not a book
+      either — the shelf shows the actual set, not a spine. */
+  imageUrl?: string | null;
+  /** For per-item game entries: the catalog section the item
+      lives in, so opening the tile lands in that section. */
+  gameSectionKey?: string;
+  /** For per-item game entries: the item's game_cards id —
+      the photo tile's background-removal proxy key. */
+  gameCardId?: number;
+  /** For per-item game entries that open straight into the
+      item's own detail page (Lego sets): the detail-sheet
+      payload the open-game-section handoff carries. */
+  gameCard?: {
+    id: number;
+    name: string;
+    printed: string;
+    sectionName: string;
+    rarity: string | null;
+    finish: string | null;
+    imageUrl: string | null;
+    price: number | null;
+    ownedQty: number;
+    ownedSealedQty: number;
+  };
 };
 
 /** One Library spine: a light TAP peeks — a small floating
@@ -19537,40 +20483,250 @@ function LibrarySpine({
   selected,
   onPeek,
   onOpen,
+  arrangeable = false,
+  registerEl,
+  onDragLift,
 }: {
   entry: LibraryEntry;
   index: number;
   selected: boolean;
   onPeek: (entry: LibraryEntry, tapRect: DOMRect) => void;
   onOpen: (entry: LibraryEntry) => void;
+  /** Drag-to-reorder (Anthony, Nov 4, 2026 — the Home tile
+      drag applied to the Library, owner's Library only): a
+      hold LIFTS the spine at 400ms instead of opening it;
+      moving then drags it (the page takes over via onDragLift),
+      while a hold released without moving still opens the
+      binder, so the confirmed tap/hold model survives. */
+  arrangeable?: boolean;
+  registerEl?: (id: string, el: HTMLElement | null) => void;
+  onDragLift?: (
+    entry: LibraryEntry,
+    el: HTMLElement,
+    x: number,
+    y: number,
+  ) => { moved: boolean };
 }) {
   const timerRef = useRef<number | null>(null);
   const openedRef = useRef(false);
+  const rootRef = useRef<HTMLButtonElement | null>(null);
+  const liftSessionRef = useRef<{ moved: boolean } | null>(null);
+  const liftedRef = useRef(false);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+  const holdWatchRef = useRef<(() => void) | null>(null);
   const cancelHold = () => {
     if (timerRef.current != null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
   };
-  const startHold = () => {
+  const startHold = (x: number, y: number) => {
     openedRef.current = false;
+    liftSessionRef.current = null;
+    liftedRef.current = false;
+    lastPosRef.current = { x, y };
     cancelHold();
+    holdWatchRef.current?.();
+    holdWatchRef.current = null;
+    if (arrangeable && onDragLift && rootRef.current) {
+      // Hold watch (Nov 5, 2026 — the Library drag fix): the
+      // spine is 26px wide, so a resting thumb drifting a few
+      // pixels used to fire pointerleave and cancel the hold
+      // before the lift — the drag simply never started on a
+      // real phone. The hold now answers to WINDOW pointer
+      // movement with the shared 14px drift budget instead:
+      // drift inside the budget keeps the hold (and feeds the
+      // lift's start point), drift past it cancels, and a
+      // pointerleave alone cancels nothing.
+      const sx = x;
+      const sy = y;
+      const stopWatch = () => {
+        window.removeEventListener("pointermove", onWatchMove);
+        window.removeEventListener("pointerup", stopWatch);
+        window.removeEventListener("pointercancel", stopWatch);
+        if (holdWatchRef.current === stopWatch)
+          holdWatchRef.current = null;
+      };
+      const onWatchMove = (ev: PointerEvent) => {
+        lastPosRef.current = { x: ev.clientX, y: ev.clientY };
+        if (
+          !liftedRef.current &&
+          Math.hypot(ev.clientX - sx, ev.clientY - sy) > 14
+        ) {
+          cancelHold();
+          if (rootRef.current)
+            rootRef.current.style.touchAction = "";
+          stopWatch();
+        }
+      };
+      window.addEventListener("pointermove", onWatchMove);
+      window.addEventListener("pointerup", stopWatch);
+      window.addEventListener("pointercancel", stopWatch);
+      holdWatchRef.current = stopWatch;
+      // Lock the touch action synchronously so the browser
+      // cannot steal the coming drag into a page scroll (the
+      // Home tile drag's lesson).
+      rootRef.current.style.touchAction = "none";
+      const el = rootRef.current;
+      timerRef.current = window.setTimeout(() => {
+        liftedRef.current = true;
+        hapticTick();
+        liftSessionRef.current = onDragLift(
+          entry,
+          el,
+          lastPosRef.current.x,
+          lastPosRef.current.y,
+        );
+      }, 400);
+      return;
+    }
     timerRef.current = window.setTimeout(() => {
       openedRef.current = true;
       hapticTick();
       onOpen(entry);
     }, 550);
   };
+  const endHold = () => {
+    holdWatchRef.current?.();
+    holdWatchRef.current = null;
+    cancelHold();
+    if (rootRef.current) rootRef.current.style.touchAction = "";
+    if (liftedRef.current) {
+      liftedRef.current = false;
+      // Hold released without a drag: the hold still opens
+      // the binder, exactly as before.
+      if (liftSessionRef.current && !liftSessionRef.current.moved) {
+        openedRef.current = true;
+        onOpen(entry);
+      }
+    }
+  };
+  const leaveHold = () => {
+    // Once lifted, the drag session owns the pointer until
+    // its own pointerup — a leave mid-drag cancels nothing.
+    // Before the lift, leaving the element no longer cancels
+    // either (the hold watch's drift budget governs).
+    if (liftedRef.current) return;
+  };
+  const cancelGesture = () => {
+    // A genuine pointercancel (the browser took the gesture
+    // over) still cancels a hold that has not lifted yet.
+    if (liftedRef.current) return;
+    holdWatchRef.current?.();
+    holdWatchRef.current = null;
+    cancelHold();
+    if (rootRef.current) rootRef.current.style.touchAction = "";
+  };
+  const setRootEl = (el: HTMLButtonElement | null) => {
+    rootRef.current = el;
+    registerEl?.(entry.id, el);
+  };
+  if (entry.imageUrl) {
+    // Displayed figure (Anthony, Nov 4, 2026; presentation
+    // corrected the same evening; Lego sets joined the same
+    // night — a Lego set is not a book either): entries that
+    // carry a real product photo (Funko figures, Lego sets)
+    // display the ACTUAL item
+    // standing on the shelf — never a book spine, and no
+    // longer a framed picture either. His evening direction:
+    // the photo's white studio background GOES AWAY (the
+    // figure is cut out on-device, see cutoutImg.tsx), the
+    // figure is sized UP a little, and its base rests ON the
+    // shelf board — the tile is frameless, the figure is
+    // bottom-aligned so its base lands exactly on the shelf
+    // row's bottom edge where the board begins, with a soft
+    // drop shadow grounding it. The name rides at the base
+    // like a little display plaque in front of the figure.
+    // Same tap-to-peek / hold-to-open model as the spines.
+    // Sized up 30 percent (Anthony, Nov 5, 2026): after the
+    // Millennium Falcon and TIE Fighter cutout fixes landed,
+    // he asked for both figures about 30 percent bigger —
+    // the tile grows from 104x144 to 135x187, and the cutout
+    // inside (max-h-full / max-w-full) grows with it.
+    return (
+      <button
+        type="button"
+        aria-label={`${entry.title} — ${entry.detail}. Tap to peek; press and hold to open it.`}
+        aria-pressed={selected}
+        ref={setRootEl}
+        data-library-entry=""
+        onPointerDown={(e) => startHold(e.clientX, e.clientY)}
+        onPointerUp={endHold}
+        onPointerLeave={leaveHold}
+        onPointerCancel={cancelGesture}
+        onClick={(e) => {
+          if (liftSessionRef.current?.moved) {
+            liftSessionRef.current = null;
+            return;
+          }
+          if (openedRef.current) {
+            openedRef.current = false;
+            return;
+          }
+          hapticTick();
+          onPeek(entry, e.currentTarget.getBoundingClientRect());
+        }}
+        className={`relative flex shrink-0 flex-col rounded-md transition active:scale-[0.97] ${
+          entry.section === "funko" || entry.section === "lego"
+            ? // Photo shelves (Funko, Lego) share one level
+              // evenly: up to three figures/sets split the
+              // shelf width at equal size instead of the
+              // fixed 135px tile wrapping 2-over-1 (Nov 5,
+              // 2026 — the Lego shelf spacing report). The
+              // 135px cap keeps the approved size on wider
+              // screens; the aspect keeps the 135x187 shape.
+              "aspect-[135/187] h-auto w-[calc(33.333%-4px)] max-w-[135px] grow-0"
+            : "h-[187px] w-[135px]"
+        } ${selected ? "ring-2 ring-[var(--accent)]" : ""}`}
+      >
+        <span className="absolute inset-0 flex items-end justify-center">
+          <CutoutImg
+            src={entry.imageUrl}
+            alt={entry.title}
+            placeholderText="No photo"
+            proxyId={entry.gameCardId}
+            className="max-h-full max-w-full object-contain drop-shadow-[0_10px_10px_rgba(0,0,0,0.45)]"
+          />
+        </span>
+        {/* Name plaque REMOVED for the two display pieces
+            Anthony named (Nov 5, 2026): the Millennium
+            Falcon and the TIE Fighter sit on the shelf with
+            NO name text under them — he confirmed both look
+            perfect as they sit, and the label goes. The
+            pieces keep their names in their detail pages and
+            catalog listings, and the tile's aria-label still
+            names them for accessibility; other shelf pieces
+            keep their plaques. */}
+        {/millennium falcon|tie fighter/i.test(entry.title) ? null : (
+          <>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-black/55 to-transparent"
+            />
+            <span className="absolute inset-x-0 bottom-0 truncate px-1 pb-0.5 text-center text-[9px] font-semibold leading-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+              {entry.title}
+            </span>
+          </>
+        )}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       aria-label={`${entry.title} binder — ${entry.detail}. Tap to peek; press and hold to open it.`}
       aria-pressed={selected}
-      onPointerDown={startHold}
-      onPointerUp={cancelHold}
-      onPointerLeave={cancelHold}
-      onPointerCancel={cancelHold}
+      ref={setRootEl}
+      data-library-entry=""
+      onPointerDown={(e) => startHold(e.clientX, e.clientY)}
+      onPointerUp={endHold}
+      onPointerLeave={leaveHold}
+      onPointerCancel={cancelGesture}
       onClick={(e) => {
+        if (liftSessionRef.current?.moved) {
+          liftSessionRef.current = null;
+          return;
+        }
         if (openedRef.current) {
           openedRef.current = false;
           return;
@@ -20551,53 +21707,101 @@ function ScaledSlabFront({ comic }: { comic: Comic }) {
     Kirkham). Tapping a slab opens that comic's detail sheet,
     float-and-turn view and all. */
 function LibraryComicWall() {
-  const queryClient = useQueryClient();
   const display = useQuery({
     queryKey: ["libraryComicDisplay"],
     queryFn: () => api.getLibraryComicDisplay({}),
   });
-  const [openComic, setOpenComic] = useState<Comic | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string[]>([]);
+  // Edit display MOVED (Anthony, Nov 5, 2026): the picker
+  // no longer lives on the Library page — he did not like
+  // the control sitting here. The wall is display-only now;
+  // choosing which slabs hang here (max five) happens in
+  // the Comics section itself (LibraryDisplayPicker in
+  // comics.tsx), writing the same getLibraryComicDisplay /
+  // setLibraryComicDisplay setting, so this wall simply
+  // renders whatever is chosen there.
+  const [openComic, setOpenComicState] = useState<Comic | null>(null);
+  // Back audit (Anthony, Nov 5, 2026): a comic opened from
+  // the wall is a window ABOVE the Library window, so it
+  // takes its OWN pushed entry (the useOwnEntryWindow
+  // pattern): one Back press closes the comic and lands
+  // back on the Library. Before this fix the sheet was
+  // plain state with no trap, so the phone's Back popped
+  // the Library's entry and dumped the whole Library
+  // instead of just closing the comic.
+  const comicWin = useOwnEntryWindow("libraryComicSheet", (v) => {
+    if (!v) setOpenComicState(null);
+  });
+  const openWallComic = (comic: Comic) => {
+    hapticTick();
+    setOpenComicState(comic);
+    comicWin.open();
+  };
+  const DEFAULT_WALL = ["aliens-1", "batman-136"];
+  const chosen = display.data?.ids ?? DEFAULT_WALL;
+  // Non-card shelf items long-hold rearrange (Anthony,
+  // Nov 5, 2026): the slabs hanging on this wall are
+  // display objects, not binders — they carry the same
+  // shared long-hold drag as every other shelf item, and
+  // the wall's order saves through the same display
+  // setting that chooses which slabs hang here. A local
+  // override holds the dropped order until the saved
+  // setting reads back with it.
+  const queryClient = useQueryClient();
+  const [orderOverride, setOrderOverride] = useState<string[] | null>(
+    null,
+  );
+  useEffect(() => {
+    const savedIds = display.data?.ids;
+    if (
+      orderOverride &&
+      savedIds &&
+      savedIds.join() === orderOverride.join()
+    ) {
+      setOrderOverride(null);
+    }
+  }, [display.data, orderOverride]);
   const saveDisplay = useMutation({
-    mutationFn: (ids: string[]) =>
-      api.setLibraryComicDisplay({ ids }),
+    mutationFn: (ids: string[]) => api.setLibraryComicDisplay({ ids }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["libraryComicDisplay"],
       });
-      setEditing(false);
     },
   });
-  const DEFAULT_WALL = ["aliens-1", "batman-136"];
-  const chosen = display.data?.ids ?? DEFAULT_WALL;
-  const shown = chosen
+  const effectiveIds = orderOverride ?? chosen;
+  const shown = effectiveIds
     .map((id) => COMICS.find((c) => c.id === id))
     .filter((c): c is Comic => Boolean(c));
-  const toggleDraft = (id: string) => {
-    setDraft((d) =>
-      d.includes(id)
-        ? d.filter((x) => x !== id)
-        : d.length >= 5
-          ? d
-          : [...d, id],
-    );
-  };
+  const wallDrag = useDragReorder({
+    keys: shown.map((c) => c.id),
+    onCommit: (order) => {
+      const rest = effectiveIds.filter((id) => !order.includes(id));
+      const next = [...order, ...rest].slice(0, 5);
+      setOrderOverride(next);
+      saveDisplay.mutate(next);
+    },
+  });
   return (
     <div>
       {shown.length > 0 ? (
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 pb-3 pt-4">
-          <div className="flex flex-wrap items-end justify-center gap-3">
+          <div
+            ref={wallDrag.containerRef}
+            className="flex flex-wrap items-end justify-center gap-3"
+          >
             {shown.map((comic) => (
               <button
                 key={comic.id}
                 type="button"
+                {...wallDrag.itemProps(comic.id)}
                 onClick={() => {
-                  hapticTick();
-                  setOpenComic(comic);
+                  if (wallDrag.suppressClick()) return;
+                  openWallComic(comic);
                 }}
                 aria-label={`Open ${comic.title}`}
-                className="w-[30%] max-w-[130px] shrink-0 transition active:scale-[0.98]"
+                className={`w-[30%] max-w-[130px] shrink-0 transition active:scale-[0.98] ${
+                  wallDrag.draggingKey === comic.id ? "z-30" : ""
+                }`}
               >
                 <ScaledSlabFront comic={comic} />
                 <span className="mt-1.5 block truncate text-center text-[11px] font-semibold text-[var(--text)]">
@@ -20606,6 +21810,12 @@ function LibraryComicWall() {
               </button>
             ))}
           </div>
+          {shown.length > 1 ? (
+            <p className="mt-2 text-center text-[11px] leading-relaxed text-[var(--dim)]">
+              Hold a slab a moment, then drag to rearrange the
+              wall — the order saves as yours.
+            </p>
+          ) : null}
           <div
             aria-hidden="true"
             className="mt-3 h-[6px] rounded bg-gradient-to-b from-[#3d5086] to-[#141f3d] shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
@@ -20614,78 +21824,10 @@ function LibraryComicWall() {
       ) : (
         <p className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--dim)]">
           No slabs on display — choose up to five of your graded
-          comics to hang here.
+          comics to hang here from Edit display in the Comics
+          section.
         </p>
       )}
-      <div className="mt-2.5 flex justify-center">
-        <button
-          type="button"
-          onClick={() => {
-            hapticTick();
-            setDraft(chosen);
-            setEditing((v) => !v);
-          }}
-          aria-expanded={editing}
-          className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-xs font-semibold text-[var(--gold-soft)]"
-        >
-          {editing ? "Close the display picker" : "Edit display"}
-        </button>
-      </div>
-      {editing ? (
-        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
-          <p className="text-sm font-semibold text-[var(--text)]">
-            On the wall — {draft.length} of 5
-          </p>
-          <p className="mt-0.5 text-xs text-[var(--dim)]">
-            Tap your comics to add or remove them. The wall holds
-            at most five.
-          </p>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {COMICS.map((comic) => {
-              const on = draft.includes(comic.id);
-              const full = !on && draft.length >= 5;
-              return (
-                <button
-                  key={comic.id}
-                  type="button"
-                  disabled={full}
-                  onClick={() => toggleDraft(comic.id)}
-                  aria-pressed={on}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                    on
-                      ? "bg-[var(--gold)] text-black"
-                      : "border border-[var(--border)] text-[var(--text)] disabled:opacity-40"
-                  }`}
-                >
-                  {comic.title}
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              disabled={saveDisplay.isPending}
-              onClick={() => saveDisplay.mutate(draft)}
-              className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
-            >
-              {saveDisplay.isPending ? "Saving…" : "Save display"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--text)]"
-            >
-              Cancel
-            </button>
-          </div>
-          {saveDisplay.isError ? (
-            <p role="alert" className="mt-2 text-xs text-red-400">
-              That didn't save — try again.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
       {openComic ? (
         /* The Library overlay sits at z-70 and ComicSheet's own
             root is z-50 — this wrapper's stacking context lifts
@@ -20693,7 +21835,7 @@ function LibraryComicWall() {
         <div className="fixed inset-0 z-[80]">
           <ComicSheet
             comic={openComic}
-            onClose={() => setOpenComic(null)}
+            onClose={() => comicWin.close()}
           />
         </div>
       ) : null}
@@ -20707,11 +21849,18 @@ function LibraryPage({
   onClose,
   onOpenEntry,
   comicsWall,
+  arrangeable = false,
 }: {
   ownerName: string;
   entries: LibraryEntry[];
   onClose: () => void;
   onOpenEntry: (entry: LibraryEntry) => void;
+  /** The owner's OWN Library (Anthony, Nov 4, 2026): shelves
+      and everything on them can be long-press dragged into a
+      new order, saved per user (getLibraryOrder /
+      saveLibraryOrder). Friends' libraries render the natural
+      order and never offer the drag. */
+  arrangeable?: boolean;
   /** The Comics slab display wall (Anthony, Nov 4, 2026):
       on the owner's own Library, the Comics binder spine is
       REPLACED by this wall of chosen slabs (max five). When
@@ -20728,6 +21877,21 @@ function LibraryPage({
     entry: LibraryEntry;
     rect: DOMRect;
   } | null>(null);
+  // Back audit (Anthony, Nov 5, 2026): the peek is a
+  // floating window ABOVE the Library, so it takes its OWN
+  // pushed entry (useOwnEntryWindow) — one Back press
+  // closes just the peek and lands back on the Library
+  // shelves. Before this fix the peek was plain state, so
+  // the phone's Back popped the Library's entry and closed
+  // the whole Library with it.
+  const peekWin = useOwnEntryWindow("libraryPeek", (v) => {
+    if (!v) setPeek(null);
+  });
+  const openPeek = (entry: LibraryEntry, rect: DOMRect) => {
+    setPeek({ entry, rect });
+    peekWin.open();
+  };
+  const closePeek = () => peekWin.close();
   // Shelves by family (Anthony, Nov 3, 2026, ~11:36 AM,
   // refined ~11:54 AM): every shelf holds ONE family,
   // filled as full as the page width allows before the
@@ -20756,22 +21920,295 @@ function LibraryPage({
     "funko",
     "lego",
   ];
+  // Saved arrangement (Anthony, Nov 4, 2026): the owner's own
+  // section order and per-section entry order. Anything not
+  // listed keeps its natural place after the listed ids, so
+  // newly owned binders append until arranged.
+  const queryClient = useQueryClient();
+  const orderQ = useQuery({
+    queryKey: ["libraryOrder"],
+    queryFn: () => api.getLibraryOrder({}),
+    enabled: arrangeable,
+  });
+  const [ordSections, setOrdSections] = useState<string[]>([]);
+  const [ordEntries, setOrdEntries] = useState<string[]>([]);
+  const ordSectionsRef = useRef<string[]>([]);
+  const ordEntriesRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (!orderQ.data) return;
+    setOrdSections(orderQ.data.sections);
+    setOrdEntries(orderQ.data.entries);
+    ordSectionsRef.current = orderQ.data.sections;
+    ordEntriesRef.current = orderQ.data.entries;
+  }, [orderQ.data]);
+  const saveOrder = useMutation({
+    mutationFn: (o: { sections: string[]; entries: string[] }) =>
+      api.saveLibraryOrder(o),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["libraryOrder"],
+      });
+    },
+  });
+  const applyOrder = <T extends string>(ids: T[], order: string[]): T[] => {
+    const idx = new Map(order.map((id, i) => [id, i] as const));
+    return [...ids].sort(
+      (a, b) =>
+        (idx.get(a) ?? Number.MAX_SAFE_INTEGER) -
+        (idx.get(b) ?? Number.MAX_SAFE_INTEGER),
+    );
+  };
+  const orderedSections = applyOrder(
+    SECTION_ORDER as string[],
+    ordSections,
+  ) as LibraryEntry["section"][];
+  const entryById = new Map(entries.map((e) => [e.id, e] as const));
+  const sectionLists = new Map<
+    LibraryEntry["section"],
+    LibraryEntry[]
+  >();
+  for (const section of SECTION_ORDER) {
+    const ids = applyOrder(
+      entries.filter((e) => e.section === section).map((e) => e.id),
+      ordEntries,
+    );
+    sectionLists.set(
+      section,
+      ids
+        .map((id) => entryById.get(id))
+        .filter((e): e is LibraryEntry => e != null),
+    );
+  }
   const shelves: {
     section: LibraryEntry["section"];
     list: LibraryEntry[];
     start: number;
   }[] = [];
   let shelfRunning = 0;
-  for (const section of SECTION_ORDER) {
+  for (const section of orderedSections) {
     // With the slab wall in place, Comics has no spines.
     if (section === "comics" && comicsWall) continue;
-    const list = entries.filter((e) => e.section === section);
+    const list = sectionLists.get(section) ?? [];
     for (let i = 0; i < list.length; i += shelfCapacity) {
       const slice = list.slice(i, i + shelfCapacity);
       shelves.push({ section, list: slice, start: shelfRunning });
       shelfRunning += slice.length;
     }
   }
+  // Section blocks group a family's boards under ONE sign, so
+  // a shelf drag moves the whole family at once.
+  const sectionBlocks: {
+    section: LibraryEntry["section"];
+    boards: typeof shelves;
+  }[] = [];
+  for (const section of orderedSections) {
+    if (section === "comics" && comicsWall) {
+      sectionBlocks.push({ section, boards: [] });
+      continue;
+    }
+    const boards = shelves.filter((s) => s.section === section);
+    if (boards.length > 0) sectionBlocks.push({ section, boards });
+  }
+
+  // The drag sessions read the section lists through this
+  // ref so consecutive swaps inside one drag build on each
+  // other, not on the render the drag started in.
+  const sectionListsRef = useRef(sectionLists);
+  sectionListsRef.current = sectionLists;
+
+  // ---- Long-press drag-to-reorder (Anthony, Nov 4, 2026) ----
+  // Same contract as the Home tile drag: hold ~400ms to lift,
+  // drag with the finger, swaps happen live, the drop commits
+  // once and saves. Sessions run on window listeners with the
+  // dragged element following by direct transform, so no
+  // re-render happens per pointer move — only per swap.
+  const entryElsRef = useRef(new Map<string, HTMLElement>());
+  const sectionElsRef = useRef(new Map<string, HTMLElement>());
+  const registerEntryEl = (id: string, el: HTMLElement | null) => {
+    if (el) entryElsRef.current.set(id, el);
+    else entryElsRef.current.delete(id);
+  };
+  const flattenEntryOrder = (
+    lists: Map<LibraryEntry["section"], LibraryEntry[]>,
+  ): string[] =>
+    orderedSections.flatMap((s) =>
+      (lists.get(s) ?? []).map((e) => e.id),
+    );
+  const beginEntryDrag = (
+    entry: LibraryEntry,
+    el: HTMLElement,
+    startX: number,
+    startY: number,
+  ): { moved: boolean } => {
+    const session = { moved: false };
+    const section = entry.section;
+    // Scroll lock for the drag's duration (Nov 5, 2026):
+    // the shared drag hook's contract — the page must not
+    // scroll under an item drag on any surface where the
+    // button's own touch-action lock does not hold.
+    let scroller: HTMLElement | null = el.parentElement;
+    while (scroller) {
+      const oy = window.getComputedStyle(scroller).overflowY;
+      if (oy === "auto" || oy === "scroll") break;
+      scroller = scroller.parentElement;
+    }
+    const prevScrollerOverflow = scroller?.style.overflow ?? "";
+    if (scroller) scroller.style.overflow = "hidden";
+    const blockTouchScroll = (ev: TouchEvent) =>
+      ev.preventDefault();
+    document.addEventListener("touchmove", blockTouchScroll, {
+      passive: false,
+    });
+    el.style.zIndex = "30";
+    el.style.position = "relative";
+    el.style.boxShadow = "0 14px 34px rgba(0,0,0,0.6)";
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (Math.abs(dx) + Math.abs(dy) > 10) session.moved = true;
+      el.style.transform = `translate(${dx}px, ${dy}px) scale(1.06)`;
+      if (!session.moved) return;
+      // Hit-test the other spines of the SAME family: crossing
+      // one swaps the two in the saved order, live.
+      for (const [otherId, otherEl] of entryElsRef.current) {
+        if (otherId === entry.id) continue;
+        const r = otherEl.getBoundingClientRect();
+        if (
+          ev.clientX >= r.left &&
+          ev.clientX <= r.right &&
+          ev.clientY >= r.top &&
+          ev.clientY <= r.bottom
+        ) {
+          const lists = new Map(sectionListsRef.current);
+          const list = [...(lists.get(section) ?? [])];
+          const a = list.findIndex((e) => e.id === entry.id);
+          const b = list.findIndex((e) => e.id === otherId);
+          if (a >= 0 && b >= 0 && a !== b) {
+            const tmp = list[a]!;
+            list[a] = list[b]!;
+            list[b] = tmp;
+            lists.set(section, list);
+            sectionListsRef.current = lists;
+            const flat = flattenEntryOrder(lists);
+            ordEntriesRef.current = flat;
+            setOrdEntries(flat);
+          }
+          break;
+        }
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      el.style.transform = "";
+      el.style.zIndex = "";
+      el.style.boxShadow = "";
+      if (scroller) scroller.style.overflow = prevScrollerOverflow;
+      document.removeEventListener("touchmove", blockTouchScroll);
+      if (session.moved) {
+        saveOrder.mutate({
+          sections: ordSectionsRef.current,
+          entries: ordEntriesRef.current,
+        });
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return session;
+  };
+  const beginShelfDrag = (
+    section: LibraryEntry["section"],
+    blockEl: HTMLElement,
+    startY: number,
+  ): { moved: boolean } => {
+    const session = { moved: false };
+    blockEl.style.zIndex = "30";
+    blockEl.style.position = "relative";
+    blockEl.style.boxShadow = "0 14px 34px rgba(0,0,0,0.55)";
+    const onMove = (ev: PointerEvent) => {
+      const dy = ev.clientY - startY;
+      if (Math.abs(dy) > 10) session.moved = true;
+      blockEl.style.transform = `translateY(${dy}px)`;
+      if (!session.moved) return;
+      for (const [other, otherEl] of sectionElsRef.current) {
+        if (other === section) continue;
+        const r = otherEl.getBoundingClientRect();
+        if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
+          const cur = [...ordSectionsRef.current];
+          const full = applyOrder(
+            SECTION_ORDER as string[],
+            cur,
+          );
+          const a = full.indexOf(section);
+          const b = full.indexOf(other);
+          if (a >= 0 && b >= 0 && a !== b) {
+            const tmp = full[a]!;
+            full[a] = full[b]!;
+            full[b] = tmp;
+            ordSectionsRef.current = full;
+            setOrdSections(full);
+          }
+          break;
+        }
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      blockEl.style.transform = "";
+      blockEl.style.zIndex = "";
+      blockEl.style.boxShadow = "";
+      if (session.moved) {
+        saveOrder.mutate({
+          sections: ordSectionsRef.current,
+          entries: ordEntriesRef.current,
+        });
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return session;
+  };
+  const signHoldRef = useRef<number | null>(null);
+  const onSignPointerDown = (
+    section: LibraryEntry["section"],
+    blockEl: HTMLElement | null,
+    e: { clientX: number; clientY: number },
+  ) => {
+    if (!arrangeable || !blockEl) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    blockEl.style.touchAction = "none";
+    signHoldRef.current = window.setTimeout(() => {
+      window.removeEventListener("pointermove", onMoveWatch);
+      hapticTick();
+      beginShelfDrag(section, blockEl, startY);
+    }, 400);
+    const cancel = () => {
+      if (signHoldRef.current != null) {
+        window.clearTimeout(signHoldRef.current);
+        signHoldRef.current = null;
+      }
+      blockEl.style.touchAction = "";
+      window.removeEventListener("pointerup", cancel);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("pointermove", onMoveWatch);
+    };
+    // A press that drifts past the shared 14px budget before
+    // the lift is a scroll, not a shelf grab — cancel the
+    // pending lift and hand the gesture back.
+    const onMoveWatch = (ev: PointerEvent) => {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 14)
+        cancel();
+    };
+    window.addEventListener("pointermove", onMoveWatch);
+    window.addEventListener("pointerup", cancel);
+    window.addEventListener("pointercancel", cancel);
+  };
   const peekWidth = Math.min(300, window.innerWidth - 24);
   const peekLeft = peek
     ? Math.min(
@@ -20815,11 +22252,53 @@ function LibraryPage({
         </div>
 
         <div className="mt-5 space-y-5">
-          {shelves.map((shelf, si) => (
-            <div key={si}>
+          {sectionBlocks.map((block) => (
+            <div
+              key={block.section}
+              ref={(el) => {
+                if (el) sectionElsRef.current.set(block.section, el);
+                else sectionElsRef.current.delete(block.section);
+              }}
+            >
+              {block.boards.map((shelf, si) => (
+                <div
+                  key={si}
+                  className={si > 0 ? "mt-5" : ""}
+                  onPointerDown={
+                    arrangeable
+                      ? (e) => {
+                          // Whole-shelf grab (Nov 5, 2026):
+                          // the shelf drag used to start ONLY
+                          // from the tiny sign — a thumb on the
+                          // shelf itself (the natural grab)
+                          // found no handler at all and the
+                          // shelf never moved. The whole board
+                          // (sign, items row, board bar) is
+                          // the handle now; presses that land
+                          // on an item keep the item's own
+                          // tap / hold / drag behavior.
+                          if (
+                            (e.target as HTMLElement).closest(
+                              "[data-library-entry]",
+                            )
+                          )
+                            return;
+                          onSignPointerDown(
+                            shelf.section,
+                            sectionElsRef.current.get(
+                              shelf.section,
+                            ) ?? null,
+                            e,
+                          );
+                        }
+                      : undefined
+                  }
+                >
               {/* The shelf's sign: the family this shelf
                   holds (Anthony, Nov 3, 2026, ~11:36 AM,
-                  refined ~11:54 AM). */}
+                  refined ~11:54 AM). The shelf-hold handler
+                  lives on the board wrapper above (the whole
+                  shelf is the handle), not on the sign alone. */}
               <div className="mb-1.5 flex justify-center">
                 {shelf.section === "promos" ? (
                   <span className="flex items-center gap-1.5 rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] py-[3px] pl-2.5 pr-1.5 shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
@@ -20855,6 +22334,26 @@ function LibraryPage({
                       ))}
                     </span>
                   </span>
+                ) : shelf.section === "quests" ? (
+                  /* "Lorcana Quests" in full (Anthony, Nov 4,
+                      2026, evening correction): the medieval
+                      banner redo had dropped the word
+                      "Lorcana" and made "Quests" too big and
+                      loud. The sign now matches the Promos
+                      sign's plaque exactly: "Lorcana" in the
+                      same gold wordmark treatment as the other
+                      two Lorcana signs, and "Quests" toned
+                      down to the Promos part's scale and
+                      weight — gold-leaf medieval serif with a
+                      little flair (.quests-word in theme.css).
+                      The old .quests-sign banner styles are
+                      retired. */
+                  <span className="flex items-center gap-1.5 rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] px-2.5 py-[3px] shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
+                    <span className="lorcana-wordmark text-[10px] uppercase tracking-[0.24em]">
+                      Lorcana
+                    </span>
+                    <span className="quests-word">Quests</span>
+                  </span>
                 ) : shelf.section === "comics" ? (
                   /* "Comics" as a classic comic-book masthead
                       (Anthony, Nov 3, 2026): bold punchy block
@@ -20868,15 +22367,82 @@ function LibraryPage({
                       Comics
                     </span>
                   </span>
-                ) : shelf.section === "funko" || shelf.section === "lego" ? (
-                  /* Funko / Legos shelf signs (Anthony, Nov 4,
-                      2026, PROVISIONAL): plain themed plaques in
-                      the same Library sign language — no
-                      brand-wordmarks borrowed, just the family
-                      name in the app's album lettering. */
-                  <span className="rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] px-2.5 py-[3px] shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
-                    <span className="font-album text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--gold-soft)]">
-                      {shelf.section === "funko" ? "Funko" : "Legos"}
+                ) : shelf.section === "funko" ? (
+                  /* "Funko" as a bespoke masthead (Anthony,
+                      Nov 4, 2026, evening): the provisional
+                      plain plaque is replaced with a treatment
+                      benchmarked on the Comics masthead — in
+                      Funko's own spirit: bubbly rounded pop
+                      letters in pale sky on a deep Funko-blue
+                      plaque, the letters bouncing like the
+                      Promos sticker's, with a little gold
+                      crown perched on the F (Funko's brand
+                      mark is its crowned script). Styles live
+                      in theme.css (.funko-sign / .funko-masthead
+                      / .funko-crown). */
+                  <span className="funko-sign" aria-label="Funko">
+                    <span aria-hidden="true" className="funko-masthead">
+                      <svg
+                        className="funko-crown"
+                        viewBox="0 0 24 17"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M2.5 14.5 4.2 5.2 8.6 9 12 3.4 15.4 9 19.8 5.2 21.5 14.5Z"
+                          fill="#ffc93c"
+                          stroke="#a86e00"
+                          strokeWidth="1"
+                          strokeLinejoin="round"
+                        />
+                        <rect
+                          x="2.5"
+                          y="14.2"
+                          width="19"
+                          height="2.2"
+                          rx="1"
+                          fill="#f5a623"
+                          stroke="#a86e00"
+                          strokeWidth="0.8"
+                        />
+                      </svg>
+                      {"Funko".split("").map((ch, ci) => (
+                        <span
+                          key={ci}
+                          className="funko-letter"
+                          style={{
+                            transform: `rotate(${ci % 2 === 0 ? -5 : 4}deg) translateY(${ci % 2 === 0 ? 0.5 : -0.5}px)`,
+                          }}
+                        >
+                          {ch}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                ) : shelf.section === "lego" ? (
+                  /* "Legos" as a bespoke brick sign (Anthony,
+                      Nov 4, 2026, late): the plain themed
+                      plaque is replaced with the same fun
+                      treatment the Comics and Funko signs got —
+                      in Lego-brick spirit: a red brick plaque
+                      with a row of studs standing along its top
+                      edge, and chunky block letters that read
+                      as built from bricks. Styles live in
+                      theme.css (.lego-sign / .lego-masthead /
+                      .lego-letter). The label still reads
+                      Legos. */
+                  <span className="lego-sign" aria-label="Legos">
+                    <span aria-hidden="true" className="lego-masthead">
+                      {"Legos".split("").map((ch, ci) => (
+                        <span
+                          key={ci}
+                          className="lego-letter"
+                          style={{
+                            transform: `translateY(${ci % 2 === 0 ? 0 : -0.5}px)`,
+                          }}
+                        >
+                          {ch}
+                        </span>
+                      ))}
                     </span>
                   </span>
                 ) : (
@@ -20895,15 +22461,18 @@ function LibraryPage({
                   </span>
                 )}
               </div>
-              <div className="flex items-end gap-[6px] px-1">
+              <div className="flex flex-wrap items-end gap-[6px] px-1">
                 {shelf.list.map((entry, ei) => (
                   <LibrarySpine
                     key={entry.id}
                     entry={entry}
                     index={shelf.start + ei}
                     selected={peek?.entry.id === entry.id}
-                    onPeek={(e, rect) => setPeek({ entry: e, rect })}
+                    onPeek={(e, rect) => openPeek(e, rect)}
                     onOpen={onOpenEntry}
+                    arrangeable={arrangeable}
+                    registerEl={registerEntryEl}
+                    onDragLift={beginEntryDrag}
                   />
                 ))}
               </div>
@@ -20911,22 +22480,37 @@ function LibraryPage({
                 aria-hidden="true"
                 className="h-[6px] rounded bg-gradient-to-b from-[#3d5086] to-[#141f3d] shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
               />
+                </div>
+              ))}
+              {block.section === "comics" && comicsWall ? (
+                <div>
+                  {/* The Comics sign over the slab display wall —
+                      same masthead as the old Comics shelf sign. */}
+                  <div
+                    className="mb-1.5 flex justify-center"
+                    onPointerDown={
+                      arrangeable
+                        ? (e) =>
+                            onSignPointerDown(
+                              "comics",
+                              sectionElsRef.current.get("comics") ??
+                                null,
+                              e,
+                            )
+                        : undefined
+                    }
+                  >
+                    <span className="comics-sign" aria-label="Comics">
+                      <span aria-hidden="true" className="comics-masthead">
+                        Comics
+                      </span>
+                    </span>
+                  </div>
+                  {comicsWall}
+                </div>
+              ) : null}
             </div>
           ))}
-          {comicsWall ? (
-            <div>
-              {/* The Comics sign over the slab display wall —
-                  same masthead as the old Comics shelf sign. */}
-              <div className="mb-1.5 flex justify-center">
-                <span className="comics-sign" aria-label="Comics">
-                  <span aria-hidden="true" className="comics-masthead">
-                    Comics
-                  </span>
-                </span>
-              </div>
-              {comicsWall}
-            </div>
-          ) : null}
         </div>
 
         {entries.length === 0 ? (
@@ -20937,6 +22521,9 @@ function LibraryPage({
           <p className="mt-5 px-1 text-center text-xs leading-relaxed text-[var(--dim)]">
             Light-tap a spine to peek at whose binder it is and which
             chapter — press and hold a spine to open that binder.
+            {arrangeable
+              ? " Hold a spine or a shelf sign a moment longer, then drag to rearrange — your order is saved as your own."
+              : ""}
           </p>
         )}
       </div>
@@ -20951,7 +22538,7 @@ function LibraryPage({
           <button
             type="button"
             aria-label="Close the binder preview"
-            onClick={() => setPeek(null)}
+            onClick={() => closePeek()}
             className="fixed inset-0 z-[71] cursor-default"
           />
           <section
@@ -20995,7 +22582,13 @@ function LibraryPage({
               disabled={!peek.entry.canOpen}
               onClick={() => {
                 hapticTick();
-                onOpenEntry(peek.entry);
+                const entry = peek.entry;
+                // Consume the peek's own entry first, then
+                // open the binder on its own entry — the
+                // small delay lets the pop land so the two
+                // windows never share one entry.
+                closePeek();
+                window.setTimeout(() => onOpenEntry(entry), 60);
               }}
               className="mt-3 rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-bold text-[var(--on-accent)] disabled:opacity-40"
             >
@@ -22630,6 +24223,25 @@ function MarketSwitch({
   );
 }
 
+/** Diagonal "EXAMPLE SALE" watermark (Anthony, Nov 4, 2026):
+    laid across the art of the seeded example listings only
+    (server-flagged isExample), photo-watermark style — semi-
+    transparent, edge to edge — so an example can never be
+    mistaken for a real item for sale. Real listings never
+    render this. */
+function ExampleSaleMark() {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden"
+    >
+      <span className="-rotate-[32deg] whitespace-nowrap text-[26px] font-black uppercase tracking-[0.18em] text-white/45 drop-shadow-[0_1px_3px_rgba(0,0,0,0.65)]">
+        Example Sale
+      </span>
+    </span>
+  );
+}
+
 function ListingTile({
   listing,
   trust,
@@ -22659,16 +24271,19 @@ function ListingTile({
         aria-label={`Open listing: ${listing.name}, ${listing.finish}, asking ${fmtUSD(listing.askingPrice)} from ${listing.sellerUsername}${listing.status === "pending" ? ". Sale pending" : ""}`}
         className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
       >
-        <MarketArt
-          kind={listing.kind}
-          cardId={listing.cardId}
-          sealedName={listing.sealedName}
-          comicId={listing.comicId}
-          name={listing.name}
-          finish={listing.finish}
-          photoUrl={listing.photoUrl}
-          photoStatus={listing.photoStatus}
-        />
+        <span className="relative block">
+          <MarketArt
+            kind={listing.kind}
+            cardId={listing.cardId}
+            sealedName={listing.sealedName}
+            comicId={listing.comicId}
+            name={listing.name}
+            finish={listing.finish}
+            photoUrl={listing.photoUrl}
+            photoStatus={listing.photoStatus}
+          />
+          {listing.isExample ? <ExampleSaleMark /> : null}
+        </span>
         <span className="mt-2 block text-sm font-semibold leading-tight text-[var(--text)]">
           {listing.name}
           {listing.printed ? ` ${listing.printed.split("/")[0]}` : ""}
@@ -22877,16 +24492,19 @@ function ListingSheet({
               : "w-60 max-w-full"
           }
         >
-          <MarketArt
-            kind={listing.kind}
-            cardId={listing.cardId}
-            sealedName={listing.sealedName}
-            comicId={listing.comicId}
-            name={listing.name}
-            finish={listing.finish}
-            photoUrl={listing.photoUrl}
-            photoStatus={listing.photoStatus}
-          />
+          <span className="relative block">
+            <MarketArt
+              kind={listing.kind}
+              cardId={listing.cardId}
+              sealedName={listing.sealedName}
+              comicId={listing.comicId}
+              name={listing.name}
+              finish={listing.finish}
+              photoUrl={listing.photoUrl}
+              photoStatus={listing.photoStatus}
+            />
+            {listing.isExample ? <ExampleSaleMark /> : null}
+          </span>
         </Turntable>
 
         <h2 className="font-album mt-3 text-[22px] font-bold leading-tight text-[var(--text)]">
@@ -29324,19 +30942,43 @@ function SocialPanel({
     return () => window.removeEventListener("popstate", syncFromHistory);
   }, []);
   // The friend profile opens in the swap area below the selector
-  // (Anthony, Nov 4, 2026): it is main-flow navigation, so it
-  // REPLACES the single app entry — no stacking. The on-screen
-  // back control (closeFriend) returns to the area underneath.
+  // (Anthony, Nov 4, 2026). BACK ROOT-CAUSE FIX (Nov 5, 2026):
+  // it used to REPLACE the single app entry — the same
+  // replace-with-no-entry shape that broke Back on the own
+  // profile — so the device Back from a friend's profile
+  // exited the app instead of returning to Social. It now
+  // PUSHES its own entry over the Social entry; the sync
+  // listener above already restores friendOpen from whatever
+  // entry Back lands on, so one Back lands back on the Social
+  // area underneath, and the on-screen back control consumes
+  // the same pushed entry through history.back().
   const openFriend = () => {
     setFriendOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    replaceNavState({
-      mcView: "social",
-      socialArea: area,
-      socialFriend: "jarvis",
-    });
+    try {
+      window.history.pushState(
+        {
+          ...(readNavState() ?? {}),
+          mcView: "social",
+          socialArea: area,
+          socialFriend: "jarvis",
+        },
+        "",
+      );
+    } catch {
+      // History unavailable: the profile still opened; the
+      // on-screen back remains the way back.
+    }
   };
   const closeFriend = () => {
+    try {
+      if (readNavState()?.socialFriend === "jarvis") {
+        window.history.back();
+        return;
+      }
+    } catch {
+      // Fall through to the in-place close.
+    }
     setFriendOpen(false);
   };
   // Area tabs are main-flow navigation (three-back rule,
@@ -29489,10 +31131,16 @@ function SocialPanel({
               aria-label={`Open ${JARVIS_FRIEND.displayName}'s profile — your assistant, built into the app as a friend`}
               className="flex w-full flex-col items-center gap-1.5"
             >
+              {/* Avatar sized to the Best Matches row
+                  standard (h-9 w-9 text-sm) — Anthony,
+                  Nov 4, 2026: the full-rail-width version
+                  was too big at the top of Friends. The
+                  letter-avatar rendering itself is
+                  unchanged; only the size. */}
               <LetterAvatar
                 initial="J"
                 jarvis
-                className="aspect-square w-full text-2xl"
+                className="h-9 w-9 text-sm"
               />
               <span className="flex w-full items-center justify-center gap-1 text-center text-xs font-semibold text-[var(--text)]">
                 <span className="truncate">
@@ -29762,6 +31410,13 @@ const VIEW_STORAGE_KEY = "mycollectibles-view-v1";
 
 type MainView =
   | "home"
+  | "tcg"
+  | "sports"
+  | "toppsau"
+  | "au-disney"
+  | "au-starwars"
+  | "au-gpk"
+  | "au-wwe"
   | "binder"
   | "finances"
   | "social"
@@ -29776,6 +31431,20 @@ type MainView =
 
 const MAIN_VIEWS: MainView[] = [
   "home",
+  // "tcg" (TCG Universe) and "sports" (Sports Cards) are
+  // real views (Nov 4, 2026): Home's two new main areas, so
+  // Back and refresh restore them like any other section.
+  // Neither is a bottom-menu tab — both open from Home.
+  "tcg",
+  "sports",
+  // "toppsau" (Topps Alternate Universe) and its four
+  // sub-area views (Nov 4, 2026): real views like "sports",
+  // opened from Home / the universe page, never bottom tabs.
+  "toppsau",
+  "au-disney",
+  "au-starwars",
+  "au-gpk",
+  "au-wwe",
   "binder",
   "finances",
   "social",
@@ -30169,6 +31838,10 @@ export function App() {
   useEffect(() => {
     adoptServerGridCols(profileTheme.data?.gridCols);
   }, [profileTheme.data]);
+  // "Only mine" is per-section now (Anthony, Nov 5, 2026):
+  // each section hydrates its own saved position from the
+  // reorder-prefs store inside onlyMine.tsx — no root-level
+  // adoption of one shared choice anymore.
   const [binderCacheSeed] = useState(readBinderCache);
   const binder = useQuery({
     queryKey: ["binder"],
@@ -30220,6 +31893,47 @@ export function App() {
       // just starts on Home.
     }
   }, [view]);
+  // TCG Universe origin (Anthony, Nov 4, 2026): a game
+  // opened from the TCG Universe page returns THERE on its
+  // back, not Home. The root tracks it and renders the
+  // "‹ TCG Universe" pill above the section — the four
+  // games' own pages are untouched. Persisted in session
+  // storage so a refresh inside the game keeps the same
+  // back target; cleared by any other navigation.
+  const [gameOrigin, setGameOrigin] = useState<"tcg" | null>(
+    () => {
+      try {
+        return window.sessionStorage.getItem(
+          "vaultx-game-origin",
+        ) === "tcg"
+          ? "tcg"
+          : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  const originHoldRef = useRef(false);
+  const applyGameOrigin = (o: "tcg" | null) => {
+    setGameOrigin(o);
+    try {
+      if (o) {
+        window.sessionStorage.setItem("vaultx-game-origin", o);
+      } else {
+        window.sessionStorage.removeItem("vaultx-game-origin");
+      }
+    } catch {
+      // Storage unavailable: the pill still works this session.
+    }
+  };
+  const openGameFromTcg = (g: "binder" | "pokemon" | "magic" | "starwars") => {
+    applyGameOrigin("tcg");
+    // Hub drill-in (Nov 5, 2026 back re-audit): the game
+    // takes a pushed entry over the TCG Universe hub so
+    // Back — device or the on-screen pill — returns to the
+    // hub in one press.
+    pushHubDrill(g, "tcg");
+  };
   // The current view, readable from the history listeners
   // (registered once, so they cannot close over the state).
   const viewRef = useRef(view);
@@ -30298,9 +32012,14 @@ export function App() {
   // red envelope on Home opens the change-request ticket list
   // in THIS dedicated window — never the Settings page (his
   // correction, twice over). Window (three-back rule): one
-  // history entry; Back closes it.
+  // history entry; Back closes it. It uses the OWN-ENTRY
+  // variant (app-wide back audit, Nov 4, 2026): from Home it
+  // pushes its entry exactly as before, but from the Inbox
+  // it must still take its own entry — layering into the
+  // Inbox's entry made one Back close both and land on Home
+  // instead of back on the Inbox.
   const [ticketsOpen, setTicketsOpen] = useState(false);
-  const ticketsWin = useWindowHistory("lorcanaTickets", setTicketsOpen);
+  const ticketsWin = useOwnEntryWindow("lorcanaTickets", setTicketsOpen);
   const openTicketsWindow = () => {
     ticketsWin.open();
   };
@@ -30320,9 +32039,11 @@ export function App() {
   // order, trade offer, and (for the owner) change-request
   // ticket in one mail-style list. Window (three-back rule,
   // Anthony, Nov 4, 2026): one history entry; Back closes it.
-  // Opening an item layers its view into the Inbox's entry
-  // (no stacking) and Back closes both together — the Inbox
-  // itself never routes through Social or Settings.
+  // Opening an item gives that item its own entry above the
+  // Inbox's, so Back from a message lands back on the Inbox
+  // (app-wide back audit, Nov 4, 2026 — layering both views
+  // into one entry made Back skip the Inbox and land on
+  // Home). The Inbox never routes through Social or Settings.
   const [inboxOpen, setInboxOpen] = useState(false);
   const inboxWin = useWindowHistory("lorcanaInbox", setInboxOpen);
   // The one-time Welcome flow (Anthony, Nov 3, 2026): shown
@@ -30342,12 +32063,15 @@ export function App() {
   // mode opens, exactly as the old Settings button did.
   // Back-gesture trap (same Nov 4 rule as the verified
   // sheet): review mode is a window over the Admin Hub, so
-  // opening takes the window's one history entry (three-back
-  // rule: layers when a window already holds the slot) and
-  // Back closes the review first, never the Admin underneath.
-  // Only REVIEW mode gets an entry — the first-run welcome
-  // flow is the app's entry state and stays exactly as it was.
-  const welcomeReviewWin = useWindowHistory(
+  // opening takes a history entry and Back closes the review
+  // first, never the Admin underneath. It uses the OWN-ENTRY
+  // variant (app-wide back audit, Nov 4, 2026): the review
+  // sits above the Admin window, and layering into the
+  // Admin's entry made one Back close both and land on Home
+  // instead of back on the Admin page. Only REVIEW mode gets
+  // an entry — the first-run welcome flow is the app's entry
+  // state and stays exactly as it was.
+  const welcomeReviewWin = useOwnEntryWindow(
     "lorcanaWelcomeReview",
     setWelcomeReviewOpen,
   );
@@ -30440,71 +32164,44 @@ export function App() {
   // message must NOT throw him into Social/Trades). A message
   // opens as its OWN page above the Inbox — Subject/From
   // header, the order itself, its thread — with an X closing
-  // it in place. Three-back rule (Anthony, Nov 4, 2026): it
-  // layers into the Inbox's window entry instead of stacking,
-  // so the phone's Back closes the mail view and the Inbox
-  // together.
+  // it in place. Back discipline (app-wide back audit,
+  // Nov 4, 2026): the mail view takes its OWN entry above
+  // the Inbox's (the own-entry hook), so the phone's Back
+  // returns to the Inbox — the earlier layering into the
+  // Inbox's entry made one Back close both and land on Home.
+  // Stack: Home entry + Inbox entry + mail entry is exactly
+  // the three-back budget.
   const [mailView, setMailView] = useState<{
     kind: "cash" | "trade";
     id: number;
     nonce: number;
   } | null>(null);
-  const mailViewPushedRef = useRef(false);
-  const mailViewHeldRef = useRef(false);
+  const mailWin = useOwnEntryWindow("lorcanaMail", (v) => {
+    if (!v) setMailView(null);
+  });
   const openInboxOrder = (kind: "cash" | "trade", refId: number) => {
     setMailView({ kind, id: refId, nonce: Date.now() });
-    if (mailViewHeldRef.current) {
-      replaceNavState({
-        ...(readNavState() ?? {}),
-        lorcanaMail: true,
-      });
-      return;
-    }
-    mailViewPushedRef.current = pushWindowState(
-      {
-        ...(readNavState() ?? {}),
-        lorcanaMail: true,
-      },
-      "lorcanaMail",
-    );
-    mailViewHeldRef.current = true;
+    mailWin.open();
   };
   const closeMailView = () => {
-    if (mailViewPushedRef.current) {
-      window.history.back();
-    } else {
-      mailViewHeldRef.current = false;
-      scrubWindowKeys(["lorcanaMail"]);
-      setMailView(null);
-    }
+    mailWin.close();
   };
-  useEffect(() => {
-    const onPopState = () => {
-      if (
-        mailViewHeldRef.current &&
-        readNavState()?.lorcanaMail !== true
-      ) {
-        mailViewHeldRef.current = false;
-        mailViewPushedRef.current = false;
-        setMailView(null);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   const openInboxTicket = (refId: number) => {
     setTicketFocusId(refId);
     // The Inbox stays open underneath; the tickets window
-    // layers into the Inbox's window entry (three-back rule:
-    // no stacking) and Back closes both together.
+    // takes its own entry above it (app-wide back audit,
+    // Nov 4, 2026), so Back from the tickets returns to the
+    // Inbox — Home entry + Inbox entry + tickets entry is
+    // exactly the three-back budget.
     openTicketsWindow();
   };
   // Shared deck mail (Anthony, Nov 4, 2026): a plain mail
   // message (a deck list as text) opens as its own page above
-  // the Inbox, layered into the Inbox's window entry exactly
-  // like the order mail view — Back closes both together.
+  // the Inbox. Like the order mail view it takes its own
+  // entry (app-wide back audit, Nov 4, 2026), so Back from
+  // the message returns to the Inbox.
   const [deckMailId, setDeckMailId] = useState<number | null>(null);
-  const deckMailWin = useWindowHistory("lorcanaDeckMail", (v) => {
+  const deckMailWin = useOwnEntryWindow("lorcanaDeckMail", (v) => {
     if (!v) setDeckMailId(null);
   });
   const openInboxMail = (refId: number) => {
@@ -30842,6 +32539,19 @@ export function App() {
     }
   };
   const [scanOpen, setScanOpen] = useState(false);
+  /** The unified scanner's mode for this opening (Nov 5,
+      2026): shortcuts from the Search tab and the Sports
+      Cards Baseball page open it straight into slab mode. */
+  const [scanMode, setScanMode] = useState<"card" | "slab">(
+    "card",
+  );
+  /** The Card / Slab View's slab, opened from the scanner
+      (a save or an existing cert) or the Sports/Search
+      shortcuts' aftermath. The view traps its own history
+      entry. */
+  const [slabViewId, setSlabViewId] = useState<number | null>(
+    null,
+  );
   // Lorcana section search bar (Nov 3, 2026, ~11:14 PM):
   // the text typed into the chapters page's new search bar;
   // submitting hands it to the Search overlay (the catalog
@@ -30849,8 +32559,12 @@ export function App() {
   const [sectionQuery, setSectionQuery] = useState("");
   const scanPushedRef = useRef(false);
   const scanHeldRef = useRef(false);
-  const openScan = (fromSearch = false) => {
+  const openScan = (
+    fromSearch = false,
+    mode: "card" | "slab" = "card",
+  ) => {
     if (scanOpen) return;
+    setScanMode(mode);
     setScanOpen(true);
     if (fromSearch && searchPushedRef.current) {
       // Hand the search overlay's history entry to the scanner.
@@ -30903,6 +32617,27 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+  // The Sports Cards Baseball page's "Scan a PSA slab"
+  // shortcut (Nov 5, 2026): it asks the app to open the one
+  // scanner in slab mode — the same door the Search tab's
+  // "Scan a slab" entry uses.
+  useEffect(() => {
+    const onSlabScan = () => openScan(false, "slab");
+    window.addEventListener("vaultx:open-slab-scan", onSlabScan);
+    return () =>
+      window.removeEventListener("vaultx:open-slab-scan", onSlabScan);
+    // openScan is stable enough for a mount-only listener:
+    // it reads refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /** A slab saved (or an existing cert chosen) in the
+      scanner: close the scanner, then land on the slab's
+      Card / Slab View — the small delay lets the scanner's
+      history entry pop before the view pushes its own. */
+  const openSlabFromScan = (slabId: number) => {
+    closeScan();
+    window.setTimeout(() => setSlabViewId(slabId), 60);
+  };
   // Finance data is heavy (full-collection scan): don't load it with the
   // binder on first paint. It loads the moment the Finances view opens,
   // or in the background once the browser is idle so the header totals
@@ -31080,8 +32815,33 @@ export function App() {
   const search = useQuery({
     queryKey: ["search", searchText.trim()],
     queryFn: () => api.searchCards({ query: searchText.trim() }),
-    enabled: searchText.trim().length >= 2,
+    // Typeahead from the FIRST letter (Anthony, Nov 4, 2026):
+    // suggestions populate the instant he types "A" and narrow
+    // on every keystroke — no minimum-length threshold.
+    enabled: searchText.trim().length >= 1,
+    placeholderData: (prev) => prev,
   });
+
+  // Universal Search (Anthony, Nov 4, 2026): the Search tab is
+  // the ONE place for every search — the same keystrokes also
+  // search the other catalogs (games + sealed server-side;
+  // graded comics matched locally below), grouped by type
+  // under the card results.
+  const universal = useQuery({
+    queryKey: ["searchAll", searchText.trim()],
+    queryFn: () =>
+      api.searchAllCollectibles({ query: searchText.trim() }),
+    enabled: searchText.trim().length >= 1,
+    placeholderData: (prev) => prev,
+  });
+  const comicMatches =
+    searchText.trim().length >= 1
+      ? COMICS.filter((c) =>
+          c.title
+            .toLowerCase()
+            .includes(searchText.trim().toLowerCase()),
+        ).slice(0, 4)
+      : [];
 
   const pickGroup = (key: string) => {
     setShowPicker(false);
@@ -31135,6 +32895,15 @@ export function App() {
       setSearchOpen(false);
       searchPushedRef.current = false;
       searchHeldRef.current = false;
+    }
+    // TCG Universe origin: only the TCG page's own game
+    // openers keep it (they set the hold first); every
+    // other navigation clears it, so a game reached from
+    // anywhere else behaves exactly as before.
+    if (originHoldRef.current) {
+      originHoldRef.current = false;
+    } else if (gameOrigin !== null) {
+      applyGameOrigin(null);
     }
     setView(next);
     if (next === "binder" && !showPicker && groupKey) {
@@ -31197,14 +32966,27 @@ export function App() {
   useEffect(() => {
     const onOpenGameSection = (e: Event) => {
       const detail = (
-        e as CustomEvent<{ game?: string; sectionKey?: string }>
+        e as CustomEvent<{
+          game?: string;
+          sectionKey?: string;
+          card?: unknown;
+        }>
       ).detail;
       const game =
-        detail?.game === "lego"
-          ? "lego"
-          : detail?.game === "funko"
-            ? "funko"
-            : null;
+        detail?.game === "lego" ||
+        detail?.game === "funko" ||
+        detail?.game === "pokemon" ||
+        detail?.game === "magic" ||
+        detail?.game === "starwars" ||
+        detail?.game === "topps" ||
+        detail?.game === "bowman" ||
+        detail?.game === "topps-basketball" ||
+        detail?.game === "disney-topps" ||
+        detail?.game === "starwars-topps" ||
+        detail?.game === "gpk" ||
+        detail?.game === "wwe-topps"
+          ? detail.game
+          : null;
       if (!game || !detail?.sectionKey) return;
       hapticTick();
       try {
@@ -31212,9 +32994,66 @@ export function App() {
           `vaultx-game-open-section:${game}`,
           detail.sectionKey,
         );
+        // Universal Search (Nov 4, 2026) can hand off one
+        // specific item too: GamePanel opens its detail sheet
+        // on mount when this key is present.
+        if (detail.card != null) {
+          window.sessionStorage.setItem(
+            `vaultx-game-open-card:${game}`,
+            JSON.stringify(detail.card),
+          );
+        }
       } catch {
         // Storage unavailable: the game's section list still
         // opens; only the deep link into the section is lost.
+      }
+      // A section opened from Search or the Library is not
+      // a TCG Universe entry: clear the origin so no stale
+      // "‹ TCG Universe" pill rides along.
+      applyGameOrigin(null);
+      if (
+        game === "disney-topps" ||
+        game === "starwars-topps" ||
+        game === "gpk" ||
+        game === "wwe-topps"
+      ) {
+        // Alternate Universe catalogs live in their own
+        // sub-area views under the universe page.
+        const auView =
+          game === "disney-topps"
+            ? "au-disney"
+            : game === "starwars-topps"
+              ? "au-starwars"
+              : game === "gpk"
+                ? "au-gpk"
+                : "au-wwe";
+        setView(auView);
+        replaceNavState({ mcView: auView });
+        return;
+      }
+      if (
+        game === "topps" ||
+        game === "bowman" ||
+        game === "topps-basketball"
+      ) {
+        // Topps catalogs live inside Sports Cards, not a
+        // top-level game view: open the sport that owns the
+        // catalog (the Sports page also listens for this
+        // event when it is already mounted); GamePanel picks
+        // up the section/card handoff keys on mount.
+        try {
+          window.sessionStorage.setItem(
+            "vaultx-sports-open-sport",
+            game === "topps-basketball"
+              ? "basketball"
+              : "baseball",
+          );
+        } catch {
+          // Storage unavailable: the Sports list still opens.
+        }
+        setView("sports");
+        replaceNavState({ mcView: "sports" });
+        return;
       }
       setView(game);
       replaceNavState({ mcView: game });
@@ -31229,11 +33068,80 @@ export function App() {
         onOpenGameSection,
       );
   }, []);
+  // HUB DRILL-IN entries (Anthony, Nov 5, 2026 — the
+  // app-wide back re-audit's root fix): a game opened from
+  // the TCG Universe hub, and a brand opened from the Topps
+  // Alternate Universe hub, are drill-ins OVER their hub —
+  // and the same rule one level up (Anthony, Nov 5, 2026,
+  // the Sports Cards landing case): the three folder
+  // LANDING pages themselves (TCG Universe, Sports Cards,
+  // Topps Alternate Universe) are drill-ins over HOME —
+  // Home's tiles open them through this same push with
+  // hub "home", and their Back pills run backToHub("home"),
+  // so one Back from a landing page returns Home instead
+  // of exiting the app (his Sports Cards report: Baseball
+  // → Back → Sports Cards already worked; Sports Cards →
+  // Back exited outright). Stack: Home entry, landing
+  // entry, drill-in entry — three Backs still exit.
+  // the same shape as a sport over the Sports Cards list.
+  // They take ONE pushed history entry naming the hub, so
+  // the phone's Back returns to the HUB in one press (the
+  // central popstate listener restores the hub view from
+  // the entry it lands on) instead of exiting the app, and
+  // the hub's on-screen back pill consumes the same entry
+  // exactly once. Everywhere else, main-flow navigation
+  // keeps replacing the single app entry (three-back rule:
+  // hub entry, then the app entry, then out — the budget
+  // holds). Before this fix these hops were plain replaces,
+  // so Back from a game or brand exited Vault X outright.
+  const pushHubDrill = (next: MainView, hub: MainView) => {
+    tabNavigationUsed = true;
+    hapticTick();
+    setView(next);
+    try {
+      const cur = readNavState() ?? {};
+      if (cur.vxHub === hub && cur.mcView === next) return;
+      window.history.pushState(
+        {
+          ...cur,
+          mcView: next,
+          vxHub: hub,
+          // Lorcana reached with a set already open carries
+          // it, the same as navigate() writes, so the entry
+          // always matches what is on screen.
+          ...(next === "binder" && !showPicker && groupKey
+            ? { mcBinder: groupKey }
+            : {}),
+        },
+        "",
+      );
+    } catch {
+      // History unavailable: the view still switched; the
+      // on-screen pill remains the way back.
+    }
+  };
+  /** On-screen hub back pill: consume the drill-in entry
+      when it is the one on top (device Back does the same),
+      otherwise fall back to a plain hub navigation. */
+  const backToHub = (hub: MainView) => {
+    hapticTick();
+    try {
+      if (readNavState()?.vxHub === hub) {
+        window.history.back();
+        return;
+      }
+    } catch {
+      // Fall through to the plain navigation.
+    }
+    navigate(hub);
+  };
+
   /** The Lorcana row of My Collection: the chapters/sets
       grid — the same destination as Home's Lorcana tile —
       NOT the Library (Anthony, Nov 4, 2026). */
   const openBinderHomeFromProfile = () => {
     hapticTick();
+    applyGameOrigin(null);
     setView("binder");
     setShowPicker(true);
     replaceNavState({ mcView: "binder" });
@@ -31348,18 +33256,90 @@ export function App() {
   // 60ms after opening, which forced the keyboard up every
   // time the Search tab was entered.)
 
-  // Tapping a result closes the overlay and opens that card right
-  // where he is — no jump to the binder list first. The search
-  // window gives up its history slot and the card sheet layers
-  // into the same entry (three-back rule: no stacking), so Back
-  // from the card closes it and lands on the view underneath
-  // exactly as if the card had been opened directly.
+  // Tapping a result opens the card OVER Search (Anthony,
+  // Nov 4, 2026): Search stays open behind it with the query
+  // intact, and the card takes its OWN history entry on top of
+  // Search's entry, so Back from the card returns to Search —
+  // ready for another search — never dumps to Home. The overlay
+  // unmounts while the sheet is up (render gate below) and comes
+  // back with the text untouched; query results survive in the
+  // react-query cache. Back budget: card → Search → the view
+  // underneath → exit (three-back rule holds).
   const pickSearchResult = (result: SearchResult) => {
-    setSearchOpen(false);
-    setSearchText("");
+    try {
+      const cur = readNavState() ?? {};
+      window.history.pushState(
+        {
+          ...cur,
+          lorcanaCard: result.cardId,
+          vxWin: "lorcanaCard",
+          vxDepth: 2,
+        },
+        "",
+      );
+      sheetPushedRef.current = true;
+      sheetHeldRef.current = true;
+      hapticTick();
+      setSelectedId(result.cardId);
+    } catch {
+      // History unavailable: fall back to the old layered open.
+      setSearchOpen(false);
+      setSearchText("");
+      searchPushedRef.current = false;
+      searchHeldRef.current = false;
+      openCard(result.cardId);
+    }
+  };
+
+  // Universal Search exits (Nov 4, 2026): a game, sealed, or
+  // comics result leaves Search for a main-flow destination.
+  // The navigation runs first (it replaces or layers the
+  // current entry as its own pattern requires), then Search
+  // closes IN PLACE — its history key scrubbed, no
+  // history.back() — so the destination keeps the entry and
+  // the back budget stays intact.
+  const leaveSearchToMain = (go: () => void) => {
+    go();
+    scrubWindowKeys(["lorcanaSearch"]);
     searchPushedRef.current = false;
     searchHeldRef.current = false;
-    openCard(result.cardId);
+    setSearchOpen(false);
+    setSearchText("");
+  };
+  const pickUniversalGame = (
+    r: ApiResponse<typeof api, "searchAllCollectibles">["games"][number],
+  ) => {
+    leaveSearchToMain(() => {
+      window.dispatchEvent(
+        new CustomEvent("vaultx:open-game-section", {
+          detail: {
+            game: r.game,
+            sectionKey: r.sectionKey,
+            card: {
+              id: r.id,
+              name: r.name,
+              printed: r.printed,
+              sectionName: r.sectionName,
+              rarity: r.rarity,
+              finish: r.finish,
+              imageUrl: r.imageUrl,
+              price: r.price,
+              ownedQty: r.ownedQty,
+              ownedSealedQty: r.ownedSealedQty,
+            },
+          },
+        }),
+      );
+    });
+  };
+  const pickUniversalSealed = (name: string) => {
+    leaveSearchToMain(() => openSealedItem(name));
+  };
+  const pickUniversalComic = () => {
+    leaveSearchToMain(() => {
+      setView("comics");
+      replaceNavState({ mcView: "comics" });
+    });
   };
 
   // Card detail + browser history: opening a card pushes one history
@@ -31481,16 +33461,39 @@ export function App() {
         </section>
         ) : null}
 
+        {/* TCG Universe back pill (Nov 4, 2026): when one
+            of the four games was opened from the TCG
+            Universe page, its back returns there — rendered
+            here at the root, above the section, so nothing
+            inside the games changes. */}
+        {(view === "binder" ||
+          view === "pokemon" ||
+          view === "magic" ||
+          view === "starwars") &&
+        gameOrigin === "tcg" ? (
+          <div className="pt-3">
+            <button
+              type="button"
+              onClick={() => backToHub("tcg")}
+              aria-label="Back to TCG Universe"
+              className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] transition active:scale-95"
+            >
+              <span aria-hidden="true">‹</span> TCG Universe
+            </button>
+          </div>
+        ) : null}
+
         {view === "home" ? (
           <HomePanel
             value={finance.data ? finance.data.value : null}
-            onOpenBinder={() => navigate("binder")}
-            onOpenComics={() => navigate("comics")}
-            onOpenLego={() => navigate("lego")}
-            onOpenPokemon={() => navigate("pokemon")}
-            onOpenMagic={() => navigate("magic")}
-            onOpenStarwars={() => navigate("starwars")}
-            onOpenFunko={() => navigate("funko")}
+            onOpenTcgUniverse={() => pushHubDrill("tcg", "home")}
+            onOpenSportsCards={() => pushHubDrill("sports", "home")}
+            onOpenToppsAlternateUniverse={() =>
+              pushHubDrill("toppsau", "home")
+            }
+            onOpenComics={() => pushHubDrill("comics", "home")}
+            onOpenLego={() => pushHubDrill("lego", "home")}
+            onOpenFunko={() => pushHubDrill("funko", "home")}
             onOpenCard={(id) => openCard(id)}
             onOpenSealed={(name) => openSealedItem(name)}
             onOpenBinderGroup={openBinderGroup}
@@ -31507,6 +33510,44 @@ export function App() {
             onOpenChangeRequests={openTicketsWindow}
             onOpenOrderMail={openInbox}
           />
+        ) : view === "tcg" ? (
+          <TcgUniversePage
+            onBack={() => backToHub("home")}
+            onOpenGame={openGameFromTcg}
+          />
+        ) : view === "sports" ? (
+          <SportsCardsPage onBack={() => backToHub("home")} />
+        ) : view === "toppsau" ? (
+          <ToppsAlternateUniversePage
+            onBack={() => backToHub("home")}
+            onOpenArea={(v: AuAreaView) => pushHubDrill(v, "toppsau")}
+          />
+        ) : view === "au-disney" ||
+          view === "au-starwars" ||
+          view === "au-gpk" ||
+          view === "au-wwe" ? (
+          <section className="pt-4">
+            <button
+              type="button"
+              onClick={() => backToHub("toppsau")}
+              aria-label="Back to Topps Alternate Universe"
+              className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] transition active:scale-95"
+            >
+              <span aria-hidden="true">‹</span> Topps Alternate
+              Universe
+            </button>
+            <GamePanel
+              game={
+                view === "au-disney"
+                  ? "disney-topps"
+                  : view === "au-starwars"
+                    ? "starwars-topps"
+                    : view === "au-gpk"
+                      ? "gpk"
+                      : "wwe-topps"
+              }
+            />
+          </section>
         ) : view === "comics" ? (
           <ComicsPanel onScan={() => openScan()} />
         ) : view === "lego" ? (
@@ -32244,7 +34285,7 @@ export function App() {
       <nav
         aria-label={translate(language, "nav.main")}
         className={`pointer-events-none fixed inset-x-0 bottom-0 px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))] ${
-          searchOpen ? "z-[67]" : "z-40"
+          searchOpen && selectedId == null ? "z-[67]" : "z-40"
         }`}
       >
         <div
@@ -32396,7 +34437,7 @@ export function App() {
           is up the entrance class drops and the panel stays
           fully opaque with a plain shadow, per the keyboard
           ghost-pattern fix. */}
-      {searchOpen ? (
+      {searchOpen && selectedId == null ? (
         <div
           ref={searchOverlayRef}
           className={`app-shell fixed inset-0 z-[66] overflow-y-auto ${
@@ -32437,8 +34478,8 @@ export function App() {
                   Search
                 </h2>
                 <p className="mt-1 text-sm text-[var(--dim)]">
-                  Find any card in the catalog — or scan one with
-                  your camera.
+                  Find anything in the vault — cards, figures,
+                  comics, sealed — or scan a card with your camera.
                 </p>
               </div>
             )}
@@ -32488,7 +34529,7 @@ export function App() {
                     const el = searchOverlayRef.current;
                     if (el) el.style.height = "";
                   }}
-                  placeholder="Search your collection…"
+                  placeholder="Search all collectibles"
                   className="h-[52px] w-full rounded-full border border-[var(--border)] bg-[var(--surface)] pl-12 pr-12 text-base text-[var(--text)] placeholder:italic placeholder:text-[#8a8a96]"
                 />
                 <button
@@ -32523,7 +34564,29 @@ export function App() {
                 </svg>
                 Scan a card with your camera
               </button>
-              {searchText.trim().length >= 2 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOpen(false);
+                  openScan(true, "slab");
+                }}
+                aria-label="Scan a slab with your camera — reads the grading cert number"
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full border border-[var(--accent)]/50 px-4 py-2.5 text-sm font-semibold text-[var(--gold-soft)]"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  className="h-4.5 w-4.5 shrink-0"
+                  aria-hidden="true"
+                >
+                  <path d="M4 5v14M8 5v14M11 5v14M15 5v14M17.5 5v14M21 5v14" />
+                </svg>
+                Scan a slab — cert number
+              </button>
+              {searchText.trim().length >= 1 ? (
                 <div
                   className={`mt-2 overflow-y-auto ${
                     searchKbUp ? "max-h-[24vh]" : "max-h-[42vh]"
@@ -32570,11 +34633,114 @@ export function App() {
                 </div>
               ) : (
                 <p className="px-2 pb-1 pt-2.5 text-sm text-[var(--dim)]">
-                  Start typing a card name — add its number to hone in
-                  (like “Ariel 137”). Tapping a result opens the card
-                  right here, no jumping back to the binder list.
+                  Suggestions appear from the first letter as you type —
+                  add a card's number to hone in (like “Ariel 137”).
+                  Tapping a result opens the card right here, and Back
+                  brings you back to this search.
                 </p>
               )}
+              {/* Universal results (Anthony, Nov 4, 2026):
+                  every other collectible type, grouped and
+                  labeled, under the Lorcana card results. */}
+              {searchText.trim().length >= 1 &&
+              ((universal.data?.games.length ?? 0) > 0 ||
+                (universal.data?.sealed.length ?? 0) > 0 ||
+                comicMatches.length > 0) ? (
+                <div
+                  className={`mt-2 overflow-y-auto ${
+                    searchKbUp ? "max-h-[24vh]" : "max-h-[36vh]"
+                  }`}
+                >
+                  <p className="px-2 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--dim)]">
+                    More collectibles
+                  </p>
+                  {(universal.data?.games ?? []).map((r) => (
+                    <button
+                      key={`g-${r.game}-${r.id}`}
+                      type="button"
+                      onClick={() => pickUniversalGame(r)}
+                      className="flex w-full items-center justify-between gap-2 border-b border-[var(--border)] px-2 py-2.5 text-left last:border-b-0"
+                    >
+                      <span>
+                        <span className="block text-sm text-[var(--text)]">
+                          {r.name}
+                        </span>
+                        <span className="block text-xs text-[var(--dim)]">
+                          {GAME_TITLES[r.game]} · {r.sectionName} · #
+                          {r.printed}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 text-xs font-semibold ${
+                          r.ownedQty + r.ownedSealedQty > 0
+                            ? "text-[var(--gold-soft)]"
+                            : "text-[var(--ghost)]"
+                        }`}
+                      >
+                        {r.ownedQty + r.ownedSealedQty > 0
+                          ? `Owned ×${r.ownedQty + r.ownedSealedQty}`
+                          : "Missing"}
+                      </span>
+                    </button>
+                  ))}
+                  {(universal.data?.sealed ?? []).map((s) => (
+                    <button
+                      key={`s-${s.name}`}
+                      type="button"
+                      onClick={() => pickUniversalSealed(s.name)}
+                      className="flex w-full items-center justify-between gap-2 border-b border-[var(--border)] px-2 py-2.5 text-left last:border-b-0"
+                    >
+                      <span>
+                        <span className="block text-sm text-[var(--text)]">
+                          {s.name}
+                        </span>
+                        <span className="block text-xs text-[var(--dim)]">
+                          Sealed · {s.setName}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 text-xs font-semibold ${
+                          s.qty > 0
+                            ? "text-[var(--gold-soft)]"
+                            : "text-[var(--ghost)]"
+                        }`}
+                      >
+                        {s.qty > 0 ? `Owned ×${s.qty}` : "Missing"}
+                      </span>
+                    </button>
+                  ))}
+                  {comicMatches.map((c) => (
+                    <button
+                      key={`c-${c.id}`}
+                      type="button"
+                      onClick={() => pickUniversalComic()}
+                      className="flex w-full items-center justify-between gap-2 border-b border-[var(--border)] px-2 py-2.5 text-left last:border-b-0"
+                    >
+                      <span>
+                        <span className="block text-sm text-[var(--text)]">
+                          {c.title}
+                        </span>
+                        <span className="block text-xs text-[var(--dim)]">
+                          Comics · {c.publisher} · CGC {c.label}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs font-semibold text-[var(--gold-soft)]">
+                        Owned
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {/* The grading companies Vault X supports, at
+                the very bottom of the Search tab (Anthony,
+                Nov 5, 2026): their real logos in one row,
+                above the bottom menu, which stays upfront —
+                the tall bottom padding is what keeps the row
+                clear of that fixed menu instead of sliding
+                underneath it. */}
+            <div className="mt-auto pb-28 pt-6">
+              <GraderSupportRow />
             </div>
           </div>
         </div>
@@ -32592,7 +34758,19 @@ export function App() {
         <MissingSheet groupKey={missingSheetKey} onClose={closeMissingSheet} />
       ) : null}
 
-      {scanOpen ? <ScanPanel onClose={closeScan} /> : null}
+      {scanOpen ? (
+        <ScanPanel
+          onClose={closeScan}
+          initialMode={scanMode}
+          onSlabSaved={openSlabFromScan}
+        />
+      ) : null}
+      {slabViewId != null ? (
+        <SlabDetailView
+          slabId={slabViewId}
+          onClose={() => setSlabViewId(null)}
+        />
+      ) : null}
     </div>
   );
 }

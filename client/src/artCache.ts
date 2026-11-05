@@ -46,7 +46,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 
-const CACHE_NAME = "lorcana-art-v3";
+const CACHE_NAME = "lorcana-art-v4";
 const CACHE_PREFIX = "lorcana-art-";
 const INDEX_KEY = "lorcana-art-index-v2";
 const WARMUP_META_KEY = "lorcana-art-warmup-v2";

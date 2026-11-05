@@ -131,6 +131,18 @@ export type Fingerprint = {
       (mean 0, unit variance), quantized to int8 x48 and stored
       offset by +128 so it persists as unsigned bytes. */
   grid: Uint8Array;
+  /** The ART-CROP second fingerprint (Nov 5, 2026 — the last
+      open scanner-homework item): a brightness grid sampled
+      from the card's artwork window only (roughly x 8%–92%,
+      y 7%–46% of the card), same normalization as the full
+      grid. The full-card grid dilutes the artwork with the
+      text box, borders, and ink/cost furniture that several
+      printings share; the art window is where printings of
+      the same character actually differ — most sharply for
+      foils, whose art shifts with the light while the frame
+      furniture stays put. Blended into fpDistance at a
+      conservative weight; thresholds unchanged. */
+  art: Uint8Array;
 };
 
 export type FpEntry = Fingerprint & { id: number };
@@ -202,27 +214,43 @@ export const GRID_H = 16;
     round(normalized * GRID_SCALE) + 128, clamped to 0..255. */
 const GRID_SCALE = 48;
 
+/** Art-window grid dimensions and its window on the card
+    (fractions of card width/height): the Lorcana art box
+    sits inside the frame, clear of the title bar above and
+    the text box below. */
+export const ART_W = 12;
+export const ART_H = 10;
+const ART_X = 0.08;
+const ART_Y = 0.07;
+const ART_W_FRAC = 0.84;
+const ART_H_FRAC = 0.39;
+
 /** Distance between two brightness grids: the mean absolute
     difference of the normalized values, minimized over ±1-cell
     shifts (a hand-held photo is never framed cell-perfectly
     against the catalog scan) and scaled so identical grids are
     0 and unrelated layouts land around 0.3 or higher. */
-export function gridDistance(a: Uint8Array, b: Uint8Array): number {
-  if (a.length < GRID_W * GRID_H || b.length < GRID_W * GRID_H) return 1;
+export function gridDistance(
+  a: Uint8Array,
+  b: Uint8Array,
+  w: number = GRID_W,
+  h: number = GRID_H,
+): number {
+  if (a.length < w * h || b.length < w * h) return 1;
   let best = Infinity;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       let sum = 0;
       let n = 0;
-      for (let y = 0; y < GRID_H; y++) {
+      for (let y = 0; y < h; y++) {
         const by = y + dy;
-        if (by < 0 || by >= GRID_H) continue;
-        for (let x = 0; x < GRID_W; x++) {
+        if (by < 0 || by >= h) continue;
+        for (let x = 0; x < w; x++) {
           const bx = x + dx;
-          if (bx < 0 || bx >= GRID_W) continue;
+          if (bx < 0 || bx >= w) continue;
           sum += Math.abs(
-            ((a[y * GRID_W + x] ?? 128) - 128) -
-              ((b[by * GRID_W + bx] ?? 128) - 128),
+            ((a[y * w + x] ?? 128) - 128) -
+              ((b[by * w + bx] ?? 128) - 128),
           );
           n += 1;
         }
@@ -239,7 +267,29 @@ export function gridDistance(a: Uint8Array, b: Uint8Array): number {
 export function fpDistance(a: Fingerprint, b: Fingerprint): number {
   const hashColor =
     0.7 * hashDistance(a.hash, b.hash) + 0.3 * quadDistance(a.quad, b.quad);
-  return 0.35 * hashColor + 0.65 * gridDistance(a.grid, b.grid);
+  const grid = gridDistance(a.grid, b.grid);
+  // Art-crop blend (Nov 5, 2026): when both sides carry the
+  // art window, it takes an 18% share — taken from the full
+  // grid's weight, not added on top — so a printing whose
+  // ART matches gains a real edge without the art window
+  // ever outvoting the whole-card evidence. Both components
+  // are normalized grids on the same scale, so the blend
+  // keeps the calibrated thresholds meaningful; an entry
+  // without an art grid (none should exist once the v3 index
+  // builds) falls back to the pre-art weights exactly.
+  if (
+    a.art &&
+    b.art &&
+    a.art.length >= ART_W * ART_H &&
+    b.art.length >= ART_W * ART_H
+  ) {
+    return (
+      0.35 * hashColor +
+      0.47 * grid +
+      0.18 * gridDistance(a.art, b.art, ART_W, ART_H)
+    );
+  }
+  return 0.35 * hashColor + 0.65 * grid;
 }
 
 export type RankedHit = { id: number; dist: number };
@@ -391,6 +441,78 @@ function drawInto(
   }
 }
 
+/** Draw one fractional window of the source (fractions of
+    its width/height) scaled to w x h pixels — the art-crop
+    sampler. */
+function drawWindowInto(
+  source: CanvasImageSource,
+  sw: number,
+  sh: number,
+  fx: number,
+  fy: number,
+  fw: number,
+  fh: number,
+  w: number,
+  h: number,
+): ImageData | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const c2d = canvas.getContext("2d", { willReadFrequently: true });
+  if (!c2d) return null;
+  c2d.drawImage(
+    source,
+    fx * sw,
+    fy * sh,
+    fw * sw,
+    fh * sh,
+    0,
+    0,
+    w,
+    h,
+  );
+  try {
+    return c2d.getImageData(0, 0, w, h);
+  } catch {
+    return null;
+  }
+}
+
+/** A w x h ImageData (one pixel per cell) as a normalized
+    brightness grid: per-image mean 0 / unit variance, so a
+    photo taken under different light than the catalog scan
+    still compares on layout and art levels. Quantized with
+    GRID_SCALE, stored offset by +128. */
+function normalizedGridOf(
+  data: ImageData,
+  w: number,
+  h: number,
+): Uint8Array {
+  const cells = new Float32Array(w * h);
+  let mean = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const v =
+      0.299 * (data.data[i * 4] ?? 0) +
+      0.587 * (data.data[i * 4 + 1] ?? 0) +
+      0.114 * (data.data[i * 4 + 2] ?? 0);
+    cells[i] = v;
+    mean += v;
+  }
+  mean /= cells.length;
+  let variance = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const d = (cells[i] ?? 0) - mean;
+    variance += d * d;
+  }
+  const std = Math.sqrt(variance / cells.length) || 1;
+  const grid = new Uint8Array(w * h);
+  for (let i = 0; i < cells.length; i++) {
+    const q = Math.round((((cells[i] ?? 0) - mean) / std) * GRID_SCALE);
+    grid[i] = Math.min(255, Math.max(0, q + 128));
+  }
+  return grid;
+}
+
 /** Fingerprint of an image that IS one card, full-frame (a
     catalog scan, or a photo crop already framed on the card). */
 export function fingerprintOf(
@@ -446,29 +568,23 @@ export function fingerprintOf(
   // catalog scan still compares on layout and art levels.
   const gridData = drawInto(source, sw, sh, GRID_W, GRID_H);
   if (!gridData) return null;
-  const cells = new Float32Array(GRID_W * GRID_H);
-  let gMean = 0;
-  for (let i = 0; i < cells.length; i++) {
-    const v =
-      0.299 * (gridData.data[i * 4] ?? 0) +
-      0.587 * (gridData.data[i * 4 + 1] ?? 0) +
-      0.114 * (gridData.data[i * 4 + 2] ?? 0);
-    cells[i] = v;
-    gMean += v;
-  }
-  gMean /= cells.length;
-  let gVar = 0;
-  for (let i = 0; i < cells.length; i++) {
-    const d = (cells[i] ?? 0) - gMean;
-    gVar += d * d;
-  }
-  const gStd = Math.sqrt(gVar / cells.length) || 1;
-  const grid = new Uint8Array(GRID_W * GRID_H);
-  for (let i = 0; i < cells.length; i++) {
-    const q = Math.round((((cells[i] ?? 0) - gMean) / gStd) * GRID_SCALE);
-    grid[i] = Math.min(255, Math.max(0, q + 128));
-  }
-  return { hash, quad, grid };
+  const grid = normalizedGridOf(gridData, GRID_W, GRID_H);
+  // The art-crop second fingerprint: the same normalized grid
+  // over the artwork window only.
+  const artData = drawWindowInto(
+    source,
+    sw,
+    sh,
+    ART_X,
+    ART_Y,
+    ART_W_FRAC,
+    ART_H_FRAC,
+    ART_W,
+    ART_H,
+  );
+  if (!artData) return null;
+  const art = normalizedGridOf(artData, ART_W, ART_H);
+  return { hash, quad, grid, art };
 }
 
 /** Fingerprints of a hand-held photo under card-shaped crops
@@ -553,7 +669,10 @@ export function photoFingerprints(img: HTMLImageElement): {
 // V2 (Nov 3, 2026): entries gained the brightness grid, which a
 // v1 persisted index does not hold — a new cache bucket makes
 // every device rebuild once instead of matching grid-less.
-const FP_CACHE_NAME = "lorcana-fp-v2";
+// V3 (Nov 5, 2026): entries gained the art-crop grid — same
+// rule, a new bucket ("lorcana-fp-v3") so every device rebuilds
+// once with art windows instead of blending against missing data.
+const FP_CACHE_NAME = "lorcana-fp-v3";
 const FP_KEY = "/__fpcache/index.json";
 
 const entriesById = new Map<number, FpEntry>();
@@ -633,22 +752,27 @@ async function loadPersisted(version: string): Promise<void> {
       if (hit) {
         const parsed = (await hit.json()) as {
           v?: string;
-          e?: Record<string, { h: string; q: string; g?: string }>;
+          e?: Record<
+            string,
+            { h: string; q: string; g?: string; a?: string }
+          >;
         };
         if (parsed.v === version && parsed.e) {
           entriesById.clear();
           for (const [idText, sig] of Object.entries(parsed.e)) {
             const id = Number(idText);
             if (!Number.isFinite(id)) continue;
-            // An entry without its grid (a pre-v2 save) cannot
-            // take part in the combined distance — leave it out
-            // so the build refills it.
-            if (!sig.g) continue;
+            // An entry without its grid (a pre-v2 save) or its
+            // art grid (a pre-v3 save) cannot take part in the
+            // combined distance — leave it out so the build
+            // refills it.
+            if (!sig.g || !sig.a) continue;
             entriesById.set(id, {
               id,
               hash: b64ToBytes(sig.h),
               quad: b64ToBytes(sig.q),
               grid: b64ToBytes(sig.g),
+              art: b64ToBytes(sig.a),
             });
           }
         }
@@ -670,12 +794,16 @@ function persistSoon(version: string) {
     void (async () => {
       try {
         if (!("caches" in window)) return;
-        const e: Record<string, { h: string; q: string; g: string }> = {};
+        const e: Record<
+          string,
+          { h: string; q: string; g: string; a: string }
+        > = {};
         for (const entry of entriesById.values()) {
           e[String(entry.id)] = {
             h: bytesToB64(entry.hash),
             q: bytesToB64(entry.quad),
             g: bytesToB64(entry.grid),
+            a: bytesToB64(entry.art),
           };
         }
         const cache = await caches.open(FP_CACHE_NAME);

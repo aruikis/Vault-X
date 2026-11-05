@@ -2,6 +2,164 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.98.4
+
+- Back button, fixed at the root this time: your profile, a friend profile, and moving between Lego areas used to replace the app's one history entry instead of adding their own, so the phone's Back had nothing in the app to land on and left Vault X entirely. Those screens now take their own entry like every window in the app - one back returns to the exact screen you came from, windows still close on back first, and three backs from anywhere still exit. Also in this build: Library shelves move now - hold anywhere on a shelf (not just its little sign) to lift and drag it up or down, and items drag too, because a resting thumb drifting a few pixels no longer cancels the hold before it lifts; dragging no longer scrolls the page. Your Lego shelf sits even: the sets share one level at one size instead of two up and one dropped below. Sports Cards has your picked art: the leather glove with the baseball for Baseball, the basketball on the dark court for Basketball. Dr. Peter Venkman with Firehouse: its studio photo defeated the background cut-out and kept its white box, because the set is three separate pieces in one photo - the Firehouse, the figure, and the box - and the cut-out's safety check only trusted a product in one piece. The check now accepts a product in a few solid pieces too (it still rejects a picture the cut-out would shatter), so the white is stripped and the Firehouse, Venkman, and the box stand on the dark page like everything else. And a Lego set page whose details fail to load now says so with a Retry button instead of sitting empty
+
+## v1.98.3
+
+- Two fixes from your phone checks. The grader logos at the bottom of Search: TAG, SGC, and Beckett now sit on light backing plates, one even size each, so their real colors read clearly on the dark background instead of washing out in black - the logos themselves are untouched, still the companies own artwork in its native colors. And the Funko Pop search flash: tapping the search field no longer flashes another screen - the tap used to make the browser scroll the page to lift the field above the keyboard, painting whatever it scrolled past for a few frames. The field now takes focus without any page movement, in Funko and in every other section search field, since they all share the same search bar
+
+## v1.98.2
+
+- Share Vault X opens fast now: tapping Share used to take about seven seconds before the share sheet came up, because the tap first tried one share, then drew the invite picture card on the spot, then tried up to three more shares in a row - and every refused try cost seconds before the next one started. The invite card is now drawn in the background as soon as Settings opens, and the tap makes exactly one share call with everything ready, so the sheet comes up right away - inside a second. If that one call is refused, the invite is saved as a file right then, with the reason shown, instead of after a chain of retries
+
+## v1.98.1
+
+- Fixed the catalog download cancelling itself: on the Pokémon page, tapping download started it, then about five seconds later the button flipped back to Continue download. The Pokémon source answers with a server error every so often for a page it served fine seconds earlier, and one failed chunk used to end the whole download. Failed chunks are now retried automatically - the app retries the page fetch on the server, and if a chunk still fails the download stays in its Downloading state, shows a retrying note, and tries again with a short wait instead of giving up. Progress already landed is never redone, and this covers every catalog download, not just Pokémon
+
+## v1.98.0
+
+- Share Vault X now opens your phone's own share menu - the same menu you get when sharing a photo - with the invite ready to send. The old in-app share menu is gone
+- Only mine is now per section: turning it on in one place no longer turns it on everywhere else, and each section remembers its own setting. Disney Topps and Garbage Pail Kids have the toggle too
+- Garbage Pail Kids in Topps Alternate Universe lists its sets again, and Disney Topps and Garbage Pail Kids sets now show official Topps product artwork where Topps publishes it
+- Settings now stamps each version's go-live: under the green up-to-date line you will see the date and Central time the version you are running went live
+- Your tickets in Settings: a completed ticket stays in your list for one week, then moves under the new Completed tickets pill next to the Your tickets heading - tap it for your full completed history. Nothing is deleted
+- New tile art for Star Wars Topps and WWE Topps inside Topps Alternate Universe
+- The Lego Batmobile Tumbler (set 76240-1) now shows the photo with its information plaque
+- The We support grader logos at the bottom of the Search tab now appear in their official colors at one even size
+
+## v1.97.0
+
+- New: the Only mine toggle. Every list page with more than 15 sets or products now has an Only mine switch at the top of the list: flip it on and the page hides everything you own nothing from, so you only scroll through what you actually collect. Flip it off and everything shows again
+- It is one shared choice everywhere: the Lorcana chapter page, every game catalog (Pokemon, Magic, Star Wars Unlimited, Funko, Lego), the Sports Cards manufacturers, the Topps Alternate Universe brands, and the Sealed shelf (whose old Owned and All switch is now this same toggle). Set it once and it is remembered on every page
+- Lists of 15 or fewer never show the toggle, and nothing you own is ever hidden - a set where you own even one card always stays. Inside a set's own card grid nothing changes: missing cards still show ghostly as always
+
+## v1.96.0
+
+- Slab scanning now lives inside the card scanner: one scanner, two modes - Scan a card matches artwork as always, and Scan a slab (cert) reads the grading cert number only (QR code, barcode, a photo of the label, or typing). Shortcuts open it straight into slab mode: Scan a slab in the Search tab and Scan a PSA slab on the Sports Cards Baseball page
+- After a cert is read, the app checks the grading company's own online record and fills in what it actually finds: PSA records come with the grade, their description, and a copy of the slab photo they host for that cert (front, and back when there is one), imported into the app. Beckett, CGC, and TAG records could not be read from here and SGC publishes none, so those stay label-only with a link to the company's own page - and when no company photo exists, the card's catalog art stands in, clearly labeled a stand-in, ready for your own photo
+- New: the Card / Slab View - every saved slab now has its own page with its photo hovering and turning (flip it to see the back photo when there is one), a plus/minus stepper tied to that cert that saves right away, and its details and paid amounts in tabs. Saving a scan lands you right on it
+- The Search tab now shows We support: with the real logos of PSA, Beckett, SGC, CGC, and TAG along the bottom
+- Camera: card scans now also compare a second fingerprint taken from the card's artwork alone, and a scan that does not land at once takes two more quick frames and keeps the best read - foil insurance. The five-second stop is unchanged, counted from the moment the shutter fires
+
+## v1.95.0
+
+- New: graded cert scanning for the top five companies - PSA, Beckett (BGS), SGC, CGC Cards, and TAG. Every card catalog section (Sports Cards first) has a Scan graded cert button, and every card page has an Add a graded slab button: point the camera at the slab and the app reads the cert number from its QR code or barcode, or photograph the label and the printed cert, grade, and company are read off it, or type the number yourself
+- Each company keeps its own cert shape and grade scale: PSA and TAG have no 9.5, TAG certs start with a letter, SGC has its hyphenated long format, and CGC and TAG have a Pristine 10 above Gem Mint
+- You confirm the company, cert number, grade, and which card is in the slab before anything saves - then the slab lives on that card page drawn as a slab in that company's label colors, and counts as one owned copy. Paid price is optional
+- Within a company, one cert number can only ever be saved once: scan a cert that is already in your vault and the app shows you the card it already sits on instead of adding it twice
+- Each saved slab links out to the company's own record for that cert number. Vault X saves the number you scanned; it does not verify certs with the companies or price slabs from them
+
+## v1.94.0
+
+- Catalog downloads now keep downloading when you leave the page: the download runs at app level, so switching tabs never loses it, coming back shows the true live progress, and Continue can never start a second copy of the same download. Progress is saved chunk by chunk, so an interrupted download resumes where it stopped
+- Admin opens instantly: it now paints at once with the last-known numbers saved on your device, labeled with their as-of time, and refreshes in the background instead of waiting on the slowest server computation. Detail views still load only when you open them
+- Portfolio: the whole breakdown area below Movers is deleted - the Value by Set pills and the per-set table (value, Complete percent, dollars to Finish) are gone entirely. Most Valuable stays as its own section
+- Sports Cards and Topps Alternate Universe Home covers toned down to the same calm level as TCG Universe: Sports keeps its graded slab wall under soft spotlights on a quiet dark background, and Alternate Universe keeps the castle, starship and chrome cards with big clear lettering on a calm night sky
+
+## v1.93.1
+
+- Library display pieces: the Millennium Falcon and the TIE Fighter no longer carry a name label on the Library shelf - just the two pieces, exactly as they sit. Their names still appear on their own detail pages and in the catalog
+- Library Legos sign remade for clarity: a flat, fully saturated brick-red plaque with crisp white block letters and one hard shadow - no more blurry, washed-out lettering at shelf size
+- TCG Universe tiles are uniform now: the counts line under each game (binders, sets, owned) is removed, so all four tiles are the same size with art and name only
+- Pokemon back button: opening Pokemon from the TCG Universe page and pressing Back returns to the TCG Universe page - never Home, never out of the app - including while a catalog download is running
+
+## v1.93.0
+
+- Back button fixed at the root, app-wide: opening a game from TCG Universe or a brand from Topps Alternate Universe now takes a real step back in history, so one Back press lands on the universe page you came from instead of leaving the app. The same fix covers every set page inside Pokemon, Magic, Star Wars Unlimited, Funko, Legos, Baseball, Basketball, and the Alternate Universe brands - Back returns to the set list - and forum threads, which now return to the board. Popups and sheets still close on Back first, and three Back presses still exit to Muse
+- Millennium Falcon Pop fixed: the background cut-out was mistaking the Falcon light gray hull for the photo shadow and fading the whole ship out, which is why his page showed a black silhouette. The cut-out now protects the product itself - a figure can never be faded or silhouetted by its own matte again - so the Falcon shows his true colors, and every other Funko and Lego cut-out gets the same protection
+- TCG Universe cover toned down: the busy portal art is replaced with a calm, quiet version - same four characters in the four corners around the portal, a soft dark background, and big clear TCG Universe lettering
+- Search now starts at the first letter, everywhere: the search boxes inside the game sections, Comics, the deck builder, Portfolio Research, and the scan fix-it search all match from the first letter you type and keep their suggestions on screen while you keep typing, the same as the main Search tab, which already searched every catalog including Sports Cards and Topps Alternate Universe
+- Portfolio: Track and Research and the Movers section are now boxed with the same border as the rest of the Portfolio page
+
+## v1.92.0
+
+- Share Vault X rebuilt: tapping Share now calls your phone share sheet directly in the tap, the way sharing a photo works, so the sheet is the normal path. Copying is only a fallback now, and when it has to run, the button area says why the sheet did not open. If you cancel the sheet, nothing is copied behind your back
+- Edit display moved: the Library page no longer carries the Edit display control. The Library Comics wall just shows your slabs; choosing which slabs hang there (up to five) now lives in the Comics section under Library display wall. Your wall still shows your two signed comics until you change it
+- Baseball banner remade: a wide banner made for the shape, just the word Baseball in the same big purple lettering with the whole batter and bat inside the frame, no Vault X wording, at half the old banner height. The Basketball banner got the same remake after its check found the same cropping and wording problems
+- Topps Alternate Universe tile fixed: new tile art with Topps Alternate Universe in large chrome lettering that reads clearly at tile size, and the tile itself is now exactly the same size as every other Home tile
+- Back button re-audited across the whole app, with fixes where it failed: the phone Back from Baseball or Basketball now returns to the Sports Cards list instead of leaving the app, a comic opened from the Library wall now closes back to the Library in one press, the Library binder preview closes on Back first, and the Funko barcode scanner closes on Back first. The other named places were checked and already returned correctly: TCG Universe and back from each game, Sports Cards home, every Baseball and Basketball tab, Topps Alternate Universe and back from Disney, Star Wars, Garbage Pail Kids and WWE, Lego and Funko detail pages, Library shelves and flip binders, Search, card pages, Comics, Admin, and decks. Three Back presses still exit to Muse from anywhere
+
+## v1.91.1
+
+- Library figures stand bigger: the cut-out figures and sets on your Library shelves - your Millennium Falcon and your TIE Fighter included - are now about 30 percent bigger, still standing on the shelf with their studio backgrounds removed
+
+## v1.91.0
+
+- Sharing Vault X the phone way: the Share Vault X button in Settings now opens your phone's own share sheet — send the invite by text, email, Facebook, or whatever your phone offers, just like sending a photo. The message your friend gets needs only the Muse app: GitHub is gone from the invite completely, no accounts to create and nothing to be granted
+- Baseball now breaks down by the name on the cards: ten tabs — Topps, Bowman, Fleer, Donruss, Upper Deck, Score, Pinnacle, Leaf, Panini, and Beckett. Topps and Bowman carry real catalogs from Topps official checklists (Bowman sets moved out of the Topps tab into their own); the other names do not publish a downloadable catalog, so their tabs say so plainly for now
+- Basketball tabs reordered: Panini first (it held the NBA license for years), then Topps
+- New on Home: Topps Alternate Universe — a sixth main area with Topps Disney, Star Wars, Garbage Pail Kids, and WWE cards inside, each with its full catalog downloading from Topps official checklists, data only with no artwork downloaded
+
+## v1.90.0
+
+- Sports Cards grows up: Baseball now has a Topps tab with the WHOLE Topps baseball catalog downloading into it — every Topps and Bowman baseball set from Topps' own official checklists (2018–2026), card by card with number, player, team, and subset. Data only, the way you asked: no artwork is downloaded, and the checklists carry no prices, so none are invented
+- Basketball gets the same build-out: a Topps tab with Topps' official basketball checklists downloading the same way, and a Panini tab — Panini doesn't publish a downloadable checklist catalog and the big checklist sites forbid bulk downloads, so that tab says so plainly instead of filling with borrowed data
+- Sports sets browse like your other collections: set groups, binder grids with missing cards ghosted, a page for every card, owned steppers, and search that finds sports cards too
+- The catalog downloads run in chunks with a live progress bar and pick up where they stopped — tap Continue any time, and they also advance a little every morning on their own
+
+## v1.89.0
+
+- Home is condensed: your four trading-card games — Lorcana, Pokémon, Star Wars Unlimited, and Magic: The Gathering — now live behind ONE TCG Universe tile (the portal artwork you approved, with the Vault X wording removed). Tapping it opens a page with the four games as folders, each with its own artwork and counts; tapping a game opens it exactly as before, and its back returns to the TCG Universe page instead of Home. Nothing inside the games changed, and hiding or reordering still works — the eye window on Home now has an Inside TCG Universe group for the games.
+- Sports Cards joins Home as the fifth main area, with the slab-wall artwork you approved. Inside are two sports for now — Baseball and Basketball, each with its own artwork and page. Their catalogs have not been added yet, so the sport pages say so plainly instead of showing invented sets; when the catalog lands they will fill with set groups, binder grids, and card pages just like the other collections.
+
+## v1.88.0
+
+- Lego set pages are rebuilt in the card pages' clothes: the set's photo floats over a blurred blow-up of itself, the tabs are the card pages' own segmented bar, facts and figures sit in stat tiles and styled inset rows instead of plain lists, the Your copy block carries the opened and sealed steppers and Where it lives the way the card pages do, and the watch button and price alert moved to the Financial tab with the rest of the numbers. Every fact, figure, and financial from before is still there — your TIE Fighter 75095 page included.
+- Library: the Legos shelf sign is now a red brick plaque with a studded top edge and chunky brick-style lettering, sized to sit with the Lorcana, Comics, and Funko signs.
+- Library: your Lego sets stand on the Legos shelf as themselves — the actual set's photo, starting with your TIE Fighter — never as a book spine. Tapping one still opens that set's page.
+- Funko photos lose their baked-in white studio background everywhere they appear — the collection grid, search, the figure's own page, and the Library shelf — so a figure shows as just the figure or its box, nothing behind it, sized up on the shelf like a real figure standing there. The background cut-out is smarter about grey studio backdrops too, and when a photo host blocks the app from reading a picture, the app now fetches its own copy through the server and cuts that instead — your Millennium Falcon included.
+
+## v1.87.0
+
+- Share Vault X is simpler: the Muse invite link is gone. The Settings share section no longer asks you to paste a Muse invite link, and the message it sends no longer carries one — what the Muse Invite button copies is a whole block of text, not a link. The message still explains that your friend needs the Muse app first, then walks them through the install file, and your Vault X invite code still rides along so the app knows you sent them. Sharing works right away now, with nothing to paste in first.
+
+## v1.86.0
+
+- Lego set pages are built out in full, with two tabs. Set details carries theme and subtheme, release date, piece count, price per piece, ages, retired status and retirement date, dimensions, build time, UPC and EAN barcodes, the official LEGO description, and an openable minifigures and parts breakdown that names every figure, flags the ones exclusive to the set, and gives their combined value.
+- A Your copy block sits on every Lego set: opened and sealed copies counted apart (sealed copies are valued separately), condition, completeness with a missing-pieces count, what you paid per copy, the date the set was added, and Where it lives.
+- The Financial tab carries the retail price, the current market value split sealed vs used, growth against retail and annual growth, a value history chart, recent real sold listings with their dates and sources labeled, part-out value where a source publishes one, and the cheapest current listings for a sealed copy.
+- The honesty rule stands: a field no Lego source publishes shows as unavailable, never a guess, and any forecast is labeled an estimate. A set that has not been researched yet offers a Research this set button, and Jarvis gathers its facts from Brickset, BrickLink, BrickEconomy, Rebrickable, and Brickfact. Your TIE Fighter 75095 is researched already: retail 199.99 dollars, worth 399.68 dollars sealed and 265.46 dollars used, with its exclusive TIE Fighter Pilot figure at 80.34 dollars.
+
+## v1.85.0
+
+- Back button, fixed app-wide: every screen was audited, and Back (the in-app control and the phone gesture) now returns to the page you came from instead of dropping you on Home. Fixed spots: Admin sub-tabs such as Users, Activity, Trades, Tickets, Catalog, and Server now return to the Admin page; the Admin photo review screen returns to Admin; an opened deck (its page, the builder, and the collection check) returns to your deck boxes; an Inbox message, a shared deck message, the tickets window opened from the Inbox, and the welcome review opened from Admin each return to the screen underneath them. Popups still close first on Back, and three Back presses from anywhere still leave Vault X for Muse.
+- Library signs: the Quests shelf sign reads Lorcana Quests in full again — Lorcana in the same gold lettering as the other Lorcana signs, and Quests toned down to the Promos scale in a gold medieval serif. The Funko shelf sign is new: bubbly pop letters in pale sky on a deep blue plaque, with a little gold crown on the F.
+- Funko on display: a Funko figure you display in the Library now stands on the shelf for real — the white background of its photo is removed, the figure is a bit bigger, and its base rests on the shelf board instead of floating in a framed picture. The same treatment applies on the figure detail page, which now shows the figure on the dark themed presentation like the cards.
+- Comics: the 9.8 grade marker on a slab label moved to the left end of the label band, where it sits on a real CGC label. Nothing else about the comics changed.
+- The Zelle icon is rebuilt round and bubbly, drawn in the same line style as the cash icon beside it — still an outline with no solid fill, so it sits quietly with the other payment icons. It updates everywhere Zelle appears: Settings payment info, the split button, and the pay-the-seller line on an order.
+- Social: the avatar at the top of Friends is now the same smaller size as the Best Matches row avatars below it. The style is unchanged — only the size.
+
+## v1.84.0
+
+- Buy lists are back, by your call: on a set missing-cards sheet and on a deck collection check, tap Send buy list to my Muse and confirm — your Muse gets just the cards you are missing (their TCGplayer product IDs and quantities, nothing else from your collection) and builds the cart on TCGplayer under your sign-in, Near Mint, keeping single-card shipping at 3 dollars or under where it can. It never checks out or pays — you review the cart and approve payment yourself. Cards with no TCGplayer product ID are counted and named as not sent, and the per-card TCGplayer links are still there if you would rather shop by hand.
+
+## v1.83.1
+
+- Download progress, everywhere: the app-wide rule is now fully applied — every download control shows a live progress bar while it runs. The Settings artwork saver (Save artwork now) now shows a progress bar with the live count and percentage while the rest of your artwork saves, joining the catalog downloads in Pokémon, Magic, Star Wars Unlimited, Funko, and Legos and the up-front artwork download, which already showed theirs.
+
+## v1.83.0
+
+- One banner color everywhere: the top of the app is now the same deep dark blue on every tab and screen — Home no longer lightens it. The color you liked in Search is the color everywhere.
+- Search back fix: open a card from Search, do your business, press Back — you land back on Search with your search still there, ready for the next one. No more dumping to Home.
+- Search is now universal: the Search tab searches everything — Lorcana cards, Pokémon, Magic, Star Wars Unlimited, Funko, Legos, sealed products, and your graded comics — with matches grouped by type under the card results. The field reads Search all collectibles.
+- Typeahead from the first letter: suggestions populate the instant you type the first letter and narrow on every keystroke — no waiting for two or three letters, no submit.
+- Every set tile now wears the purple border: chapters, promos, Illumineer's Quests, and the set lists in Pokémon, Magic, Star Wars Unlimited, Funko, and Legos — one treatment everywhere, with the same selected ring.
+- Marketplace examples are watermarked: the two example listings (Elsa and Stitch) now carry a big diagonal EXAMPLE SALE watermark across the card art, so an example can never be mistaken for a real listing. Real listings are untouched.
+- Library: the Quests shelf sign is now a medieval knightly banner — iron, oak, and gold-leaf lettering — standing out the way the Promos sign does, in its own old-world style.
+- Library arranging: on your own Library, hold a spine or a shelf sign a moment, then drag to reorder shelves and the binders and items on them. Your arrangement saves as your own preference. A plain hold still opens the binder, and a tap still peeks.
+- Long-press count picker: buttons now run 1 through 6, with an open type-in box right after for any count — type 15, tap Set, done. The X still closes it.
+- Hyperia City Full Puzzle Art fixed: the assembled picture was the wrong photo. It is now assembled from Hyperia City's own nine puzzle pieces, so the full picture is exactly what the pieces make. Chapter One's Full Puzzle Art is verified as the Mickey Mouse assembled image its pieces form.
+- Funko Pop: your owned figures now greet you on entry — your shelf is the first thing in the section, starting with Han Solo in the Millennium Falcon. The header is its own bordered card with just your collection info, and the catalog description text is gone.
+- Funko barcode scan: the scan button is now Scan barcode. Scan the UPC on a Funko box — where a barcode is linked or researched, the figure opens; where nothing matches yet, the app says so plainly and offers search by name, and you can link that box's barcode to its figure once so every later scan lands on it.
+- Funko search suggestions now show three at a time, narrowing as you type.
+- Funko market data: a Funko item's page now has a Market box — value history built from eBay SOLD listings (never asking prices), with current sold values out of box, in box, and new. The Millennium Falcon's sold values are recorded (in box $36.50, new $42.39, out of box $14.90, via PriceCharting's completed eBay sales, Nov 4, 2026), and Funko values now record daily alongside your cards' re-pricing so the history builds over time. Figures with no recorded sales say so plainly.
+- Library Funko shelf: your Funko shelf in the Library now shows the actual figure — the real Millennium Falcon product photo — not a book. Books are for card binders.
+- Funko catalog is toys only now: apparel, Pop! Home, Pop! Pins, Pop! Pez, Pop! Books, board games, and shirt and pint packs are removed and blocked from future catalog imports. Pop! Plush stays. Nothing you own was in those groups.
+- Funko catalog images: pictures that fail to load now fall back to a clean styled placeholder — never a broken-image icon.
+- Download buttons show their work now: tapping a catalog download (like Pokémon's Continue download) shows a live progress bar with set and card counts while it runs — never click-and-nothing.
+
 ## v1.82.3
 
 - Removed the buy handoffs: the missing-cards sheet and the deck collection check no longer send your lists out to have a TCGplayer cart built for you. Nothing leaves the app. Every missing card still carries its own TCGplayer link — tap it to open that card on TCGplayer and shop there yourself, exactly as before.

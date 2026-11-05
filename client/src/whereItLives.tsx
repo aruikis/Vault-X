@@ -159,6 +159,7 @@ export function OwnedLocationBar({
   cardId,
   sealedName,
   comicId,
+  gameCardId = null,
   ownedQty,
   copiesQty,
   onCopiesMinus,
@@ -170,10 +171,14 @@ export function OwnedLocationBar({
   barClassName,
   children,
 }: {
-  targetKind: "card" | "sealed" | "comic";
+  targetKind: "card" | "sealed" | "comic" | "game";
   cardId: number | null;
   sealedName: string | null;
   comicId: string | null;
+  /** game_cards id when targetKind is "game" (a Lego set's
+      locations, Nov 4, 2026). Optional so the card/sealed/
+      comic call sites are untouched. */
+  gameCardId?: number | null;
   /** How many copies exist in total, for the placed line. */
   ownedQty: number | null;
   /** The number the right half shows (total copies owned). */
@@ -195,12 +200,18 @@ export function OwnedLocationBar({
   const queryKey = [
     "itemLocations",
     targetKind,
-    cardId ?? sealedName ?? comicId ?? "",
+    cardId ?? sealedName ?? comicId ?? gameCardId ?? "",
   ] as const;
   const locations = useQuery({
     queryKey,
     queryFn: () =>
-      api.listItemLocations({ targetKind, cardId, sealedName, comicId }),
+      api.listItemLocations({
+        targetKind,
+        cardId,
+        sealedName,
+        comicId,
+        gameCardId,
+      }),
     retry: 2,
   });
   const known = useQuery({
@@ -235,6 +246,7 @@ export function OwnedLocationBar({
         cardId,
         sealedName,
         comicId,
+        gameCardId,
         locType: args.locType,
         place: args.place,
         spot: args.spot,

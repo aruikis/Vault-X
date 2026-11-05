@@ -104,6 +104,91 @@ export function scrubWindowKeys(keys: string[]): void {
 }
 
 /**
+ * A window that lives ABOVE another window and must peel on
+ * its own (Anthony, Nov 4, 2026, app-wide back audit): the
+ * mail view above the Inbox, deck mail above the Inbox, the
+ * tickets window opened from the Inbox, the welcome review
+ * above the Admin hub. For these, the shared layering rule
+ * backfires — parent and child share ONE entry, so a single
+ * Back pops both and lands on whatever sits under the PARENT
+ * (Home), not on the parent itself. This variant's open()
+ * therefore ALWAYS takes its own pushed entry (the Library
+ * flip-binder's proven pattern): base entry + parent entry +
+ * this entry is exactly the three-back budget — Back 1 lands
+ * on the parent, Back 2 closes the parent, Back 3 exits.
+ * Everything else mirrors useWindowHistory: close() goes
+ * through history.back() when this open did the push, and a
+ * popstate trap closes the window whenever its key leaves
+ * the top entry.
+ */
+export function useOwnEntryWindow(
+  key: string,
+  setOpen: (v: boolean) => void,
+  seededOpen = false,
+) {
+  const pushedRef = useRef(seededOpen);
+  const heldRef = useRef(seededOpen);
+  const open = useCallback(() => {
+    if (heldRef.current) {
+      setOpen(true);
+      return;
+    }
+    setOpen(true);
+    const cur = readNavState() ?? {};
+    let pushed = false;
+    try {
+      window.history.pushState(
+        {
+          ...cur,
+          [key]: true,
+          vxWin: key,
+          vxDepth:
+            (typeof cur.vxDepth === "number" &&
+            Number.isFinite(cur.vxDepth)
+              ? cur.vxDepth
+              : 0) + 1,
+        },
+        "",
+      );
+      pushed = true;
+    } catch {
+      // History unavailable: the window still opened; its
+      // close will flip state in place.
+      pushed = false;
+    }
+    pushedRef.current = pushed;
+    heldRef.current = true;
+  }, [key, setOpen]);
+  const close = useCallback(() => {
+    if (pushedRef.current) {
+      try {
+        window.history.back();
+      } catch {
+        pushedRef.current = false;
+        heldRef.current = false;
+        setOpen(false);
+      }
+    } else {
+      scrubWindowKeys([key]);
+      heldRef.current = false;
+      setOpen(false);
+    }
+  }, [key, setOpen]);
+  useEffect(() => {
+    const onPopState = () => {
+      if (heldRef.current && readNavState()?.[key] == null) {
+        heldRef.current = false;
+        pushedRef.current = false;
+        setOpen(false);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [key, setOpen]);
+  return { open, close };
+}
+
+/**
  * The window side of the discipline, mirroring the old
  * useHistorySheet contract: open() shows the window and takes
  * the one history entry (or layers into it); close() goes

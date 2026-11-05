@@ -541,6 +541,38 @@ body::before {
   background-image: none !important;
 }
 
+/* THE BANNER RULE (Anthony, Nov 4, 2026, live on v1.82.2):
+   the top band of the app must be ONE single deep color —
+   the flat --bg he sees in Search — on EVERY tab and
+   screen. The flip he kept catching: fixed overlays
+   (Search) paint flat --bg from row zero, while the in-flow
+   tab pages leave the strip above/behind their top edge to
+   the body::before underlay, whose theme glows lighten
+   exactly that band (rainbow's blue glow measured
+   rgb(25,30,62) against Search's flat rgb(11,15,30)). This
+   fixed band covers the top of the viewport in flat --bg
+   for every page — behind all content (z-index -1, painted
+   after body::before in the same layer, so it wins over
+   the underlay) — solid through the banner zone, then
+   fading out so it can never seam against the themed
+   background below it. */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top, 0px) + 132px);
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(
+    to bottom,
+    var(--bg) 0,
+    var(--bg) calc(env(safe-area-inset-top, 0px) + 64px),
+    transparent calc(env(safe-area-inset-top, 0px) + 132px)
+  );
+}
+
 /* Headings and display numbers use a clean bold sans, matching the
    reference app's look (class name kept from the earlier serif theme). */
 .font-album {
@@ -628,6 +660,184 @@ body::before {
     1px 1px 0 #111111,
     2px 2px 0 #d92323,
     3px 3px 0 rgba(0, 0, 0, 0.85);
+}
+
+/* The word "Quests" on the Library's "Lorcana Quests"
+   shelf sign (Anthony, Nov 4, 2026, evening correction —
+   supersedes the same day's standalone medieval banner,
+   whose oversized lone "Quests" dropped the word "Lorcana"
+   entirely): the sign is now the Promos sign's plaque, with
+   "Lorcana" in the shared gold wordmark and "Quests" toned
+   down to sit beside it like the Promos part — Promos scale
+   (11px against the wordmark's 10px) and weight, but in a
+   medieval old-world serif with gold-leaf colouring: a
+   little flair, not loud. The retired banner styles
+   (.quests-sign / .quests-masthead / .quests-sign-rule)
+   are gone with it. Used ONLY for this one word. */
+.quests-word {
+  display: inline-block;
+  font-family:
+    "Palatino Linotype", "Book Antiqua", Palatino, Georgia,
+    "Times New Roman", serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  background-image: linear-gradient(
+    180deg,
+    #fdf0bd 0%,
+    #f3d67c 34%,
+    #c9962e 58%,
+    #8a5f14 82%,
+    #e9c766 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+}
+
+/* Funko shelf sign (Anthony, Nov 4, 2026, evening): the
+   Library's "Funko" shelf label, benchmarked on the Comics
+   masthead's quality but in Funko's own spirit — bubbly
+   rounded pop letters in pale sky with a chunky offset
+   shadow, bouncing letter by letter like the Promos
+   sticker, on a deep Funko-blue plaque with a soft top
+   light; a little gold crown perches on the F, Funko's
+   brand mark being its crowned script. Fixed pop colours
+   in every theme, the way the Comics sign keeps its own.
+   Sized to sit with the other shelf signs (13px masthead
+   scale, like Comics). Used ONLY for this one shelf sign. */
+.funko-sign {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px 7px;
+  border: 1.5px solid #0b2a5b;
+  border-radius: 6px;
+  background-image:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, #3a7bd5 0%, #2456a6 55%, #1a4486 100%);
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.funko-masthead {
+  position: relative;
+  display: inline-block;
+  font-family:
+    "Arial Rounded MT Bold", "Helvetica Rounded", ui-rounded,
+    "Baloo 2", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  line-height: 1;
+}
+
+.funko-letter {
+  display: inline-block;
+  color: #eaf6ff;
+  text-shadow:
+    0 2px 0 #123a75,
+    0 3px 6px rgba(0, 0, 0, 0.35);
+}
+
+.funko-crown {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  width: 15px;
+  height: auto;
+  transform: rotate(-10deg);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+
+/* Legos shelf sign (Anthony, Nov 4, 2026, late): the
+   Library's "Legos" shelf label gets the same fun
+   treatment as the Comics and Funko signs — a red brick
+   plaque with a row of lighter studs standing along its
+   top edge, and the word itself in chunky block letters
+   that read as built from bricks: heavy white block
+   lettering with the classic yellow halo and a hard black
+   offset, each letter nudged like a snapped-on brick.
+   Fixed brick colours in every theme, the way the Comics
+   and Funko signs keep theirs. Sized to sit with the other
+   shelf signs (13px masthead scale, like Comics/Funko).
+   Used ONLY for this one shelf sign. */
+/* CLARITY REMAKE (Anthony, Nov 5, 2026): the old sign read
+   blurry AND faded at shelf size — white 13px letters wrapped
+   in a four-way YELLOW halo of shadows (a blur by another
+   name) over a gradient that fell to dark maroon, with a
+   white inset glow washing the edges. The remake keeps the
+   approved red studded-brick plaque but renders it the way a
+   real sign is printed: a flat, fully saturated brick red,
+   no glow overlays, and chunky white letters with ONE hard
+   zero-blur offset shadow — vector text is the highest-
+   resolution source there is, so edges stay razor sharp and
+   colors stay solid at the size the Library actually shows. */
+.lego-sign {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 5px;
+  padding: 6px 12px 7px;
+  border: 1.5px solid #5f0407;
+  border-radius: 3px;
+  background-color: #d90416;
+  background-image: linear-gradient(
+    180deg,
+    #e8071a 0%,
+    #d90416 55%,
+    #c90313 100%
+  );
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55);
+}
+
+/* The studs: a row of brick studs standing on the plaque's
+   top edge — little red cylinders with a lit top face, in
+   the same saturated red family as the plaque. */
+.lego-sign::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  background-image: radial-gradient(
+    ellipse 5px 3px at 50% 100%,
+    #ff9a8a 0%,
+    #e8071a 55%,
+    #b00310 100%
+  );
+  background-size: 14px 6px;
+  background-repeat: repeat-x;
+  background-position: center bottom;
+  pointer-events: none;
+}
+
+.lego-masthead {
+  display: inline-block;
+  font-family:
+    "Arial Black", Impact, Haettenschweiler, "Franklin Gothic Heavy",
+    ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lego-letter {
+  display: inline-block;
+  color: #ffffff;
+  /* One hard offset shadow, zero blur: a crisp printed
+     edge with maximum contrast against the saturated red.
+     No halo, no stroke, no glow — nothing softens or
+     washes the letterforms. */
+  text-shadow: 2px 2px 0 #6d0608;
 }
 
 /* "Set complete" achievement marker (Anthony, Nov 4, 2026):

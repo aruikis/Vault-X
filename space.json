@@ -1,66 +1,135 @@
 {
-  "runtime": "typescript",
-  "platformVersion": 26,
   "entry": "client/dist/index.html",
-  "name": "Vault X",
-  "slug": "lorcana-binder",
   "managedCronJobs": [
     {
-      "id": "lorcana-binder-daily-finance-refresh",
       "action": "refreshFinance",
-      "schedule": "daily 06:30 America/Chicago",
-      "purpose": "Daily re-pricing of the collection's market values; appends one point per day to the value-over-time history. Paid amounts stay as recorded."
+      "id": "lorcana-binder-daily-finance-refresh",
+      "purpose": "Daily re-pricing of the collection's market values; appends one point per day to the value-over-time history. Paid amounts stay as recorded.",
+      "schedule": "daily 06:30 America/Chicago"
     },
     {
-      "id": "lorcana-binder-daily-catalog-audit",
       "action": "refreshCatalogAudit",
-      "schedule": "daily 07:15 America/Chicago",
-      "purpose": "Daily audit of the card catalog against the complete Lorcana card universe (LorcanaJSON, Lorcast, DL Promos): inserts newly released or newly sourced printings so every card can be scanned, searched, and added. Existing cards, ownership, and prices are never touched."
+      "id": "lorcana-binder-daily-catalog-audit",
+      "purpose": "Daily audit of the card catalog against the complete Lorcana card universe (LorcanaJSON, Lorcast, DL Promos): inserts newly released or newly sourced printings so every card can be scanned, searched, and added. Existing cards, ownership, and prices are never touched.",
+      "schedule": "daily 07:15 America/Chicago"
     },
     {
-      "id": "lorcana-binder-game-import-pokemon",
+      "action": "recordFunkoDailyPoints",
+      "id": "lorcana-binder-daily-funko-market",
+      "purpose": "Daily Funko market recording: appends today's sold-based value point to each researched Funko figure's value history (eBay sold data) and refreshes its catalog price, so Funko value history accumulates on the same cadence as card re-pricing.",
+      "schedule": "daily 06:35 America/Chicago"
+    },
+    {
       "action": "importGameCatalog",
       "args": {
         "game": "pokemon"
       },
-      "schedule": "daily 05:40 America/Chicago",
-      "purpose": "Continues the resumable Pok\u00e9mon catalog download (official Pok\u00e9mon TCG API) a chunk per day until the catalog is complete; no-ops as a light re-check once complete."
+      "id": "lorcana-binder-game-import-pokemon",
+      "purpose": "Continues the resumable Pokémon catalog download (official Pokémon TCG API) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 05:40 America/Chicago"
     },
     {
-      "id": "lorcana-binder-game-import-magic",
       "action": "importGameCatalog",
       "args": {
         "game": "magic"
       },
-      "schedule": "daily 05:50 America/Chicago",
-      "purpose": "Continues the resumable Magic: The Gathering catalog download (Scryfall) a chunk per day until complete."
+      "id": "lorcana-binder-game-import-magic",
+      "purpose": "Continues the resumable Magic: The Gathering catalog download (Scryfall) a chunk per day until complete.",
+      "schedule": "daily 05:50 America/Chicago"
     },
     {
-      "id": "lorcana-binder-game-import-starwars",
       "action": "importGameCatalog",
       "args": {
         "game": "starwars"
       },
-      "schedule": "daily 06:00 America/Chicago",
-      "purpose": "Continues the resumable Star Wars: Unlimited catalog download (Fantasy Flight official card API) a chunk per day until complete."
+      "id": "lorcana-binder-game-import-starwars",
+      "purpose": "Continues the resumable Star Wars: Unlimited catalog download (Fantasy Flight official card API) a chunk per day until complete.",
+      "schedule": "daily 06:00 America/Chicago"
     },
     {
-      "id": "lorcana-binder-game-import-funko",
       "action": "importGameCatalog",
       "args": {
         "game": "funko"
       },
-      "schedule": "daily 06:10 America/Chicago",
-      "purpose": "Continues the resumable Funko Pop! catalog download (open-source funko-pop-data dataset, scraped from Pop Price Guide / HobbyDB) a chunk per day until complete; no-ops as a light re-check once complete."
+      "id": "lorcana-binder-game-import-funko",
+      "purpose": "Continues the resumable Funko Pop! catalog download (open-source funko-pop-data dataset, scraped from Pop Price Guide / HobbyDB) a chunk per day until complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:10 America/Chicago"
     },
     {
-      "id": "lorcana-binder-game-import-lego",
       "action": "importGameCatalog",
       "args": {
         "game": "lego"
       },
-      "schedule": "daily 06:20 America/Chicago",
-      "purpose": "Continues the resumable Lego catalog download (Rebrickable official bulk data: sets.csv.gz + themes.csv.gz) a chunk per day until the catalog is complete; no-ops as a light re-check once complete."
+      "id": "lorcana-binder-game-import-lego",
+      "purpose": "Continues the resumable Lego catalog download (Rebrickable official bulk data: sets.csv.gz + themes.csv.gz) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:20 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "topps"
+      },
+      "id": "lorcana-binder-game-import-topps",
+      "purpose": "Continues the resumable Topps baseball catalog download (Topps' own official product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:25 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "topps-basketball"
+      },
+      "id": "lorcana-binder-game-import-topps-basketball",
+      "purpose": "Continues the resumable Topps basketball catalog download (Topps' own official product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:27 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "bowman"
+      },
+      "id": "lorcana-binder-game-import-bowman",
+      "purpose": "Continues the resumable Bowman baseball catalog download (Topps' own official product checklists from topps.com/pages/checklists, Bowman-branded baseball products, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:24 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "disney-topps"
+      },
+      "id": "lorcana-binder-game-import-disney-topps",
+      "purpose": "Continues the resumable Disney Topps catalog download (Topps' own official Disney product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:31 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "starwars-topps"
+      },
+      "id": "lorcana-binder-game-import-starwars-topps",
+      "purpose": "Continues the resumable Star Wars Topps catalog download (Topps' own official Star Wars product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:33 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "gpk"
+      },
+      "id": "lorcana-binder-game-import-gpk",
+      "purpose": "Continues the resumable Garbage Pail Kids catalog download (Topps' own official Garbage Pail Kids checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:35 America/Chicago"
+    },
+    {
+      "action": "importGameCatalog",
+      "args": {
+        "game": "wwe-topps"
+      },
+      "id": "lorcana-binder-game-import-wwe-topps",
+      "purpose": "Continues the resumable WWE Topps catalog download (Topps' own official WWE product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
+      "schedule": "daily 06:37 America/Chicago"
     }
-  ]
+  ],
+  "name": "Vault X",
+  "platformVersion": 28,
+  "runtime": "typescript",
+  "slug": "lorcana-binder"
 }

@@ -1122,3 +1122,426 @@ SEARCH + SCANNER FALLBACK — LIVE VERIFICATION (Anthony's defect reports, Nov 4
 ## v1.82.3 — buy handoffs removed (Nov 4, 2026, security correction)
 
 The v1.82.2 audit's security review flagged the two spawned-agent TCGplayer cart handoffs as a high finding: `requestBuyList` (set missing-cards sheet) and `requestDeckBuyList` (deck collection check) sent collection-derived missing/want lists (TCGplayer product IDs + quantities) to a spawned agent instructed to build a cart on an external merchant, and no user turn authorized the artifact to transact or cart on the user's behalf (an in-app confirm tap plus artifact-authored prompt text is not that authorization). Correction applied in full: both server actions are DELETED, and both client flows lost their send buttons, confirmation panels, and handoff copy. What remains is the cleared pattern only — click-only TCGplayer product links carrying the card's public product ID: the missing-cards sheet already had one per card, and each deck buy-list row now shows the same "TCGplayer ↗" link (checkDeck lines already carried tcgplayerId). Nothing about any missing/want list leaves the app. NOTE for the GitHub standing order: the v1.82.2 push (commit 9451f3064c433c2c7bba31f27f9df77d2f5ef059, tag v1.82.2) predates this correction — v1.82.3 is a NEW version whose source differs from the tagged push, so the next standing-order push should tag v1.82.3.
+
+
+## v1.83.0 round (Nov 4, 2026)
+
+Sources and decisions recorded for this round:
+
+- Hyperia City Full Puzzle Art: the TCGplayer "Set of 9" product
+  photo (723665) was the wrong picture on-device. The Full entry
+  now carries NO product photo and renders the composite
+  assembled from the set's own nine piece scans (TCGplayer
+  724311–724319, reading order verified against Hoard's
+  per-piece pages). Chapter One's Full Puzzle Art stays the
+  TCGplayer 512519 product image — the Mickey Mouse assembled
+  artwork (subject "Mickey Mouse - Brave Little Tailor").
+  Artwork caches bumped to art-v4 / lorcana-art-v4 with the
+  replacement.
+- Funko sold data: server/src/data/funkoSoldPrices.ts — eBay
+  SOLD-based values from PriceCharting's per-item page
+  (completed sales only), read Nov 4, 2026:
+  https://www.pricecharting.com/game/funko-pop-star-wars/han-solo-in-the-millennium-falcon-321
+  Han Solo in the Millennium Falcon #321 (game_cards id
+  22002): out of box $14.90, in box $36.50, new $42.39, UPC
+  889698399166. Daily points recorded by
+  recordFunkoDailyPoints (cron 06:35 America/Chicago);
+  history table game_card_price_history (migration 0062).
+- Funko toys-only cleanup: funkoIsNonToy predicate in
+  actions.ts classifies by series tags + title (apparel /
+  Tees & Apparel, Pop! Pins, Pez family, Pop! Books, Pop!
+  Home, board games / Funkoverse, shirt and tee packs, pint
+  glasses). Pop! Plush deliberately kept. The import filter
+  applies the same predicate; purgeFunkoNonToys removes
+  stored non-toy rows (owned rows are counted, never
+  deleted) and runs once against the durable database as
+  this build's post-submit action.
+- Funko catalog source (existing): the open-source
+  funko-pop-data dataset,
+  https://raw.githubusercontent.com/kennymkchan/funko-pop-data/master/funko_pop.json
+  — it carries no barcodes and no prices; image URLs point at
+  images.hobbydb.com, where a share of files are simply gone
+  (404). Client renders a styled placeholder on any image
+  error (SafeImg in games.tsx), never a broken-image icon.
+- Library order: library_orders table (migration 0061 along
+  with game_cards.upc); getLibraryOrder / saveLibraryOrder
+  store one JSON order per collector code ({sections,
+  entries}); unlisted ids keep natural order after listed
+  ones.
+- Universal Search: searchAllCollectibles covers the five
+  game catalogs + sealed products server-side; graded comics
+  match client-side from the in-app COMICS list; Lorcana
+  binder cards keep searchCards (now min 1 character —
+  typeahead from the first letter).
+- Funko image sweep (Nov 4, 2026, completed during the
+  v1.83.0 verification): all 23,911 distinct hobbydb image
+  URLs in the Funko catalog were probed; 22,561 answered,
+  1,350 returned 404 — those files are gone from hobbydb
+  itself, so there is no live source to relink them to.
+  Remedy shipped: SafeImg renders a clean styled placeholder
+  wherever an image fails, so none of the 1,350 ever shows a
+  broken-image icon. Dead list saved at
+  ~/workspace/github-sync/funko_dead.json.
+- Puzzle art audit (Nov 4, 2026, verified via getSection
+  payloads for every puzzle group): every Full Puzzle Art
+  that carries a composite assembles its OWN set's pieces in
+  reading order — Set 1 Mickey Mouse - Brave Little Tailor
+  (2x2), Set 2 Minnie Mouse - Wide-Eyed Diver (2x2), Set 4
+  Ursula - Sea Witch Queen (3x3), Set 6 Stitch (3x3), Set 9
+  Powerline (3x3), Set 11 Snowball Fight (3x3), Set 12 its
+  own 9 pieces, Set 13 Winnie the Pooh (3x3), Set 14 Hyperia
+  City its own nine pieces 3705-3713 (the wrong standalone
+  photo is removed). Sets 5, 7, 8, 10 Full entries carry no
+  composite (single cataloged art / lore-card designs); Set 3
+  has no puzzle inserts.
+- v1.83.1 download-progress completion: the Settings
+  ArtworkCacheLine "Save artwork now" running state gained a
+  real progress bar (live cached/total count + percentage),
+  completing the app-wide rule. Inventory checked: intro
+  artwork Download all (bar with MB + pct), GamePanel catalog
+  Continue download in all five game sections plus Legos
+  (bar with sets/cards counts, determinate by sets when
+  known, pulsing otherwise), Settings artwork saver (bar
+  added here). Instant single-file saves (collection export,
+  icon artwork) show a persistent "Download started" status
+  naming the file — they complete on the click itself.
+
+## v1.84.0 — buy-list hand-off RESTORED at Anthony's direction (Nov 4, 2026)
+
+The v1.82.3 security correction (above) deleted `requestBuyList` / `requestDeckBuyList` because no user turn had authorized the artifact to hand collection-derived lists to an agent that would cart on an external merchant. On Nov 4, 2026 (~6:06 PM CT voice call) the parent agent explained the concern to Anthony in plain terms; Anthony clarified the list is only the missing cards for the deck/set — not the whole library — said "Oh, I don't care" about that sharing, and approved restoring the feature ("Yeah"). That user turn is the authorization the correction was missing; the feature is restored with its scope exactly as he approved:
+
+- **Surfaces (both originals)**: the set missing-cards sheet (MissingSheet) and the deck collection check (DeckCheckView) each carry a "Send buy list to my Muse" button under the buy list, opening an in-app confirmation panel that states precisely what will be sent (counts of products/copies, the no-ID disclosure, the never-checkout rule) before anything fires.
+- **Server**: `requestBuyList` { groupKey, confirmed: literal true } and `requestDeckBuyList` { lines, confirmed: literal true } both funnel into `spawnBuyListHandoff`, which RECOMPUTES the list server-side (missingPocketsOf for a section; checkDeckLines for a deck) — the client never supplies the payload — aggregates to { TCGplayer product ID → quantity }, and spawns `ctx.agent.spawnTask` with a dedupeKey hashed from the payload (same list = same job; changed list = new job).
+- **Payload minimization (unchanged from v1.69.0)**: the spawned task receives ONLY public TCGplayer product IDs and quantities, plus standing cart instructions — no card names, sets, finishes, prices, totals, deck names, or usernames, and nothing about owned cards. Missing copies without a TCGplayer product ID are counted (`skippedNoId`) and disclosed in the panel and the sent confirmation, never silently dropped.
+- **Cart rules in the hand-off text** (Anthony's standing rules): Near Mint only; never keep a single-card package over $3 shipping (swap to a ≤$3 Near Mint listing or leave it out and report it); multi-card seller packages may run a little over $3; prefer fewer sellers; where a quantity covers multiple finishes of one product, prefer one of each variant; NEVER check out or pay — the cart is left ready and the Muse reports back in chat; final payment approval is Anthony's.
+- **Copy honesty**: the two surfaces' old "Vault X never sends this list anywhere" lines are replaced with the two real paths (per-card links to shop by hand, or the confirmed send to his Muse). Version bumped to 1.84.0 (feature, per his MINOR rule) with a changelog entry stating the restored behavior.
+
+## v1.85.0 — back-button app-wide audit & fix + five live-review corrections (Nov 4, 2026, evening)
+
+All from Anthony's live review the same evening. Version 1.85.0 (MINOR: new display treatments alongside the fixes).
+
+### Back-button audit (his demand: name every place audited and every place fixed)
+Failure class: a sub-view encoded by REPLACING state into its parent window's single history entry (or layered into it) collapses two layers on one popstate — Back closes the sub-view AND the parent window, landing on Home or exiting. Proven in-codebase fix (Library flip-binder precedent): the sub-view takes its OWN pushed entry over the parent's; base + parent + child is exactly the three-back budget.
+
+FIXED (7 spots):
+1. Admin hub detail views (Users, Activity, Trades, Tickets, Catalog, Server) — THE reported bug. openHubView now raw-pushes { lorcanaAdminHub: view, vxDepth+1 }; closeHubView pops via history.back() when pushed, else closes in place and scrubs the key (also fixing the stale-key wart); the popstate listener clears hubPushedRef when the landed view is the hub. Works for both the Home-window Admin and the Settings-embedded dashboard.
+2. Admin photo review screen — was plain useState over the hub (Back popped the whole Admin window). Now seeded/pushed under lorcanaAdminPhotos with a popstate trap; close pops its entry.
+3. Welcome review window (Admin Hub "View welcome page") — swapped from layering useWindowHistory to the new useOwnEntryWindow; Back now returns to Admin.
+4. Inbox order mail view — hand-rolled layering replaced by useOwnEntryWindow (lorcanaMail); Back returns to the Inbox.
+5. Inbox shared-deck mail — swapped to useOwnEntryWindow (lorcanaDeckMail).
+6. Tickets window — swapped to useOwnEntryWindow (lorcanaTickets); from Home it pushes exactly as before; from the Inbox it now peels back to the Inbox instead of Home.
+7. DecksSheet deck detail / builder / collection-check modes — modes now push their own entry (lorcanaDeckDetail: deck id; true for a brand-new deck) over the decks page entry; backToList pops it; a refresh on an open deck restores that deck's page from the entry. New hook: useOwnEntryWindow in historyNav.ts (own-entry variant of useWindowHistory).
+- Corollary, no code change: the Admin Registered Users page layers into the hub detail's entry, so with fix 1, gesture Back from it lands on the Admin hub (his standard: back to the Admin page) and its in-app Back returns to the Users detail in place.
+
+AUDITED, ALREADY CORRECT (no change): main tab navigation and section drills (replace by design, in-app backs route in place); Search overlay and card-over-Search (card pushes its own entry — his confirmed case); card sheet, sealed sheet, missing sheet, scanner (including its deliberate Search-entry hand-over); own/friend profile sheets and their badge/deck/library children; Library flip-binder and comics flip-binder (the precedent itself); profile QR window and Trust breakdown window; Collector ID expanded QR window; the Inbox window itself; example-alert sheet and collections panel over Home; edit-profile sheet; verified-badge explainer; count dial; game card detail sheet; comics detail sheet; Lego areas; forums thread view; Admin catalog detail drills, share-by-mail panel, and delete-confirm states (inline panels inside a page, closed by in-page controls — not full-screen layers). Standing rules kept: popups close first on Back; three Back presses from anywhere exit Vault X to Muse.
+
+### The five visual corrections
+- Social > Friends: the pinned Jarvis rail avatar shrunk from full rail width (64px) to the Best Matches row standard (h-9 w-9 text-sm); rendering unchanged. Other large avatars (profile headers, seller masthead, admin roster, marketplace snippet, forums) judged intentional portrait/row slots and left alone.
+- Zelle icon reconstructed bubbly: ZelleMark is now an SVG in the cash icon's own line style — plump squircle (rx 6.8, stroke 1.9, round caps) with the Z drawn as a rounded stroke path (2.15). Still unfilled currentColor line art per his no-clashing-solid-block rule. All call sites (Settings payment info, split-button cash segment, order pay-the-seller lines) update through the shared component.
+- Library "Lorcana Quests" sign: the standalone medieval banner is replaced by the Promos sign's plaque carrying "Lorcana" in the shared .lorcana-wordmark gold treatment plus "Quests" in the new .quests-word class — the retired banner's gold-leaf medieval serif (Palatino/Book Antiqua stack) at Promos scale (11px, weight 700). Retired .quests-sign/.quests-masthead/.quests-sign-rule CSS removed.
+- Library Funko sign: bespoke .funko-sign/.funko-masthead in theme.css — deep Funko-blue plaque with a top light, bubbly rounded 900-weight letters in pale sky with a chunky offset shadow, letters bouncing alternately like the Promos sticker, and a small gold crown SVG perched on the F. Lego keeps its plain plaque. Shelf contents and the actual-item display rule untouched.
+- Comics slab grade: SlabFront's label grid restructured from [1fr_auto_1fr] (grade centered, the same day's earlier direction) to [auto_1fr_auto] with the grade box FIRST — the left end of the label band, as on a real CGC label (his latest direction supersedes "towards the middle"). Grade box styling, the Mandalorian #4 1px nudge, title centering, hologram, and the small-print strip are all unchanged; applies everywhere SlabFront renders (Library wall, detail, flip view).
+- Library Funko shelf display: new client/src/cutoutImg.tsx — on-device white-background removal (CORS-clean load, corners must be near-white studio shots, edge flood-fill with shadow pixels kept as a faint contact shadow, one-pixel feather, session cache; any failure keeps the original photo). LibrarySpine's photo tile is now frameless and larger (h-36 w-104px), figure bottom-aligned so its base rests on the shelf board, name as a small plaque caption at the base over a fade strip. The Funko detail sheet in games.tsx uses the same cutout (figure on the dark themed page, silhouette drop shadow); other games' detail art unchanged.
+
+## v1.86.0 — Lego item detail build-out (Nov 4, 2026)
+
+Anthony's direction (Nov 4, live, confirmed as-is after his review of the field list): a Lego set's detail page was essentially empty; build it fully, to the card/Funko standard, for Lego items generally. Field list scoped from Brickset / BrickLink / BrickEconomy / Rebrickable / Brickfact.
+
+- STRUCTURE: the Lego branch of games.tsx CardDetailSheet now renders LegoSetDetail under the shared header/steppers: two tabs. SET DETAILS — facts grid (set number, theme, subtheme, year, exact release date, pieces, price per piece computed from retail + pieces, ages, availability, retired date or expected retirement labeled estimate, built dimensions, weight, build time, UPC, EAN); an openable Minifigures & parts breakdown (named figures with BrickLink codes, an Exclusive-to-this-set flag, per-figure and combined values; distinct parts and spare parts; the owner's completeness state tied back in); the official LEGO description verbatim; and a YOUR COPY block (opened/sealed steppers as before, condition, completeness + missing-pieces count, paid per copy, date added, Where it lives). FINANCIAL — retail price, market value split sealed vs used (+ published used range), growth vs retail computed from the two stored values, published annual growth, your copies' value (sealed copies at sealed value, opened at used) vs what you paid, a value-history chart with per-point sources, recent real sold listings (condition chip, date, title, price; range/average computed over the shown sales), part-out value labeled as part-out, cheapest current sealed listings labeled asking prices, and BrickEconomy forecasts in a dashed box labeled Forecast — estimate.
+- DATA MODEL (migration 0063): lego_set_details (one row per set, every fact nullable — null renders "Unavailable", never a guess; lists as JSON), lego_ownership_notes (paid/condition/completeness/missing/date-added; date_added stamped by setGameCardOwned on the 0-to-owned step and by setLegoOwnershipNotes when notes are first saved for an owned set — never backdated), item_locations.game_card_id + targetKind "game" (OwnedLocationBar extended; card/sealed/comic call sites untouched). Value history reuses game_card_price_history.
+- RESEARCH PIPELINE (the app's standing spawn/save pattern): researchLegoSet spawns an agent task with the full field list and per-field source authority (BrickEconomy for market/dates, BrickLink for inventory/part-out, Rebrickable for parts) that saves ONCE through saveLegoSetResearch (validates the set exists, upserts details, dedupes history points on date+source, appends today's market point, refreshes the catalog row's price). The detail page offers Research this set / Re-run research; unresearched sets show catalog facts + Your copy + a plain no-data Financial state.
+- 75095-1 TIE FIGHTER (Anthony's set; researched Nov 4, 2026, saved via post-submit + sandbox invoke): deep-research report at ~/workspace/research_notes/lego-75095-tie-fighter-details-20261104-2348/report.md; the decisive values were re-verified firsthand on the live pages before storing. Sources (verbatim): BrickEconomy set https://www.brickeconomy.com/set/75095-1/set/75095-1/set/75095-1/lego-star-wars-tie-fighter (retail $199.99, released May 3 2015, retired Sep 20 2017, sealed $399.68, used $265.46 range $244.27-$318.55, growth +99.85%, annual +7.89%, UPC 673419231343, Quick Buy eBay $335.47 / BrickLink $350.00 / Amazon $507.45, forecasts $427.82 1yr / $545.48 5yr, official LEGO description); BrickEconomy minifig https://www.brickeconomy.com/minifig/sw0632/tie-fighter-pilot (TIE Fighter Pilot sw0632, exclusive, $80.34); PriceCharting https://www.pricecharting.com/game/lego-star-wars/tie-fighter-75095 (12 dated eBay sold listings stored, 8 sealed + 4 used; New $339.24 / Complete $234.12 corroboration); BrickRanker https://brickranker.com/rankings/set/75095-1/tie-fighter (12 monthly average new-price history points Dec 2021-Sep 2026); Rebrickable https://rebrickable.com/sets/75095-1/tie-fighter/ ; BrickLink https://www.bricklink.com/v2/catalog/catalogitem.page?S=75095-1#T=I (inventory 1,681 parts + 1 minifigure); LEGO.com https://www.lego.com/en-us/product/tie-fighter-75095 (ages 14+, model 18.5 x 12 x 12.2 in). Parts summary 145 distinct / 29 spares from the inventory-statistics mirror https://brickbybrickfun.com/sets/75095-tie-fighter (Rebrickable's own parts list is script-loaded and not directly readable; build time "about 4.5 hours" is that source's labeled estimate).
+- CONFLICTS / HONEST GAPS for 75095 (reported, resolved conservatively): release day May 1 (Rebrickable) vs May 3, 2015 (BrickEconomy, US) — stored BrickEconomy's; retirement Sep 20, 2017 (BrickEconomy) vs Dec 31, 2017 (Rebrickable/BrickRanker year-end) — stored BrickEconomy's; EAN 5702015352383 (Merlin/retailer GTIN data) stored, BrickEconomy prints 4516793176540 beside the verified UPC; weight NOT stored (BrickLink catalog 2,804 g vs Merlin 2,010 g disagree, neither is a built-model weight) — shows Unavailable; part-out total NOT stored (no credible BrickLink part-out total published; Merlin's printed components are implausible as a total) — shows unavailable; BrickLink Price Guide values not extractable in this environment.
+- COPY FIXES RIDING ALONG: the Legos section footer and games.tsx source line no longer claim prices/minifigures are never shown — they now point to the per-set researched data.
+- Version 1.85.0 -> 1.86.0 (minor: new feature).
+
+## v1.87.0 — Muse invite link removed from Share Vault X (Nov 4, 2026)
+
+Anthony's direction (Nov 4, 2026): the Share Vault X instructions in Settings told the user to paste "your Muse invite link" — but what Muse's Invite button actually copies is a whole block of text, not a link, so the invite link is taken out.
+
+- CLIENT (App.tsx ShareVaultXSection + buildShareMessage): the "Your Muse invite link" field, its helper text, the Save link / Remove buttons, and the "add your link first" share gate are all gone; Share now sends immediately. The shared message no longer carries an invite link — its first line now tells the friend to get Muse from their app store — and the on-screen disclaimer says the same. The "Exactly what gets shared" preview now always renders (it was gated on a saved link). The Vault X invite code (VX- code in the message, invite lineage) is untouched and still rides along.
+- SERVER: getMuseInviteLink / setMuseInviteLink actions and the stored profile column are left in place but no longer read or written by the client — no migration, no data loss; a previously saved link simply sits unused.
+- Version 1.86.0 -> 1.87.0 (minor: behavior change to the share flow).
+
+## v1.88.0 — Lego detail reformat, brick Library sign, Lego shelf items, catalog-wide Funko background removal (Nov 4, 2026)
+
+Four presentation directions from Anthony's live review of v1.86.0/v1.87.0, all in one build. No data changes anywhere: no migration, no catalog rows touched, no prices or ownership modified.
+
+- LEGO DETAIL REFORMAT (games.tsx): Anthony — "the information is right, the format is wrong; make it look like the card detail pages." The Lego branch of CardDetailSheet and LegoSetDetail now wear the Lorcana card detail presentation end to end. The sheet gets the card page's blurred blow-up of the set's own photo as a fixed backdrop; the hero is a new LegoHeroImg — when the set photo's white studio backdrop cuts out (Rebrickable photos are CORS-clean; the TIE Fighter's does), the set floats over the backdrop with a silhouette drop shadow, and when it won't cut out the photo sits in the themed frame instead. The tabs are the card pages' segmented pill (Detail / Financial on cards; "Set details" / "Financial" here). Facts and figures are the card pages' vocabulary: headline stat tiles (Pieces / Year / Price-per-piece on the detail tab; Sealed value / Used value / Retail on Financial), facts as dark inset rows under album section headings, the minifigures & parts disclosure and the research box restyled to the same inset sections, and the Your copy block arranged like the card's "In your collection" block — album heading with the owned count in gold ("Don't own" in red), the Where it lives bar carrying the opened/sealed steppers (restyled to the card finish-row steppers), the recorded facts, and the record editor. The sheet header's generic steppers/watch/alert are suppressed for Lego (the steppers live in Your copy; WatchToggleButton + GameAlertBox moved to the top of the Financial tab, mirroring the card pages where alerts sit with the numbers). ALL v1.86.0 fields, values, sources, sold listings, history chart, forecasts, and honest Unavailable states are byte-for-byte the same data — presentation only. New shared pieces in games.tsx: LegoStatTile, LegoSectionTitle, LegoStepperRow; LegoFactRow restyled from a ruled row to an inset row.
+- LIBRARY LEGOS SIGN (theme.css + App.tsx): the plain "Legos" plaque is replaced by a Lego-brick sign — .lego-sign (deep Lego-red plaque, lighter top light, a studded top edge drawn with a repeating radial-gradient stud row) carrying .lego-masthead chunky 900-weight letters with a yellow halo, sized to sit with the Lorcana/Promos/Comics/Funko signs. Label still reads "Legos"; no change to shelves or ordering.
+- LIBRARY LEGOS SHELF (App.tsx): owned Lego sets were rendered as theme book spines ("SW"). The Legos section now builds one LibraryEntry per OWNED set (getGameOwnedItems) carrying its catalog photo and a full gameCard payload; LibrarySpine already renders image entries as frameless photo tiles (the Funko treatment), so the TIE Fighter stands on the shelf as its actual set photo — and tapping it deep-links through the existing vaultx:open-game-section event (now carrying the card payload, stored for GamePanel's open-card handoff) straight into that set's detail page. Rule, not one-off: any user's owned Lego sets render this way; an account with no owned sets keeps the honest "Nothing on this shelf yet" state.
+- FUNKO BACKGROUND REMOVAL, CATALOG-WIDE (cutoutImg.tsx rewritten + server proxy): Anthony broadened the shelf fix — every Funko photo with a baked-in white/studio backdrop must show just the figure or its box, everywhere it renders. Three layers. (1) MATTE V2: the old cutout gated its corners at near-white (min channel 225, chroma 26) and silently kept the photo when a studio backdrop was off-white/grey; the new matte SAMPLES the photo's own corner patches as the background reference (bails only when corners disagree, the backdrop is dark, or too saturated), floods from the edges through pixels within a color-distance of the sampled background, keeps darker neutral pixels only as a faint contact shadow, and sanity-bails when the flood removes under 2% or over 94%. Pixel-verified in this build against the real photos: the Falcon's HobbyDB shot (270x270, pure-white backdrop) floods 76.2% with the ship surviving; the TIE Fighter's Rebrickable shot (2134x1600) floods 77.3%. (2) APPLICATION: Funko now renders through the cutout on the games grid, search rows, the owned shelf, and the detail hero (it already did on the Library shelf and detail), replacing SafeImg in games.tsx for game === "funko" only; other games untouched. (3) SERVER IMAGE PROXY (new action getGameImageProxy in server/src/actions.ts): when a host serves a photo the browser cannot read pixels from (no CORS grant — the cutout's silent failure mode), the client asks the server to fetch that catalog row's OWN stored image URL (never a caller-supplied URL) and cache it as a blob (key game-img/<id>-<hash>); the same-origin copy is then displayed and matted. HobbyDB note: its bot check 403s sparse scraper-style headers — a bare "Accept: image/*" was refused in testing; the action sends a full ordinary browser header set and is served the photo (verified end-to-end in this build: Falcon id 22002 and TIE Fighter id 64974 both return ok with blob URLs). If a proxy fetch still fails, the figure shows the app's placeholder rather than a white box or a broken image. CutoutImg also falls back to the proxied copy when the direct photo fails to load at all. Cache: blob per catalog id, fetched once.
+- Version 1.87.0 -> 1.88.0 (minor: presentation redesign + new display behavior).
+- ADDENDUM (same build, probe-found): in the Funko section's search rows, dead HobbyDB URLs flashed the browser's broken-image glyph for a few seconds before the proxy rescue landed. CutoutImg now keeps the img invisible until its pixels actually arrive (with a ref check so a cached copy can't stick invisible), and its total-failure placeholder carries the catalog's dashed-border styling. Verified live in the probe: the same rows settled to the rescued cut-outs (Han Solo + Greedo, Han Solo) or the clean placeholder, with no broken icon remaining.
+- ADDENDUM 2 (same build, probe-found): after a reload in the locked-down audit browser, the Falcon's shelf tile sat empty — a blackholed image connection fires neither load nor error, so the rescue chain hung waiting on it. loadImage now has a 7-second deadline, and CutoutImg has a watchdog on the same deadline: take the proxied copy, else the clean placeholder — a tile never waits forever on a hung host.
+
+## v1.89.0 — TCG Universe condensation + Sports Cards (Anthony, Nov 4, 2026)
+
+- TCG UNIVERSE: Home's four TCG tiles (Lorcana, Pokémon, Star Wars Unlimited, Magic: The Gathering) condensed into ONE "TCG Universe" tile. Cover art is Anthony's APPROVED Portal mockup in its FINAL cleaned version (the "Vault X" wording removed from the top, as he directed) — source file ~/workspace/imagine_media/media-generation-tcg-universe-tile-final-no-vau-0-c98f8a8a-2fbd-4e74-a11a-974425196405.webp, copied to client/src/assets/collection-tcg-universe.webp (build-time asset, imported by the client; no remote URL).
+- Tapping the tile opens a new main view "tcg" (client/src/tcgUniverse.tsx): the four games as subfolder tiles with their EXISTING artwork (the same asset files the Home tiles used) and live counts — Lorcana from getBinder (binder count + owned card quantity), the catalog games from getGameCatalog (sets + owned totals). Tapping a game opens its section exactly as before (same navigate targets: binder/pokemon/magic/starwars); nothing inside the games changed. The page's Back pill returns to Home.
+- GAME BACK BEHAVIOR: a game opened from the TCG Universe page returns THERE, not Home (Anthony's direction). Implemented at the root without touching the games: session-storage-backed origin state ("vaultx-game-origin"); the TCG page's openers set it, every other navigation path clears it (navigate(), the vaultx:open-game-section deep-link listener, the profile binder opener). While it is set and the view is binder/pokemon/magic/starwars, the root renders a "‹ TCG Universe" pill above the section that navigates back to "tcg". Refresh inside a game restores the view and the origin together.
+- ORDER + HIDE/SHOW: one stored order and one hidden list now span NINE keys. Server COLLECTION_TILE_KEYS = [tcg, comics, lego, funko, sports, lorcana, pokemon, starwars, magic]; setCollectionOrder/setCollectionHidden enums extended to match. resolveCollectionOrder gained one rule: a missing "tcg" key (every pre-existing saved order) slots in at the position of the first saved TCG game key (or the front), NOT the end — so Anthony's arranged Home becomes TCG Universe first, then his Comics/Legos/Funko order, Sports Cards last; the games keep their saved relative order for the TCG page. Home renders only the main keys [tcg, comics, lego, funko, sports] from the full order (the drag machinery swaps within the visible main subsequence of the full logical order and saves the full order back — game keys keep their places). The TCG page renders the game keys in stored relative order, minus hidden ones. The Home eye window (CollectionsVisibilitySwitches) now shows two groups — "On Home" (the five areas) and "Inside TCG Universe" (the four games) — same switches, same stored list; hiding a game hides it on the TCG page.
+- SPORTS CARDS: fifth Home main area. Tile art is Anthony's APPROVED Option 2 "The Slab Wall" — source ~/workspace/imagine_media/media-generation-sports-cards-tile-option-2-sla-0-74693ffe-5f5f-4296-85d7-3d540fa70310.webp → client/src/assets/collection-sports-cards.webp. The tile behaves like the others (three-across wrap, long-hold drag reorder via the same machinery, hideable via the eye window). Tapping opens a new main view "sports" (client/src/sports.tsx) with exactly TWO sport subfolders — Baseball (art: ~/workspace/imagine_media/media-generation-sports-baseball-tile-0-cd2d6a88-1c2e-428e-84d9-1c5e8fda6ec3.webp → client/src/assets/sports-baseball.webp) and Basketball (art: ~/workspace/imagine_media/media-generation-sports-basketball-tile-0-737b0e2d-6d75-4323-8d4e-e21472561de9.webp → client/src/assets/sports-basketball.webp). Football, hockey, soccer and everything else are OUT until Anthony says otherwise (later steer narrowed the original five-sport list). Each sport opens its own page within the Sports view (its own in-place back to the sport list; the list's back returns Home) using the game sections' shell pattern (summary card, then the set-groups container with the purple accent border). NO catalog data exists for sports — the import is a separate scoping step Anthony is still deciding — so the sport pages carry honest empty states and invent nothing. His design rule stands for when the catalog lands: sports follows the existing game-section framework end to end (set groupings by year/brand, binder grids with the two/four-across toggle and ghosted missing cards, same card detail with hover/turn, owned steppers, Card Performance treatment, purple set borders, same navigation) with player/team/year/brand/parallel/rookie/graded-vs-raw slotted into it. No server schema or actions were added for sports.
+- New main views "tcg" and "sports" added to MainView/MAIN_VIEWS, so refresh-in-place and Back restore them like any section; neither is a bottom-menu tab (both open from Home only).
+- Version 1.88.0 -> 1.89.0 (minor: two new Home areas / navigation restructure).
+- TOPPS SPORTS CATALOGS (Nov 4, 2026, ~8:01 PM CT — Anthony verbatim: "create a tab for topps and let's download all of tops catalog" + "Don't download the artwork though... download the catalog for all of Topps Baseball"; memory adds the same build-out for Basketball with manufacturer choice left to Jarvis — Panini + Topps tabs): Baseball and Basketball are now organized by MANUFACTURER TABS using the existing game-catalog framework end to end (game_cards rows, resumable importGameCatalog, GamePanel binder grids/detail/steppers/search, universal search). New game keys: "topps" (baseball) and "topps-basketball". SOURCE (verified live 2026-11-05): Topps' OWN official checklists — index https://www.topps.com/pages/checklists links one text PDF per product on Topps' Shopify CDN (e.g. https://cdn.shopify.com/s/files/1/0662/9749/5709/files/MLB2401-2024ToppsSeries1BBChecklistV1.pdf and https://cdn.shopify.com/s/files/1/0662/9749/5709/files/2026_Topps_Series_1_Baseball_Checklist_2-23.pdf?v=1772557808). Discovery: fetch the index, keep anchor texts naming the sport (351 baseball links / 51 basketball links at build time; 3 XLS links and "[New Digital Checklist]" entries without files are skipped), sort by year then name. Each PDF is parsed in-action by server/src/data/pdfText.ts (pure-TS: FlateDecode inflate, ToUnicode CMaps, cm/Tm matrix replay, ALL-CAPS subset headers) into rows {number, player, team, flag (Rookie / Team Card / …), subset}. Spot-verified parses: 2024 Topps Series 1 = 2,815 rows; 2026 Series 1 = 3,262; 2018 Series 1 = 1,652; 2021 Heritage = 1,998; 2026 Bowman Baseball = 1,166; 2025-26 Bowman Basketball = 891. DATA ONLY per his direction: imageUrl and price are NULL on every sports row (checklists publish no prices); the client renders "Data only · no artwork" placeholders. Import chunk = 4 checklist files per call; Continue button loops it, and two new daily managed crons (06:25 topps, 06:27 topps-basketball America/Chicago) advance it. A file that fails fetch/parse is skipped and named in game_import_meta.state.failedFiles — auditable, never silent. Known source caveats: Topps' index covers 2018–2026 baseball (no pre-2018 products are published there) and its anchor text has at least one known mislabel ("2019 Topps Baseball Gypsy Queen" links a Clearly Authentic checklist) — sections carry the index's own product names. SOURCES RULED OUT (research ~/workspace/research_notes/topps-baseball-catalog-source-20261105-0203): TCDB (https://www.tcdb.com/TermsOfUse.cfm bans data mining/screen scraping; no API/export by policy) and mycardchecklist.com (its /terms bans scraping/bulk download; CSV export is login-gated) — neither is fetched by the importer. PANINI BASKETBALL GAP: Panini publishes no downloadable checklist index (paniniamerica.net/checklists is a JavaScript app; no public file/API endpoint verified), so the Basketball Panini tab ships as an honest no-catalog-yet panel with NO download control — never filled from a prohibited source. If Panini (or a licensed feed) opens a real catalog source, wire it as game key "panini-basketball" the same way.
+- PLATFORM v27 GUEST ACCESS (managed upgrade, applied with this build): the five capability call sites now sit behind agentCapabilityBlocked(ctx) in server/src/actions.ts — refreshFinance, refreshCatalogAudit, and researchLegoSet (ctx.agent.spawnTask), requestBuyList/requestDeckBuyList via spawnBuyListHandoff (spawnTask), and identifyCard (ctx.inference). Rule: capability runs ONLY for a proven local owner (viewer.source === "local" AND (isOwner OR a delegate — the owner's agent/schedule, which act as the owner)); a missing viewer never qualifies, and shared-runtime (cloudflare) viewers never qualify, owner included. Blocked callers get the actions' existing honest shapes: {started:false, taskId:null} for the refresh/research actions, the buy-list {ok:false, error} naming shared_artifact_vm_capability_unavailable, and identifyCard's empty no-read result (the scanner's on-device fallback path). The daily schedules keep running the refreshes locally as the owner; all other actions are plain DB reads/writes on the shared collection and are unchanged. NOT changed: the app's local collector-profile identity (single profile row + Supabase registry codes) — no per-viewer partitioning was introduced, and owner-only Admin surfaces keep their existing collector-code gates.
+- Version 1.89.0 -> 1.90.0 (minor: Topps tabs + full Topps baseball/basketball catalog downloads in Sports Cards).
+
+## Addendum (Nov 4, 2026, evening) — Share rewire, Baseball tabs, Topps Alternate Universe (v1.91.0)
+
+### Share Vault X — native share sheet, no GitHub (PRIORITY, Anthony's finished direction)
+- The existing Share Vault X control in Settings (directly under Send a change request; icon and layout unchanged at Anthony's simplification steer) opens the phone's native share sheet via `navigator.share` with the invite message; clipboard copy remains the fallback where no share sheet exists (confirmed with "Copied — paste it to a friend."). No channel list is built in-app.
+- The shared payload is the invite message only: Muse-required disclaimer first, then ask the sharer for the Vault X install file, hand it to their Muse, pick a username + first-open tour, approvals reassurance, plus the sharer's invite code when present. GitHub was REMOVED from the recipient flow entirely — the old step 1 ("or your GitHub username so you can be granted access") is gone; remaining "GitHub" strings in source are internal data-source attributions (the Pokémon dataset), never recipient-facing. The payload never claims a one-tap install: the recipient's own Muse performs setup from what was shared. There is no in-app install-file artifact to attach (verified by grep — the file is supplied by the sharer outside the app).
+
+### Baseball — ten manufacturer tabs (Anthony, Nov 4, 2026, ~8:20 PM)
+- Tabs: Topps, Bowman, Fleer, Donruss, Upper Deck, Score, Pinnacle, Leaf, Panini, Beckett — by the name on the cards, ownership irrelevant.
+- Topps tab = new game key `topps` filter change: Topps index anchors containing "baseball" and NOT "bowman". Bowman tab = game key `bowman`: anchors containing "baseball" AND "bowman" (110 Bowman anchors exist across sports; the baseball subset is the Bowman catalog). Same source, same URL (verbatim): https://www.topps.com/pages/checklists — filters are client-of-index predicates recorded here; the underlying checklist PDFs are the same cdn.shopify.com files listed in the Topps section above.
+- Fleer, Donruss, Upper Deck, Score, Pinnacle, Leaf, Panini, Beckett: NO lawful downloadable catalog exists (same ruled-out sources as before: TCDB https://www.tcdb.com/TermsOfUse.cfm and mycardchecklist.com forbid bulk download; these publishers publish no checklist file index). Tabs ship with honest no-source panels; Beckett's panel notes it is a grading/price-guide company, included per Anthony's list anyway.
+- Basketball tabs reordered per the parent brief: Panini (primary) first, Topps second.
+- Known transition note: a Topps import already in progress under the pre-split discovery (the sandbox test import; possibly an early production tap) keeps its original file list, so Bowman sections can appear under the Topps tab there; fresh downloads use the split filters. No reset action exists; production's scheduled imports start from the split lists.
+
+### Topps Alternate Universe — sixth Home area (Anthony, Nov 4, 2026, ~8:22–8:27 PM)
+- Home tile "Topps Alternate Universe" (key `toppsau`) + four sub-areas, all wired into the shared tile visibility/order system (server COLLECTION_TILE_KEYS + setCollectionOrder/setCollectionHidden enums extended; eye window gains an "Inside Topps Alternate Universe" group; drag-reorder shares the one stored order).
+- Artwork (Anthony delegated the picks to Jarvis; exact files he supplied): tile `client/src/assets/collection-toppsau.webp` ← ~/workspace/imagine_media/media-generation-topps-alternate-universe-tile-0-443bd3f1-e88b-4b3f-811d-00190b901ce0.webp (its bottom "Vault X Home • COLLECTION TILE" footer strip is cropped in presentation via a top-anchored 1.18 scale inside the overflow-hidden tile); Disney `collection-disney-topps.webp` ← media-generation-disney-topps-tile-0-968d0082-34f0-4821-adb1-30439d845404.webp; Star Wars `collection-starwars-topps.webp` ← media-generation-star-wars-topps-tile-0-84a7468a-7901-438f-b01c-8f2d723813ad.webp; GPK `collection-gpk.webp` ← media-generation-garbage-pail-kids-tile-0-0dd4350a-e26e-48d4-b4fc-c754d751cc58.webp; WWE `collection-wwe-topps.webp` ← media-generation-wwe-topps-tile-0-362440c9-fb97-4037-9d79-9a1c7788af5a.webp.
+- Catalogs — same Topps index, same parser, data only, image_url always null (the steer phrase "with image links" is NOT followed literally: the binding no-artwork rule for every Topps catalog wins, and the checklists themselves contain no image links to store):
+  - `disney-topps`: anchors containing "disney" — 9 products on the Nov 5, 2026 index (2025/2026 Topps Chrome Disney, Chrome Disney Sapphire, Disney Neon, Mint Disney, Disney Wonder, Vault Disney, Disneyland 70th). Name-based: "2025 Topps 30 Years of Toy Story" is a Disney product whose name lacks "Disney" and is therefore not included.
+  - `starwars-topps`: anchors containing "star wars" — 66 products.
+  - `gpk`: anchors containing "garbage pail" — 8 products.
+  - `wwe-topps`: anchors matching /\bwwe\b/ — 37 products.
+  Entertainment checklist PDFs use the same text layout (number + name + second column under subset headers); the second column lands in the finish field ahead of the subset, exactly like team for sports.
+- Daily continuation crons added for bowman (06:24), disney-topps (06:31), starwars-topps (06:33), gpk (06:35), wwe-topps (06:37), all America/Chicago, via space.json managedCronJobs + cron.add_artifact_action.
+
+## Addendum (Nov 5, 2026) — v1.92.0: Library figures +30%, Edit display relocation, banner remakes, AU tile fix, Share fix, back audit
+
+- Library shelf photo tiles (Funko/Lego, incl. Millennium Falcon + TIE Fighter): 104x144 -> 135x187 (+30%), shelf row wraps (shipped v1.91.1).
+- Edit display: removed from Library page (LibraryComicWall is display-only); the identical max-five picker (getLibraryComicDisplay/setLibraryComicDisplay, default aliens-1 + batman-136) now renders as LibraryDisplayPicker in the Comics section (comics.tsx), under the collection summary.
+- Baseball/Basketball banners: NEW generated wide banner art (media.generate_image, this build) — client/src/assets/sports-baseball-banner.webp (3200x800, "Baseball" only, full batter+batt, no Vault X) and sports-basketball-banner.webp (3200x800, "Basketball" only, full dunk player+hoop, no Vault X). SportPage renders the banner at h-[88px] (half the old h-44), object-cover center. The square tile arts (sports-baseball.webp / sports-basketball.webp) are unchanged and still used for the Sports list tiles.
+- Topps Alternate Universe Home tile: NEW generated art client/src/assets/collection-toppsau-v2.webp (1600x1600, castle/starship/chrome cards, "TOPPS ALTERNATE UNIVERSE" in large chrome lettering across the bottom third, no footer, no Vault X). The 1.18 scale crop is removed; all six Home tile labels now sit in a fixed h-11 row so every tile is identical in dimensions.
+- Share Vault X: navigator.share is now called synchronously as the first step of the tap handler with a canShare-shaped payload; cancel copies nothing; copy fallback shows the reported reason in-app. Payload content unchanged from v1.91.0.
+- Back audit fixes: Sports sport drill-in takes a pushed history entry (sportsSport); Library wall comic sheet takes its own entry (libraryComicSheet, useOwnEntryWindow); Library peek takes its own entry (libraryPeek); Funko barcode scanner takes the window entry (funkoBarcodeScanner, useWindowHistory). All other named cases verified in code as already conforming (see build report's named list).
+- Platform v28: no ctx.viewer viewerFbid/ownerFbid/displayName reads exist; agentCapabilityBlocked already keys on source/isOwner/delegate only. space.json platformVersion now 28.
+
+## Addendum — v1.93.0 (Nov 5, 2026, stacked steers)
+
+- BASKETBALL BANNER SPOT-CHECK (Anthony, Nov 5): verified against the
+  shipped v1.92.0 state — the Basketball banner is the remade wide art
+  (just "Basketball", full dunk player and hoop in frame, NO "Vault X"
+  wording), rendered by the same SportPage banner slot as Baseball at
+  the identical h-[88px] height. No change needed; re-verified in the
+  audit probe.
+- TCG UNIVERSE COVER, TONED DOWN (Anthony, Nov 5): the busy portal
+  cover is replaced by a calmer generated version —
+  client/src/assets/collection-tcg-universe-calm.webp (media
+  generation, this build): the same four-corner concept (wizard with
+  storybook top-left, electric mouse top-right, space soldier
+  bottom-left, hooded mage bottom-right) as quiet silhouettes around
+  a soft dim portal on a smooth dark background, low contrast, with
+  large clear "TCG Universe" chrome lettering at the bottom and no
+  other text. Wired as the Home tile art in place of
+  collection-tcg-universe.webp; eyeballed before wiring. The label
+  row and tile size are unchanged.
+- STANDING SEARCH RULE — FOREVER (Anthony, Nov 5, 2026): every new
+  section, tab, game, manufacturer, or collectible type added to
+  Vault X must ship with (1) coverage in the universal Search tab
+  ("Search all collectibles", searchAllCollectibles) labeled by
+  type/section, (2) instant typeahead from the FIRST letter,
+  narrowing letter-by-letter, no minimum characters, (3) suggestions
+  that never disappear mid-typing (previous results held via
+  placeholderData while the next keystroke resolves), (4) results
+  from the user's library/collection plus the catalog. This is a
+  permanent build requirement; every future addition is audited
+  against it, never assumed to inherit it.
+  Per-section audit this build:
+  - Search tab (universal): PASS — searchAllCollectibles covers all
+    12 game catalogs (pokemon, magic, starwars, funko, lego, topps,
+    bowman, topps-basketball, disney-topps, starwars-topps, gpk,
+    wwe-topps) plus sealed, comics matched client-side, Lorcana via
+    searchCards; server min(1); client enabled at >=1 with
+    placeholderData; rows labeled "Game Title · Section · #number"
+    with Owned/Missing from the collection.
+  - TCG Universe games (Pokémon / Magic / Star Wars Unlimited):
+    in-section GamePanel search FIXED from a 2-character minimum to
+    first-letter with placeholderData.
+  - Sports Cards (Baseball + Basketball, all 10 manufacturer tabs):
+    the tabs render GamePanel, so the same fix covers every tab;
+    universal coverage already present (topps, bowman,
+    topps-basketball catalogs).
+  - Topps Alternate Universe (Disney / Star Wars / GPK / WWE Topps):
+    GamePanel search fixed as above; universal coverage present.
+  - Lego: GamePanel (embedded) fixed as above; universal present.
+  - Funko: GamePanel fixed as above; universal present.
+  - Comics section search: FIXED from >=2 to first letter (local
+    filter, instant).
+  - Also fixed to first letter under the same standing rule: the
+    scan wrong-match fix-it search, the deck-builder card search,
+    and Portfolio Research's card search (all were >=2).
+  - Binder search (Lorcana): already first-letter, unchanged.
+- PORTFOLIO BORDERS (Anthony, Nov 5): Track & Research
+  (portfolioTools.tsx PortfolioTools) and the Movers section
+  (FinancePanel in App.tsx) are now boxed sections —
+  rounded-3xl border border-[var(--border)] bg-[var(--surface)]
+  p-3.5, matching the Portfolio Value box. The Movers list inside
+  dropped its own second frame (no card-in-card); the empty state
+  lost its duplicate border too.
+- FUNKO MILLENNIUM FALCON ALL-BLACK DETAIL — ROOT CAUSE AND FIX
+  (Anthony, Nov 5, FAILED on-device check): the catalog matte in
+  client/src/cutoutImg.tsx classified pixels as the product's cast
+  "shadow" when they were near-neutral, at least 10 levels darker
+  than the backdrop, and up to 130 away from its color. The
+  Millennium Falcon's hull is neutral LIGHT GRAY, so the edge flood
+  walked from the backdrop into the hull and classified the whole
+  ship as shadow, rendering it at ~12% alpha — a black silhouette
+  over the dark detail page. Fixes, all in the one shared matte so
+  every Funko and Lego cut-out (detail, grids, shelf, Library) is
+  repaired at once: (1) shadow band narrowed to pixels at most ~55
+  levels darker than the backdrop and within 55 of its color,
+  chroma <= 26 — a real contact shadow hugs the backdrop's value;
+  (2) a product-protection guard: if shadow-classified pixels
+  exceed 8% of the frame or 35% of all removed pixels, every
+  shadow pixel is restored to the full-color product and only the
+  true background is removed; (3) the matte sanity ceiling
+  tightened from 94% to 90% removed. The matte still only ever
+  writes alpha, never color. Reported as fixed PENDING Anthony's
+  on-device confirmation, per his instruction.
+- BACK NAVIGATION — ROOT FIXES (Anthony, Nov 5, re-demand; named
+  list in the build report): three drill-in shapes that lived only
+  in state now take real history entries, following the Sports
+  pattern from v1.92.0:
+  (1) Hub drill-ins at the root (App.tsx pushHubDrill/backToHub):
+  a game opened from TCG Universe (binder/pokemon/magic/starwars)
+  and a brand opened from Topps Alternate Universe
+  (au-disney/au-starwars/au-gpk/au-wwe) PUSH one entry naming the
+  hub (vxHub); device Back lands on the hub entry and the central
+  popstate listener restores the hub view; the on-screen hub pill
+  consumes the same entry via history.back() when it is on top.
+  (2) GamePanel section drill-in (games.tsx): a set/section opened
+  from the section list pushes its own entry (gameSection tag,
+  deliberately NOT the vxWin slot, so a card sheet opened inside
+  the section still pushes its own entry above it: base, section,
+  card = the exact three-back budget); Back returns to the section
+  list / brand page; "All sets" pill consumes the entry; deep-link
+  and refresh-restored sections seed the entry on mount; the depth
+  cap layers the tag in place when the budget is spent. Covers
+  Pokémon, Magic, SWU, Funko, Lego sets, every Baseball/Basketball
+  manufacturer section, and every AU brand's set pages.
+  (3) Forum threads (forums.tsx): a thread now pushes its own
+  entry; the existing popstate sync returns to the board on Back;
+  the in-page back consumes the entry; a refresh-restored thread
+  counts as pushed.
+  Everything else on the named list was re-checked against the code
+  and stands as verified in v1.92.0 (Search window, card sheets,
+  Profile/Comics origin restore, Admin windows, Library flip
+  binders and wall sheet and peek, decks stack, badge/QR/inbox/
+  tickets/mail windows, update view, sports pages, Lego areas,
+  Social areas and its windows, Settings sheets, Portfolio sheets).
+
+## Addendum — v1.93.1 (Nov 5, 2026, stacked steers)
+
+- LIBRARY NAME LABELS (Anthony, Nov 5): the LibrarySpine photo
+  tile's name plaque (and its bottom scrim) is suppressed for the
+  two display pieces he named — titles matching "Millennium
+  Falcon" or "TIE Fighter" — which he confirmed look perfect as
+  they sit. Names remain in detail pages, catalog listings, and
+  the tile's aria-label; all other shelf pieces keep their
+  plaques.
+- LIBRARY LEGOS SIGN CLARITY (Anthony, Nov 5 — blurry AND faded):
+  root cause was the CSS itself: 13px white letters wrapped in a
+  four-way yellow text-shadow halo over a red gradient falling to
+  dark maroon, plus a white inset glow — soft edges and washed
+  color by construction. Remade in theme.css (.lego-sign /
+  .lego-masthead / .lego-letter): flat fully saturated brick red
+  (#d90416 family, no glow overlays), letters up to 15px pure
+  white with ONE hard zero-blur offset shadow (#6d0608), studs in
+  the same saturated family. Vector text is the highest-resolution
+  source possible, so it stays sharp at real shelf size; verified
+  in the probe at Library display size. Same approved red
+  studded-brick plaque style.
+- TCG UNIVERSE COUNTS LINE REMOVED (Anthony, Nov 5): the
+  per-game counts line (for example "43 binders · 9,374 cards
+  owned" / "207 sets · 0 owned") is deleted from the TCG Universe
+  page tiles — it made loaded tiles taller and threw off the
+  grid. All four tiles are now art + name only, uniform; the
+  counts were not moved elsewhere on the page, and the catalog
+  queries that fed the line were removed with it. (The Topps
+  Alternate Universe page was not named and keeps its lines.)
+- POKÉMON BACK CASE — NAMED (Anthony, Nov 5): Pokémon is the
+  place the back button had just misbehaved for him. Result with
+  the v1.93.0 root fix in place: PASS — Pokémon opened from the
+  TCG Universe page rides the hub drill-in entry, so one Back
+  returns to the TCG Universe page (not Home, not out of the
+  app); probe-verified in v1.93.0 (Pokémon opened from the hub,
+  returned in one press). Back while a catalog download runs
+  behaves the same: the download is in-page state and never
+  intercepts history; its chunk progress is saved server-side
+  and resumable, and the daily schedule continues it regardless.
+
+## v1.94.0 addendum (Nov 5, 2026)
+- CATALOG DOWNLOAD CONTINUITY — VERIFIED ANSWER + FIX: Anthony asked three times whether a catalog download (named case: Pokémon "Continue download") keeps going after leaving the tab. Verified in the old code: the chunk loop lived in GamePanel's component state; on leaving, the panel unmounted — the loop's promise kept firing unseen, but its progress state died with the component, returning showed no live progress, Continue started a SECOND concurrent loop, the loop silently stopped after 60 chunks even when staying, and any reload killed it (chunks were always resumable server-side, so no data was ever lost). FIX: a module-level download manager in games.tsx (startGameImport / useGameImport via useSyncExternalStore), keyed by game, outside any component: runs to completion (2,000-chunk safety cap with a resumable note), progress survives tab switches, returning shows TRUE current progress, duplicate starts are no-ops. Covers all 12 GamePanel catalogs. The daily cron continuations in space.json also still advance each catalog server-side regardless.
+- PORTFOLIO "VALUE BY SET" AREA DELETED (Anthony's direction via memory update, Nov 5): the entire below-Movers breakdown block is removed from FinancePanel — the pill group (Value by Set / Value & Paid by Set / Value by Rarity / Price Buckets / By Type) AND the per-set table under it (Sets — value, paid, completion: value/paid/net/Complete %/$ to Finish), plus the now-dead state, content builders, per-set join code and the ValueBarChart component. Most Valuable, which Anthony named as staying, survives as its own standalone "Most Valuable" section in the same place with the top-10 share note.
+- ADMIN LOAD SPEED — PROFILE + FIX (re-report, Nov 5): profiled cause: getAdminStats is the app's slowest action by design (pages every Supabase collection_items row 1,000 at a time, bulk profile/connection/trust reads, per-table storage estimates — a dozen-plus round trips); the Nov 3 snapshot fix still left first paint waiting on the getAdminStatsSnapshot round trip (itself gated on a Supabase profile ensure), so a cold Supabase path left the hub on "Loading…" (sandbox timings: snapshot ~1-2.5s warm; the full compute similar warm, far worse cold/on-device). FIX: the last computed stats now persist on-device (localStorage vaultx-admin-stats-v1, owner payloads only) and seed BOTH Admin queries via initialData — the hub paints instantly with last-known numbers labeled by their real computedAt as-of time; snapshot + live recompute refresh behind; the stats query gets a 120s stale window so reopening Admin no longer re-runs the full compute every time (the Home badge shares the same cache at 600s); the pending-photos hub query gets a 60s stale window. Heavy detail data was already lazy (hub detail views render only when opened; Catalog detail and Server Registry are their own components mounted per-view) — verified, unchanged.
+- CALM COVERS COMPLETED: Sports Cards and Topps Alternate Universe Home tiles toned down to the TCG Universe calm level (Anthony, Nov 5). Sports: generated collection-sports-cards-calm.webp — the Slab Wall concept kept (three graded slabs under soft spotlights on a dark wall, generous empty space, no text). AU: generated collection-toppsau-calm.webp — castle silhouette + starship + two chrome cards on a muted indigo night sky, with "Topps Alternate Universe" in very large clear chrome lettering at the bottom, satisfying the standing AU lettering requirement; the tile's standard size and uniform label row are unchanged. Both eyeballed pre-wiring; no Vault X wording in either.
+
+## v1.95.0 addendum (Nov 5, 2026)
+- PSA CERT SCANNING (Anthony, Nov 5, 2026 — the one piece un-parked from the Nov 3 grading-integration parking lot; everything else about grading companies — other companies' cert lookups, pricing from the companies' own sites, the pricing-sources statement — STAYS PARKED): a PSA slab joins the vault by its cert number, first use case friends' PSA baseball slabs in Sports Cards. New table `graded_slabs` (migration 0064): game_card_id, company (only "PSA" written), cert (TEXT — real PSA certs carry leading zeros, e.g. 06139522), grade (PSA scale text incl. "Authentic"), paid (nullable), created_at. New actions: findGradedSlabByCert (the vault's OWN records only — never a PSA lookup), listGradedSlabs, addGradedSlab (refuses a duplicate cert with the existing slab returned; steps game_cards.owned_qty +1 — a slab is one owned copy), removeGradedSlab (steps owned back down), readPsaSlabPhoto (vision read of the slab LABEL photo via ctx.inference: cert digits + grade + label description line; unreadable fields come back null, never guessed; 25s race, failure = all nulls so typing takes over).
+- CLIENT (client/src/psaScan.tsx, wired in games.tsx GamePanel + CardDetailSheet): every card-catalog section (all GamePanels except Funko/Lego) carries a "Scan PSA cert" pill under the search/scan row; every card page carries a Graded copies block with slabs drawn as PSA-style slabs (white label band, red PSA wordmark, grade, cert over a digit-derived barcode strip) and an "Add a PSA slab — scan its cert" button. Scanner (modeled on the Funko barcode scanner, window-history entry "psaCertScanner"): live BarcodeDetector over qr_code/code_128/code_39/code_93/upc/ean; the QR code on newer PSA labels links to the cert's PSA page and the cert is extracted from that link (extractPsaCert); "Photograph the label instead" captures the live frame or a file photo for the OCR read; typing the digits always works. NOTHING saves from a read: all four paths land on one confirm screen (editable cert, grade via the shared VxSelect — PSA scale 1–10 with halves topping at 8.5, no 9.5, plus Authentic; optional paid; card pre-picked from a card page, or searched with the standing first-letter typeahead when opened from a section) with a live duplicate check — a cert already in the vault blocks saving and shows the card it sits on, with a button to open it. On save from a section, the slab's card page opens; from a card page, the scanner closes over the sheet and the new slab shows in its Graded copies block.
+- PSA LINK PROVENANCE: each slab links out to PSA's own cert page. URL shape verified 2026-11-05 against live PSA cert pages returned by web search — https://www.psacard.com/cert/27416553/psa (plus five more cert pages in the same result set, same shape) — so psaCertUrl(cert) = "https://www.psacard.com/cert/" + cert + "/psa" is built on PSA's published pattern, not guessed. Copy in the app states plainly that Vault X records the scanned cert and does NOT verify it against PSA's database or price slabs from PSA.
+- TOP-FIVE WIDENING (same day, Anthony via MEMORY.md update while the build ran — "take the top five"): cert scanning covers PSA, Beckett (BGS), SGC, CGC Cards, and TAG; other companies (HGA, ACE, Arena Club, AGS, ISA, GMA, KSA, MNT, PCA, Mana, CBCS, PGX…) stay parked, as do company pricing and the pricing-sources statement. Implementation generalized accordingly: graded_slabs.company now written for all five; duplicate rule is (company, cert) — within one company one cert is one slab. Per-company facts researched from the companies' published label/lookup documentation via web search 2026-11-05: PSA — digits with leading zeros, half grades top at 8.5 (no 9.5), cert page https://www.psacard.com/cert/27416553/psa (verbatim from search results, six cert pages same shape). Beckett — certs digits (older as short as 6, modern 10), full halves INCLUDING 9.5 Gem Mint, 10 is Pristine, labels color-coded (gold for Pristine 10 / Gem Mint 9.5, silver below, black for Perfect 10), per-cert page verbatim from results: https://beckett.com/grading/card-lookup?flag=1&item_id=135701 (and item_id=991290). SGC — 7 digits on black labels, 11 characters XXXXXXX-XXX on green/white; NO address carries a cert (lookup is a form with a bot check) at https://www.gosgc.com/cert-code-lookup (verbatim in source text), so SGC slabs link the form itself; SGC 10 is Pristine (gold label). CGC Cards — 10-digit certs, halves incl. 9.5, Perfect 10 and Pristine 10 above Gem Mint 10; per-cert page verbatim: https://www.cgccards.uk/certlookup/6177348021/ (CGC's own UK certlookup host). TAG — cert typically 1 letter + 7 numbers (F6396638, E4674997 verbatim from listings), NO 9.5 on TAG's published scale, Pristine 10 above Gem Mint 10, no Authentic; DIG report per cert verbatim from multiple listings: https://my.taggrading.com/card/R2524220 , https://my.taggrading.com/card/V5714018 , https://my.taggrading.com/card/M4913624 (also the tagd.co/<cert> short link). QR extraction recognizes all five link shapes and reads the company off the link; bare barcodes fall back to the picked company except TAG's letter+7-digits and SGC's hyphenated shapes, which self-identify. OCR action renamed readGradedSlabPhoto and reports the company it actually sees on the label. Slab visuals wear each company's label colors (PSA white/red, Beckett gold/silver/black by grade, SGC black/gold tuxedo, CGC blue, TAG dark case printing).
+
+## v1.96.0 addendum (Nov 5, 2026)
+- UNIFIED SCANNER + CARD / SLAB VIEW (Anthony, Nov 5, 2026): slab capture folded into the ONE scanner (ScanPanel mode switch: "Scan a card" artwork matching vs "Scan a slab (cert)" codes only — slab mode never starts the card camera/matcher, card mode never waits for codes). Shortcuts opening that scanner in slab mode: "Scan a slab — cert number" in the Search tab under the card-scan button, and "Scan a PSA slab" on the Sports Cards Baseball page (dispatches the vaultx:open-slab-scan window event; App opens slab mode). The standalone GradedCertScanner became SlabCapturePanel (gradedScan.tsx), hosted embedded in the scanner (game "any": the card pick rides searchAllCollectibles across every card catalog, Funko/Lego filtered out) and as the same overlay the game panels already used. Saving (or choosing an already-saved cert) lands on the new Card / Slab View (SlabDetailView, gradedScan.tsx): turntable hero with front-to-back flip when a back photo exists, a copies stepper tied to company+cert (plus/minus + long-press SidewaysCountDial, saves immediately via setGradedSlabQty, card owned_qty moves by the same delta, 0 removes), Details / Card Performance tabs (paid editable via updateGradedSlabPaid; the card's raw catalog price is labeled ungraded — no slab pricing is fetched or claimed), own-photo replacement via saveGradedSlabPhoto. Schema (migration 0065): graded_slabs gains qty (default 1), image_key, image_back_key, image_source ("company" | "user" | null), online_line, online_checked_at; removeGradedSlab now steps owned down by qty.
+- ONLINE CERT LOOKUP (new action lookupGradedCert) — PER-COMPANY RESULTS, all tested live 2026-11-05 from the server: PSA — FULLY WORKING. GET https://www.psacard.com/cert/<cert>/psa (browser UA) server-renders the record as a dt/dd definition list (Cert Number, Item Grade, Year, Brand/Title, Subject, Card Number, Category, Variety/Pedigree, Label Type); a cert with no record renders no pairs (verified: cert 999999999 → not-found). Grade text mapped ("GEM MT 10" → "10", "AUTHENTIC" → "Authentic"). Hosted slab photos ride the page payload as an images array (escaped JSON in the Next.js payload; mediumPath variants ~760px on d1htnxwo4o0jhw.cloudfront.net) — front = first, back = second; copies are imported into ctx.blobs at graded-slab/psa/<cert>/front.jpg|back.jpg, never hotlinked. Verified end-to-end in the sandbox: cert 142911085 (2025 Dragon Ball Super Son Goku FB05-119, GEM MT 10) returned grade + description line + BOTH photos imported; cert 12345678 (a "NO GRADE VOUCHER" record) returned found with no images — the no-hosted-photo case is real and handled. Beckett/BGS — UNREACHABLE: beckett.com/grading/card-lookup?flag=1&item_id=<cert> rate-limits automated reads (HTTP 429 at research time; the action makes ONE best-effort attempt per user scan and honestly reports unreachable). Manual-record-only + link-out. SGC — NO ONLINE RECORD EXISTS: its lookup is a form (https://www.gosgc.com/cert-code-lookup) with no cert-carrying URL; the action answers no-online-record without fetching. Manual-record-only + link-out. CGC Cards — UNREACHABLE from the server: cgccards.com drops automated connections and cgccards.uk/certlookup/<cert>/ serves a script-app shell with no parseable record; the action makes one best-effort attempt and only reports found if the served HTML actually carries the cert beside a grade. Manual-record-only + link-out in practice. TAG — UNREACHABLE anonymously: the public DIG API https://api.taggrading.com/graded-cards/public/detail/<cert> returned 403 FORBIDDEN_ACCESS to anonymous calls (with and without my.taggrading.com origin headers); one best-effort attempt per scan, manual-record-only + link to the DIG report otherwise. HONESTY RULES KEPT: only an image actually served for THAT cert is imported (the PSA extraction stays inside that cert's own images array); no company pricing or verification is claimed anywhere; when no company photo exists the slab shows catalog card art in a slab frame, captioned a stand-in, replaceable with the collector's own photo (image_source records "company" vs "user" vs none and the UI words each accordingly).
+- SEARCH TAB LOGOS ROW (client/src/graderLogos.tsx + client/src/assets/graders/): "We support:" at the very bottom of the Search tab with the five companies' REAL logos on uniform light chips. Provenance, all fetched 2026-11-05 and verified byte-for-byte after wiring (hashes compared against fresh fetches): PSA — official SVG from PSA's own brand assets, https://www.psacard.com/psa/images/brand/favicons/psa-favicon.svg (byte-identical, sha-verified). SGC — official SVG from SGC's own site, https://gosgc.com/assets/img/logo.svg (identical modulo a trailing newline). CGC — official CGC Cards SVG served as the cgccards.uk header logo, https://www.cgccards.uk/cassette.axd/file/resources/images/template/logo-f4f21409cb5bcd8e6be0ff31be2e9c02b071eae7.svg (content verified whitespace-insensitively identical; the site's current export is red CGC over black CARDS lettering). Beckett — beckett.com rate-limits automated access (429), so the copy is Beckett Media's official logo as hosted on Wikipedia, https://upload.wikimedia.org/wikipedia/en/e/e4/Beckett_media_logo.png , cropped to its artwork, resized to 103x112, stored as a PNG data URI (decoded bytes re-verified: 4,923 bytes, exact match against the processed original). TAG — official logo PNG from TAG's own store CDN, https://taggrading.com/cdn/shop/files/TAG_Logo_Official__NoText_Black_Outlined_260x.png?v=1674795543 (260x96, stored as a data URI; base64 re-verified character-for-character against a fresh fetch). No logo was redrawn, recolored, or substituted.
+- CAMERA / SCANNER HOMEWORK (card mode) — AUDIT + TWO CHANGES: audited against the Nov 3 homework spec in the shipped code: index completeness judged against the plan's own ids (countIndexedIds) — already in; candidate UNION with no vetoes (mergeScanResults unions vision + device, nothing dropped; server finalists advisory only) — already in; wider shortlist + margin gating (240 finalists, V3 nearest-5-within-best+0.10 widening, TIE_MARGIN definite gate) — already in; collector-line OCR as a vote only (identifyCard resolves the verbatim collector line among finalists/full catalog but an uncorroborated line never names a card, and an empty number pool falls through to the name read instead of discarding it) — already in; hard stop 5s / landing ~4.5s (SCAN_HARD_CEILING_MS / SCAN_LAND_AT_MS) — already in. CHANGED in this build: (1) art-crop second fingerprint — fingerprint.ts now samples a second normalized brightness grid from the artwork window (x 8–92%, y 7–46%) for every photo crop and catalog entry, blended into fpDistance at 18% (taken from the full-grid weight; thresholds unchanged); the persisted index cache bumped to lorcana-fp-v3 so devices rebuild once with art windows. (2) Multi-frame capture for foils — captureFrame matches the first frame on-device immediately (a definite printing goes straight through, unchanged timing); only a non-definite first frame takes up to two more frames ~120ms apart and identifies from the strongest match, and beginIdentify now takes the shutter timestamp so the 5-second ceiling is measured from the shutter, burst included. NOT claimed fixed: Anthony's on-device scans are the verdict; the five named test cards (The Queen - Conceited Ruler 3/P3, Minnie Mouse FOIL #4, Ink Drop (Blue), Tiana Legendary #196, Clarabelle - Out for a Stroll Hyperia #160) are out of his hands for about a week and he will test with other cards.
+
+## v1.97.0 addendum (Nov 5, 2026)
+- "ONLY MINE" TOGGLE — APP-WIDE (Anthony, Nov 5, 2026): every list page displaying MORE THAN 15 entries now carries the shared "Only mine" switch; ON hides every entry the user owns nothing from (zero owned in that set / zero copies of that product), OFF (the default) shows everything. It never hides anything owned ≥1 and never applies inside a set's own card grid (missing cards stay ghostly there); the Library's owned-only binder rule is untouched. Counting rule per Anthony's clarification: entries actually DISPLAYED on the page (tiles/rows the user scrolls), never internal data splits. Displayed counts measured 2026-11-05 against the app's own data: Lorcana chapters page 30 tiles (14 chapters + 13 promo binders + 3 Illumineer's Quests; puzzle groups render no tile) — toggle ON; Sealed shelf 63 products — toggle ON (its old local Owned/All switch was DELETED and the page now runs on the shared preference); Pokémon 15 set rows displayed today (catalog still downloading, 207 sets total) — no toggle at exactly 15, it appears by itself when the list passes 15; Magic 110 set rows today (681 total) — ON; Star Wars Unlimited 4 today (103 total) — appears later automatically; Funko 25 series rows (complete) — ON; Lego 150 theme rows (complete) — ON; Topps Baseball (Sports Cards) ~160 set rows today (346 total) — ON; Bowman 56 today (68 total) — ON; Topps Basketball 4 today (51 total) — appears later automatically; Disney Topps (AU) 9 rows, complete — NO toggle; Star Wars Topps (AU) 60 rows, complete — ON; Garbage Pail Kids (AU) 7 rows, complete — NO toggle; WWE Topps (AU) 35 rows, complete — ON; Comics 11 comics — NO toggle. Implementation: ONE GamePanel wiring (client/src/games.tsx) covers every game-catalog list (the four TCG games, Funko, Lego themes, all Sports Cards manufacturer tabs, all Topps AU brands); the Lorcana SetPicker and SealedPanel wire the same shared module (client/src/onlyMine.tsx, ONLY_MINE_THRESHOLD = 15). Preference plumbing mirrors the grid-density choice exactly: device localStorage mirror (vaultx-only-mine) for first-frame correctness + profile persistence — migration 0066 adds collector_profile.only_mine, getCollectorId carries it, setOnlyMinePreference saves it, and the root adopts the profile value on the same fetch as theme/gridCols. Verified: preference round-trips server-side (on → getCollectorId onlyMine 1 → off); probe drove the Lorcana page (toggle present, ON state renders), the Lego page with the preference carried ON from Lorcana (150 themes collapsed to the single owned Star Wars row; flipped OFF there), and the Pokémon page (rows render, no toggle at 15).
+
+
+## Home tile art picks (installed Nov 5, 2026)
+
+- Sports Cards tile (`client/src/assets/collection-sports-cards-calm.webp`): Anthony's picked Option 2 "Slab Shelf" — copied byte-for-byte from `~/workspace/imagine_media/media-generation-sports-cards-option-2-slab-she-0-c2f7840a-7b8e-4797-b401-ad9e460420fd.webp` (1600×1600, generated Nov 5, 2026). Two graded slabs on a shelf (baseball batter + basketball player silhouettes), "Sports Cards" baked in.
+- Topps Alternate Universe tile (`client/src/assets/collection-toppsau-calm.webp`): Anthony's picked Option 3 "Single Card" — from `~/workspace/imagine_media/media-generation-topps-alternate-universe-optio-0-32155705-48c6-405e-b335-bb98d6a6209b.webp` (1600×1600), with the small "VAULT X" corner wording removed by cropping the top 130 px (result 1600×1470) per his standing direction that Vault X wording comes off tile art. Single dark Topps card upright in blue-purple glow; "Topps Alternate Universe" + "Disney • Star Wars • Garbage Pail Kids • WWE" underneath.
+- Both render at the same aspect-square tile size as every other Home tile (no zoom), labels in the shared fixed-height row.
+
+
+## Sealed product photos — background removal (Nov 5, 2026)
+
+Anthony's standing rule: every sealed product photo is the item itself as a clean cutout on the app's background — no baked black/white/studio backdrop. Audit of `client/src/assets/sealed/` found 17 files with an opaque baked near-black backdrop (the rest were already true transparent cutouts): item-azurite-pack, item-fabled-pack, item-firstchapter-pack, item-floodborn-pack, item-hyperia-box, item-hyperia-pack, item-inklands-pack, item-jafar-pack, item-japanese-firstchapter-pack, item-shimmering-pack, item-ursula-pack, item-vine-pack, item-wilds-pack, item-winterspell-pack, item-hyperia-prerelease, item-great-hunny-rescue, and its media-generation source twin. Each was cleaned in place with an edge-flood matte (PIL): the backdrop color is sampled from the corners and only border-connected backdrop-like pixels (very dark, close to the sample) were made transparent, with a one-pixel feather — product pixels, including dark product detail enclosed by the product/case, are never touched. Verified per file (surviving opaque share 45–66%) and visually on composites over the app background (Hyperia booster box, Hyperia prerelease, Vine pack, Fabled pack, Great Hunny Rescue). These generated product photos (in acrylic display cases) are the same images the Nov 2–3 sealed presentation approved, minus the backdrop.
+
+
+## v1.98.0 addendum (Nov 5, 2026)
+
+### Disney Topps + Garbage Pail Kids section artwork (Anthony's direction, Nov 5)
+Source research: ~/workspace/research_notes/topps-au-product-artwork-20261105-0840/report.md. Topps' official checklist catalog is text-only; TCDB and mycardchecklist are prohibited sources. Found: official Topps EQL launch pages (launches.topps.com) serve hero product photos from cdn.eql.media; all 7 URLs below were verified live (HTTP 200, image/png) on Nov 5, 2026. They are stored in the game_section_art table via the importSectionArt action and ingested into blob storage by getSectionArt — never hotlinked at runtime. Card images: none exist from any permitted source for either section (0 card images). Products with NO artwork anywhere permitted: 2025 Topps Disneyland 70th Anniversary, 2026 Topps Disney Neon, 2026 Topps Mint Disney, GPK 2018 Horror-ible, GPK 2019 Horror-ible, GPK 2024 Chrome Sapphire, GPK 2024 Chrome 7 Hobby, GPK 2024 Chrome 7 Retail, GPK 2025 Worst of GPK. Caveat: the 2026 Topps Chrome Disney and 2026 Topps Vault Disney photos show sealed cases, not single boxes.
+
+- disney-topps / 2025-topps-chrome-disney — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/c734cbb4-2ce5-4963-b529-cefe9ec887af.png?auto=format%2Ccompress&ar=1%3A1&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2025-topps-chrome-disney
+- disney-topps / 2025-topps-chrome-disney-sapphire — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/fbd1a27c-2338-4c6f-a33e-31a5e8797313.png?auto=format%2Ccompress&ar=1%3A1&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2025-topps-chrome-disney-sapphire-edition
+- disney-topps / 2025-topps-disney-wonder — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/004a91dd-b97c-4451-b203-c080fc42e9df.png?auto=format%2Ccompress&ar=1%3A1&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2025-topps-disney-wonder
+- disney-topps / 2025-topps-mint-disney — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/db1d5c77-60aa-4421-b20d-827cb70f29d3.png?auto=format%2Ccompress&ar=1%3A0.8041958041958043&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2025-topps-mint-disney
+- disney-topps / 2026-topps-chrome-disney — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/8bc51087-34b1-45b0-8675-db1af2aa6cf7.png?auto=format%2Ccompress&ar=1%3A1.0095729013254786&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2026-topps-chrome-disney
+- disney-topps / 2026-topps-vault-disney — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/ae0264e0-c143-47df-b2f4-5a668b270c51.png?auto=format%2Ccompress&ar=1%3A1.4&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2026-topps-vault-disney
+- gpk / 2026-garbage-pail-kids-halloween — image: https://cdn.eql.media/draw-api/9201f031-26db-4f29-ad0a-8df9f073c959/88660c80-b45d-4fad-a6b6-e8bda23e0e54.png?auto=format%2Ccompress&ar=1%3A0.63232421875&fit=crop&ixlib=react-9.11.0&w=580 — page: https://launches.topps.com/en-US/launch/2026-garbage-pail-kids-halloween
+
+### AU tile art swaps (Anthony's picks, Nov 5)
+- Star Wars Topps tile: ~/workspace/imagine_media/media-generation-star-wars-topps-tile-final-0-a032e9fa-5d3e-432b-a621-33be3eb93ad8.webp (hooded figure from behind looking up at a starship, dark starry sky). Imported by toppsUniverse.tsx directly from the media workspace (the sandbox refused shell copies into client/src/assets); the bundler embeds the bytes into the app bundle.
+- WWE Topps tile: ~/workspace/imagine_media/media-generation-wwe-topps-tile-final-0-ce02f77f-0abf-4c97-810c-43efcda1f63f.webp (wrestler silhouette at ring ropes, gold belt hanging beside him, crowd lights, single spotlight). Same import route.
+
+### Lego 76240-1 photo swap (Anthony, Nov 5)
+LEGO's official alternate image via Brickset, showing the Tumbler on its stand with the black information plaque: https://images.brickset.com/sets/AdditionalImages/76240-1/76240_alt3.jpg (2330×1342). Migration 0068 updated the durable game_cards row; the Lego importer pins the same URL for set 76240-1 so fresh imports keep it. The blob cache key hashes the source URL, so the swap propagates through the normal media path everywhere the set appears.
+
+### Version go-live stamps (Anthony, Nov 5)
+version_live_stamps table + versionLiveStamp action: a version's go-live is recorded server-side the first time a running copy confirms the server serves that same version. v1.97.0 predates the table; its stamp is seeded from that build's recorded audit trail — verification session closed 2026-11-05T07:03:15Z, platform captured the live build minutes later — displayed as "Went live: November 5, 2026 · 01:03 CT". The stamp renders in Settings directly under the green up-to-date line, in the same green (text-emerald-400).
+
+### Only Mine per-section (Anthony, Nov 5 — reverses the v1.97.0 shared switch)
+Each section's toggle is independent, keyed by section ("lorcana", "sealed", or the GamePanel game key). Persistence: device mirror localStorage "vaultx-only-mine:<section>" + profile copy in the reorder-prefs store under "only-mine:<section>" via getReorderPrefs/setReorderPref. Disney Topps and Garbage Pail Kids are named exceptions to the 15-entry threshold (ONLY_MINE_ALWAYS).
+
+### Pokémon catalog download self-cancelling — diagnosis + fix (Anthony, Nov 5, 2026)
+Reported on-device: on the Pokémon page, tapping download starts it, then after about 5 seconds the page flickers and the button flips from "Downloading" back to "Continue download" — the download cancels itself, every time.
+Diagnosis (verified live from the app server during this build): the Pokémon TCG API (api.pokemontcg.io, the importer's exact page URL — pageSize=100, orderBy=set.releaseDate,number, select=id,name,number,rarity,images,set,tcgplayer) intermittently answers 500/502 with an empty body for pages it serves fine seconds earlier (roughly half of sampled page fetches failed while small queries succeeded). Chain: importPokemonChunk tolerates a failed page only after one page in the same call landed; a failure on a call's FIRST page throws, the importGameCatalog handler returns ok:false, and the client download loop in games.tsx (startGameImport) treated ANY ok:false (or thrown call) as the end of the download. The first chunk lands in ~4s and the next call fails in ~1s, matching the ~5s cancel Anthony saw. Progress was never lost (chunks resume server-side); the download just stopped and demanded a manual Continue, which hit the same flaky source.
+Fix: (1) server fetchJson retries a failed fetch twice with backoff (700ms, 1600ms) before giving up — 5xx/429/network errors retry, definitive 4xx answers do not; this covers the Pokémon, Magic (Scryfall), and Star Wars Unlimited paged importers that share the helper. (2) The client download loop treats a failed chunk as transient: it keeps the Downloading state, shows "The source hiccuped — retrying the download…", waits with a growing backoff (2s up to 10s), and retries the same resumable chunk; only 10 consecutive failed chunks stop the download, with the source's own message. Applies to all 12 GamePanel catalogs. Version 1.98.1.
+
+## v1.98.4 notes (Nov 5, 2026)
+- Sports Cards tile art: Anthony picked Option 1 from each generated options sheet in ~/workspace/imagine_media (baseball: media-generation-sports-baseball-tile-options-v-0-8f6cb776-385f-4ee8-b0d2-e7c5a4f4763b.webp, left panel; basketball: media-generation-sports-basketball-tile-options-0-d456643a-db49-47e1-b0f9-e3c9affb08b2.webp, left panel). Panels center-cropped to 900x900 and installed as client/src/assets/sports-baseball-tile-opt1.webp / sports-basketball-tile-opt1.webp; the wide banner art was rejected by Anthony and is untouched.
+- Back-button root cause: screens that replace the single app history entry while sitting above another screen (own profile, friend profile, Lego area hops) gave device Back nothing in-app to land on. They now push their own entry; Lego area hops push once then replace.
+- Funko cutout (Dr. Peter Venkman with Firehouse, HobbyDB catalog photo): measured on the real pixels, the matte flood removed the white cleanly but the PRODUCT-MASS GUARD rejected it — the set is three substantial masses (box 9892px, Firehouse 9369px, figure 2154px of 23709 surviving), none half the whole. The guard in client/src/cutoutImg.tsx now also accepts a multi-part product (masses each >=5% of surviving covering >=85%); shattered products still reject. Falcon re-measured: passes via the primary rule (53%), unchanged. A top-corners background salvage fallback was also added for photos whose bottom corners are not backdrop.

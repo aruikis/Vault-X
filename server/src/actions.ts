@@ -51,6 +51,12 @@ EBAY_SOLD_WINDOW_END,
 EBAY_SOLD_WINDOW_LABEL,
 } from "./data/ebaySoldPrices";
 import {
+  FUNKO_SOLD_PRICES,
+  FUNKO_SOLD_SNAPSHOT_DATE,
+  funkoSoldSnapshotByUpc,
+  funkoSoldSnapshotFor,
+} from "./data/funkoSoldPrices";
+import {
 VILLAGE_AGGRO_DECK_NAME,
 VILLAGE_AGGRO_LIST,
 } from "./data/villageAggroDeck";
@@ -62,6 +68,7 @@ historySeed,
 nonBinderTotals,
 sealedItems
 } from "./data/exportFinance";
+import { extractPdfLines, parseChecklist } from "./data/pdfText";
 
 /** The full binder catalog: the LorcanaJSON snapshot plus the
     hand-authored puzzle/lore insert entries (data/puzzleCatalog.ts)
@@ -130,7 +137,7 @@ const PAGE_SIZE = 12; // 4 across x 3 down, like his Vault X binder pages
     nobody keeps stale art. Sealed / comic / set-logo artwork is
     bundled with the app build itself (content-hashed files), so
     an app update already replaces those bytes directly. */
-const ARTWORK_VERSION = "art-v3";
+const ARTWORK_VERSION = "art-v4";
 
 /** Sealed items with Anthony's quantity overrides applied (the
     sealed_qty table; adjusted via the plus/minus controls on the
@@ -390,13 +397,14 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
 /** Full Puzzle Art assembly (Anthony, Nov 4, 2026): a set's
     Full entry whose assembled photo exists in a legitimate
     source keeps that photo. Where NO assembled image exists
-    anywhere the entry is assembled from the set's own piece
-    scans, joined in reading order. (Hyperia City originally
-    sat in this fallback because its "Set of 9" product was
-    believed imageless; that was wrong — product 723665 does
-    carry the assembled photo — so Hyperia now uses the photo
-    like every other set, and the composite remains only as
-    the render fallback if a photo fetch ever fails.)
+    anywhere — or the only "assembled" photo on offer is the
+    WRONG picture — the entry is assembled from the set's own
+    piece scans, joined in reading order. (Hyperia City is
+    the wrong-picture case, confirmed by Anthony on-device
+    Nov 4, 2026: TCGplayer's photo for its "Set of 9" product
+    723665 is a completely different picture, while its nine
+    piece scans are correct — so Hyperia's Full entry carries
+    no photo and this composite IS its assembled artwork.)
     Only true puzzle sets qualify, and only with a complete
     imaged piece set (9 for a 3x3, 4 for a 2x2): lore-card
     sets are excluded because their pictures live on the
@@ -1273,6 +1281,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     theme: null as string | null,
     language: null as string | null,
     gridCols: null as number | null,
+    onlyMine: null as number | null,
     tradeMode: null as string | null,
     tradeAvailability: null as string | null,
     registrySyncedAt: null as string | null,
@@ -1337,6 +1346,10 @@ const collectorIdResponse = z.object({
   /** Set-page grid density (2 or 4 across), or null when never
       picked (the default of 2 applies). */
   gridCols: z.number().nullable(),
+  /** "Only mine" list filter (1 = on, 0/null = off, the
+      default): long list pages hide entries he owns nothing
+      from. One shared choice across every section. */
+  onlyMine: z.number().nullable(),
   /** This user's own Vault X invite code (Anthony, Nov 4,
       2026 — invite lineage): carried by the Share Vault X
       invite they send; a newcomer's registration resolves it
@@ -3351,6 +3364,14 @@ const marketplaceListing = z.object({
   sellerUsername: z.string(),
   /** Built-in test profiles are labeled, never dressed up. */
   sellerIsTest: z.boolean(),
+  /** One of the two seeded EXAMPLE listings (Elsa / Stitch,
+      listed by the built-in test friend to demonstrate the
+      Marketplace): the client watermarks its photo
+      "EXAMPLE SALE" so it can never be passed off as a real
+      item for sale (Anthony, Nov 4, 2026). Only the seeded
+      demo listings carry this — real collectors' listings
+      never do. */
+  isExample: z.boolean(),
   kind: z.enum(["card", "sealed", "comic", "other"]),
   cardId: z.number().nullable(),
   sealedName: z.string().nullable(),
@@ -3627,6 +3648,11 @@ function toListingView(
     sellerCode: row.sellerCode,
     sellerUsername: row.sellerUsername,
     sellerIsTest: TEST_COLLECTOR_CODES.has(row.sellerCode),
+    isExample:
+      row.sellerCode === JARVIS_REGISTRY_PROFILE.collector_id &&
+      JARVIS_SEED_LISTINGS.some(
+        (s) => s.name === row.name && s.finish === row.finish,
+      ),
     kind: row.kind as "card" | "sealed" | "comic" | "other",
     cardId: row.cardId,
     sealedName: row.sealedName,
@@ -3997,6 +4023,135 @@ async function checkDeckLines(
   };
 }
 
+/** Result of a buy-list hand-off (restored Nov 4, 2026 at
+    Anthony's explicit direction — see spawnBuyListHandoff). */
+const buyListHandoffResponse = z.object({
+  ok: z.boolean(),
+  error: z.string().nullable(),
+  /** Distinct TCGplayer products handed over. */
+  products: z.number(),
+  /** Total copies across those products. */
+  copies: z.number(),
+  /** Missing copies with no TCGplayer product ID — they cannot
+      ride the hand-off and are disclosed, never silently dropped. */
+  skippedNoId: z.number(),
+  taskId: z.string().nullable(),
+});
+
+type BuyListHandoffResult = z.infer<typeof buyListHandoffResponse>;
+
+/** The TCGplayer buy-list hand-off, RESTORED Nov 4, 2026 at
+    Anthony's explicit direction. History: the original Nov 3
+    feature (requestBuyList / requestDeckBuyList) was removed in
+    v1.82.3 because no user turn had authorized the artifact to
+    send collection-derived lists to an agent that would cart on
+    an external merchant. On Nov 4, 2026 (~6:06 PM CT voice
+    call) Anthony was walked through exactly what the hand-off
+    sends, confirmed it is only the missing cards — not his
+    whole library — said he does not mind that sharing, and
+    approved restoring it. Scope, exactly as he approved:
+    - fires ONLY from the user's tap, behind the per-run
+      confirmed:true gate the client drives;
+    - the payload is ONLY the missing printings' public
+      TCGplayer product IDs and quantities — no card names,
+      sets, finishes, prices, totals, deck names, or usernames,
+      and nothing about the rest of the collection;
+    - cart preparation only — the receiving Muse builds the
+      cart on TCGplayer under the user's own sign-in and NEVER
+      checks out; final payment approval stays with the user.
+    The list itself is recomputed server-side from live rows
+    (never trusted from the client), so what is sent is exactly
+    what the user is looking at. */
+async function spawnBuyListHandoff(
+  ctx: Ctx,
+  items: { tcgplayerId: string | null; qty: number }[],
+  scope: "set" | "deck",
+): Promise<BuyListHandoffResult> {
+  const byProduct = new Map<string, number>();
+  let skippedNoId = 0;
+  for (const item of items) {
+    if (item.qty <= 0) continue;
+    if (!item.tcgplayerId) {
+      skippedNoId += item.qty;
+      continue;
+    }
+    byProduct.set(
+      item.tcgplayerId,
+      (byProduct.get(item.tcgplayerId) ?? 0) + item.qty,
+    );
+  }
+  const lines = [...byProduct.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  );
+  const copies = lines.reduce((sum, [, qty]) => sum + qty, 0);
+  if (lines.length === 0) {
+    return {
+      ok: false,
+      error:
+        skippedNoId > 0
+          ? "None of the missing cards carry a TCGplayer product ID, so there is nothing your Muse can build a cart from. The cards stay listed here with everything the app knows about them."
+          : "Nothing is missing — there is no buy list to send.",
+      products: 0,
+      copies: 0,
+      skippedNoId,
+      taskId: null,
+    };
+  }
+  // Single-flight key: the same list re-sent is the same job;
+  // a changed list is a new job. The key is internal — only the
+  // message below reaches the agent.
+  const payloadText = lines.map(([id, qty]) => `${id}x${qty}`).join(",");
+  let hash = 5381;
+  for (let i = 0; i < payloadText.length; i++)
+    hash = ((hash * 33) ^ payloadText.charCodeAt(i)) >>> 0;
+  const message = [
+    "Your user tapped “Send buy list to my Muse” in Vault X, their collection app, and asked you to build this buy list into a cart on TCGplayer under their own account sign-in.",
+    "The list is TCGplayer product IDs and quantities only — one line per product to add (each product page is https://www.tcgplayer.com/product/<id>):",
+    ...lines.map(([id, qty]) => `- Product ${id} × ${qty}`),
+    "Do this:",
+    "1. On TCGplayer, signed in as the user, add each product above to the cart at the stated quantity, Near Mint condition.",
+    "2. Follow the user's standing TCGplayer cart rules: Near Mint only; never keep a package that ships a SINGLE card for more than $3 shipping — swap that copy to a Near Mint listing at $3 shipping or under, or leave it out and say so in your report; when several cards ship together from one seller, a little over $3 for that package is fine; prefer fewer sellers where prices are close.",
+    "3. Where a quantity covers more than one finish of the same product (for example a normal and a foil copy of one printing) and the product page offers finish variants, prefer one of each variant over duplicates of a single variant.",
+    "4. NEVER check out, pay, or place an order. Cart preparation only — final payment approval is always the user's. Leave the cart ready on their account and report back to the user in chat: what went into the cart, anything left out and why, and the cart total before tax.",
+  ].join("\n");
+  // Guest access (platform v27): the hand-off spawns an
+  // agent task — owner-only, and unavailable in the shared
+  // runtime for every viewer. Nothing is sent.
+  if (agentCapabilityBlocked(ctx)) {
+    return {
+      ok: false,
+      error:
+        "Buy-list hand-off isn't available here (shared_artifact_vm_capability_unavailable) — it runs from your own Vault X, where your Muse can take the list. Nothing was sent.",
+      products: lines.length,
+      copies,
+      skippedNoId,
+      taskId: null,
+    };
+  }
+  const result = await ctx.agent.spawnTask(message, {
+    dedupeKey: `vaultx-buylist-${scope}-${hash.toString(36)}`,
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      error:
+        "The hand-off didn't start — your Muse couldn't be reached to take the list. Nothing was sent; try again in a moment.",
+      products: lines.length,
+      copies,
+      skippedNoId,
+      taskId: null,
+    };
+  }
+  return {
+    ok: true,
+    error: null,
+    products: lines.length,
+    copies,
+    skippedNoId,
+    taskId: result.taskId,
+  };
+}
+
 /** The built-in test friend's one displayed deck (copy-a-deck,
     Nov 3, 2026): Jarvis is the only other collector in the app,
     and his side of every social feature runs on his known stock
@@ -4254,14 +4409,41 @@ function parseDeckCards(
   }
 }
 
+/* Every tile key the collection order/visibility system
+   knows, in canonical default order (Anthony, Nov 4, 2026 —
+   the TCG Universe condensation + Sports Cards): Home's
+   main areas first (TCG Universe, Comics, Legos, Funko,
+   Sports Cards), then the four TCG games that now live
+   INSIDE the TCG Universe page (Lorcana, Pokémon, Star Wars
+   Unlimited, Magic: The Gathering). One stored order and
+   one hidden list serve both places: Home renders the main
+   areas in their stored relative order, the TCG Universe
+   page renders the games in theirs, and hiding works the
+   same in both. */
 const COLLECTION_TILE_KEYS = [
+  "tcg",
+  "comics",
+  "lego",
+  "funko",
+  "sports",
+  "toppsau",
   "lorcana",
   "pokemon",
-  "magic",
-  "lego",
-  "comics",
   "starwars",
-  "funko",
+  "magic",
+  "disneytopps",
+  "starwarstopps",
+  "gpk",
+  "wwetopps",
+] as const;
+
+/** The four TCG game keys, for the condensation's
+    slot-in rule in resolveCollectionOrder below. */
+const TCG_GAME_TILE_KEYS = [
+  "lorcana",
+  "pokemon",
+  "starwars",
+  "magic",
 ] as const;
 
 function parseHiddenCollections(json: string | null): string[] {
@@ -4279,11 +4461,18 @@ function parseHiddenCollections(json: string | null): string[] {
   }
 }
 
-/** The user's Home tile order resolved to the full tile list:
-    their saved keys first (deduped, valid keys only), then any
-    tile they never ordered — or that was added after they saved
-    — in its default position. Null/empty saved order = the
-    default order exactly. */
+/** The user's tile order resolved to the full tile list:
+    their saved keys first (deduped, valid keys only), then
+    any tile they never ordered — or that was added after
+    they saved — in its default position. Null/empty saved
+    order = the default order exactly. One condensation
+    rule (Nov 4, 2026): "tcg" did not exist when existing
+    orders were saved, so when it is missing it slots in
+    where the games it now contains used to start — at the
+    first saved TCG game key, or the front when none was
+    saved — instead of trailing at the end; the games keep
+    their saved relative order behind it for the TCG
+    Universe page. */
 function resolveCollectionOrder(json: string | null): string[] {
   const valid = parseHiddenCollections(json);
   const seen = new Set<string>();
@@ -4293,6 +4482,13 @@ function resolveCollectionOrder(json: string | null): string[] {
       seen.add(k);
       out.push(k);
     }
+  }
+  if (!seen.has("tcg")) {
+    const firstGame = out.findIndex((k) =>
+      (TCG_GAME_TILE_KEYS as readonly string[]).includes(k),
+    );
+    out.splice(firstGame >= 0 ? firstGame : 0, 0, "tcg");
+    seen.add("tcg");
   }
   for (const k of COLLECTION_TILE_KEYS) {
     if (!seen.has(k)) out.push(k);
@@ -4806,7 +5002,232 @@ const profileSummaryResponse = z.object({
     USD prices; Star Wars' official API publishes no prices,
     so its rows honestly carry none). */
 
-type GameKey = "pokemon" | "magic" | "starwars" | "funko" | "lego";
+type GameKey =
+  | "pokemon"
+  | "magic"
+  | "starwars"
+  | "funko"
+  | "lego"
+  | "topps"
+  | "bowman"
+  | "topps-basketball"
+  | "disney-topps"
+  | "starwars-topps"
+  | "gpk"
+  | "wwe-topps";
+
+/** Guest access (platform v27): actions that spend agent or
+    model capability — spawning agent tasks or running
+    inference — are owner-only operations, and the shared
+    runtime cannot run them for ANY viewer, the signed-in
+    owner included. They run only for a proven local owner:
+    the owner's own browser, or the owner's agent / schedule
+    delegates, which act as the owner. A missing viewer is not
+    proof of ownership, and a shared-runtime (cloudflare)
+    viewer never qualifies; blocked callers get each action's
+    plain "not started / unavailable" result, with
+    shared_artifact_vm_capability_unavailable named in the
+    message-carrying shapes, while the daily schedules keep
+    the same refreshes running locally. */
+function agentCapabilityBlocked(ctx: Ctx): boolean {
+  const v = ctx.viewer;
+  if (!v) return true;
+  if (v.source !== "local") return true;
+  return !(v.isOwner === true || v.delegate != null);
+}
+
+/** Graded-slab cert rules for the top five grading
+    companies (Anthony, Nov 5, 2026 — cert scanning for PSA,
+    Beckett (BGS), SGC, CGC Cards, and TAG; every other
+    company stays parked from Nov 3). Each company prints
+    its cert in its own shape and grades on its own scale
+    (researched from the companies' published label and
+    lookup documentation when this was built):
+    - PSA: digits only, leading zeros kept; half grades
+      top out at 8.5 (there is no PSA 9.5); plus Authentic.
+    - Beckett (BGS): digits (older certs as short as 6,
+      modern 10); full half grades INCLUDING 9.5 Gem Mint;
+      plus Authentic.
+    - SGC: 7 digits on black labels, or 11 characters
+      (XXXXXXX-XXX) on green/white labels; half grades
+      including 9.5; plus Authentic.
+    - CGC Cards: 10-digit certs; half grades including 9.5,
+      plus Pristine 10 and Perfect 10 above Gem Mint 10,
+      plus Authentic.
+    - TAG: typically 1 letter + 7 numbers; NO 9.5 (TAG's
+      published scale skips it); Pristine 10 above Gem
+      Mint 10; no Authentic designation.
+    Normalization never invents characters: it uppercases,
+    drops spaces, and (for the digit companies) keeps only
+    digits — SGC's 10 straight digits gain the printed
+    hyphen of the 11-character format. */
+const GRADING_COMPANIES = ["PSA", "BGS", "SGC", "CGC", "TAG"] as const;
+type GradingCompanyKey = (typeof GRADING_COMPANIES)[number];
+
+function normalizeGradedCert(
+  company: GradingCompanyKey,
+  raw: string,
+): string {
+  const cleaned = raw.toUpperCase().replace(/\s+/g, "");
+  if (company === "TAG") return cleaned.replace(/[^A-Z0-9]/g, "");
+  if (company === "SGC") {
+    if (/^\d{7}$/.test(cleaned)) return cleaned;
+    if (/^\d{7}-\d{3}$/.test(cleaned)) return cleaned;
+    const digits = cleaned.replace(/\D/g, "");
+    if (/^\d{10}$/.test(digits)) {
+      return `${digits.slice(0, 7)}-${digits.slice(7)}`;
+    }
+    return cleaned;
+  }
+  return cleaned.replace(/\D/g, "");
+}
+
+function gradedCertValid(
+  company: GradingCompanyKey,
+  cert: string,
+): boolean {
+  switch (company) {
+    case "PSA":
+    case "BGS":
+      return /^\d{5,12}$/.test(cert);
+    case "CGC":
+      return /^\d{7,12}$/.test(cert);
+    case "SGC":
+      return /^\d{7}$/.test(cert) || /^\d{7}-\d{3}$/.test(cert);
+    case "TAG":
+      return /^[A-Z0-9]{6,12}$/.test(cert) && /\d/.test(cert);
+  }
+}
+
+function gradedGradeValid(
+  company: GradingCompanyKey,
+  grade: string,
+): boolean {
+  const halves = [
+    "9.5", "8.5", "7.5", "6.5", "5.5", "4.5", "3.5", "2.5", "1.5",
+  ];
+  const whole = ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
+  const withNineFive = new Set([...whole, ...halves, "Authentic"]);
+  const noNineFive = new Set(
+    [...whole, ...halves, "Authentic"].filter((g) => g !== "9.5"),
+  );
+  switch (company) {
+    case "PSA":
+      return noNineFive.has(grade);
+    case "BGS":
+    case "SGC":
+      return withNineFive.has(grade);
+    case "CGC":
+      return withNineFive.has(grade) ||
+        grade === "Pristine 10" ||
+        grade === "Perfect 10";
+    case "TAG":
+      return (
+        (noNineFive.has(grade) && grade !== "Authentic") ||
+        grade === "Pristine 10"
+      );
+  }
+}
+
+/** The graded-slab shape every slab action returns (Nov 5,
+    2026, Card / Slab View build): the v1.95 record plus the
+    copy count under this company+cert, the imported slab
+    photos (app-owned blob URLs — the company's hosted bytes
+    are copied into blob storage at lookup time, never
+    hotlinked), where the front photo came from ("company" |
+    "user" | null), and the company's own online description
+    line when a lookup read one. */
+const gradedSlabZ = z.object({
+  id: z.number(),
+  company: z.string(),
+  cert: z.string(),
+  grade: z.string(),
+  paid: z.number().nullable(),
+  qty: z.number(),
+  imageUrl: z.string().nullable(),
+  imageBackUrl: z.string().nullable(),
+  imageSource: z.string().nullable(),
+  onlineLine: z.string().nullable(),
+  createdAt: z.number(),
+});
+
+async function gradedSlabShape(
+  ctx: Ctx,
+  r: typeof schema.gradedSlabs.$inferSelect,
+): Promise<z.infer<typeof gradedSlabZ>> {
+  return {
+    id: r.id,
+    company: r.company,
+    cert: r.cert,
+    grade: r.grade,
+    paid: r.paid,
+    qty: r.qty,
+    imageUrl: r.imageKey ? await safeBlobUrl(ctx, r.imageKey) : null,
+    imageBackUrl: r.imageBackKey
+      ? await safeBlobUrl(ctx, r.imageBackKey)
+      : null,
+    imageSource: r.imageSource,
+    onlineLine: r.onlineLine,
+    createdAt: r.createdAt,
+  };
+}
+
+/** The public cert-page URL for a company + cert — the same
+    destinations the client links out to, so the lookup and
+    the UI never disagree about where a record lives. SGC
+    publishes no cert-carrying URL (its lookup is a form), so
+    it returns the form's page. */
+function gradedCertPageUrl(
+  company: GradingCompanyKey,
+  cert: string,
+): string {
+  switch (company) {
+    case "PSA":
+      return `https://www.psacard.com/cert/${cert}/psa`;
+    case "BGS":
+      return `https://www.beckett.com/grading/card-lookup?flag=1&item_id=${cert}`;
+    case "SGC":
+      return "https://www.gosgc.com/cert-code-lookup";
+    case "CGC":
+      return `https://www.cgccards.uk/certlookup/${cert}/`;
+    case "TAG":
+      return `https://my.taggrading.com/card/${cert}`;
+  }
+}
+
+const GRADED_LOOKUP_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+/** PSA's cert page prints grades as words ("GEM MT 10",
+    "MINT 9", "NM-MT 8"); map the printed text onto the
+    app's grade values. Anything unrecognized comes back
+    null — the collector's own label read then rules, the
+    lookup never invents a grade. */
+function psaGradeFromText(raw: string): string | null {
+  const t = raw.toUpperCase().replace(/\s+/g, " ").trim();
+  if (t.includes("AUTHENTIC")) return "Authentic";
+  const map: [string, string][] = [
+    ["GEM MT 10", "10"],
+    ["GEM MINT 10", "10"],
+    ["MINT 9", "9"],
+    ["NM-MT 8", "8"],
+    ["NM 7", "7"],
+    ["EX-MT 6", "6"],
+    ["EX 5", "5"],
+    ["VG-EX 4", "4"],
+    ["VG 3", "3"],
+    ["GOOD 2", "2"],
+    ["FAIR 1.5", "1.5"],
+    ["FR 1.5", "1.5"],
+    ["POOR 1", "1"],
+    ["PR 1", "1"],
+  ];
+  for (const [needle, grade] of map) {
+    if (t.startsWith(needle)) return grade;
+  }
+  const m = t.match(/\b(10|9|8|7|6|5|4|3|2|1)(\.5)?\b/);
+  return m ? `${m[1]}${m[2] ?? ""}` : null;
+}
 
 type GameRow = {
   game: string;
@@ -4845,12 +5266,44 @@ function asNum(v: unknown): number | null {
 }
 
 async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: { "user-agent": "VaultX catalog import" },
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
-  return (await res.json()) as unknown;
+  // Transient-source retry (Anthony, Nov 5, 2026 — the
+  // Pokémon download that cancelled itself ~5 seconds in):
+  // the Pokémon TCG API intermittently answers 500/502 for
+  // a page it served fine seconds earlier (verified live
+  // from this server: the importer's exact page URL failed
+  // roughly half the time while small queries succeeded).
+  // One such answer used to fail the whole chunk call, and
+  // the client loop treated that single failure as the end
+  // of the download. A failed fetch now retries twice with
+  // a short backoff before giving up, so a one-off hiccup
+  // never reaches the caller; a definitive client error
+  // (4xx other than 429) is NOT retried — that answer is
+  // real, not transient.
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleepMs(attempt === 1 ? 700 : 1600);
+    try {
+      const res = await fetch(url, {
+        headers: { "user-agent": "VaultX catalog import" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) {
+        throw new Error(`fetch ${res.status} for ${url}`);
+      }
+      return (await res.json()) as unknown;
+    } catch (e) {
+      lastError = e;
+      const msg = e instanceof Error ? e.message : "";
+      const status = msg.match(/^fetch (\d{3}) for /)?.[1];
+      if (status) {
+        const code = parseInt(status, 10);
+        if (code >= 400 && code < 500 && code !== 429) break;
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`fetch failed for ${url}`);
 }
 
 const sleepMs = (ms: number) =>
@@ -4863,6 +5316,12 @@ type ImportState = {
   totalPages?: number;
   sectionSorts?: Record<string, number>;
   sectionCounts?: Record<string, number>;
+  /** Topps checklist files (one per product), discovered from
+      Topps' own checklist index; cursor walks this list. */
+  files?: { key: string; name: string; sort: number; url: string }[];
+  /** Checklist files that failed to fetch or parse; skipped
+      for this pass and named here so the gap is auditable. */
+  failedFiles?: string[];
 };
 
 async function readImportMeta(ctx: Ctx, game: GameKey) {
@@ -5251,6 +5710,44 @@ function funkoHash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+/** Toys only (Anthony, Nov 4, 2026): the Funko section is
+    for collectible toys and figures — apparel, pins, Pez
+    dispensers, books, home goods, the board game, and
+    shirt / pint-glass bundles are NOT Funko Pop toys, so
+    they never enter the catalog and rows imported earlier
+    come out (purgeFunkoNonToys runs this same predicate
+    over stored rows). PLUSH STAYS — Anthony decided that
+    explicitly — and no pattern below touches a plush line:
+    "Pint Size Heroes" are mini figures, not pins, and are
+    not matched either (the pin pattern is the exact
+    "Pop! Pins" line only). */
+function funkoIsNonToy(tags: string[], title: string): boolean {
+  const t = title.toLowerCase();
+  if (
+    t.includes("pint glass") ||
+    t.includes("board game") ||
+    t.includes("funkoverse")
+  ) {
+    return true;
+  }
+  for (const raw of tags) {
+    const tag = raw.trim().toLowerCase();
+    if (tag.includes("tees & apparel")) return true;
+    if (tag.startsWith("pop! pins")) return true;
+    if (tag.includes("pez")) return true;
+    if (tag === "pop! books") return true;
+    if (tag === "pop! home") return true;
+    // Board games hide under their section tag even when the
+    // product name never says "board game" (the Five Nights
+    // at Freddy's survival game is the case that proved it).
+    if (tag.includes("board game")) return true;
+    if (tag.includes("shirt pack") || tag.includes("tee pack")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function importFunkoChunk(
   ctx: Ctx,
   state: ImportState,
@@ -5286,6 +5783,10 @@ async function importFunkoChunk(
     const series = asArr(e.series)
       .map((s) => (typeof s === "string" ? funkoText(s) : ""))
       .filter((s) => s.length > 0);
+    // Toys only (see funkoIsNonToy): non-toy products are
+    // skipped before any section/slot bookkeeping, so they
+    // never take a catalog slot.
+    if (funkoIsNonToy(series, title)) continue;
     // The section is the figure's Pop! line. Entries whose
     // series list carries no Pop! line at all (only an
     // exclusive/franchise tag) land in the one honest
@@ -5510,7 +6011,18 @@ async function importLegoChunk(
       name: s.name,
       rarity: facts.length > 0 ? facts.join(" · ") : null,
       finish: null,
-      imageUrl: s.img,
+      // 76240-1 (Batmobile Tumbler) override (Anthony, Nov 5,
+      // 2026): Rebrickable's photo doesn't show the set's
+      // information plaque; LEGO's official alternate image
+      // (via Brickset) shows the Tumbler on its stand with
+      // the plaque large in the foreground. Pin it here so a
+      // fresh import keeps the good photo; the durable row
+      // was switched by migration 0068 and imports never
+      // overwrite existing rows.
+      imageUrl:
+        s.setNum === "76240-1"
+          ? "https://images.brickset.com/sets/AdditionalImages/76240-1/76240_alt3.jpg"
+          : s.img,
       price: null,
     };
   });
@@ -5524,6 +6036,323 @@ async function importLegoChunk(
     setsDone: chunksDone,
     complete: end >= total,
   };
+}
+
+/* Topps sports catalogs (Anthony, Nov 4, 2026, ~8:01 PM —
+   the Topps tabs): Baseball gets a Topps tab and Basketball
+   a Topps tab, each holding ALL of that sport's Topps
+   catalog, DATA ONLY — no artwork is downloaded, linked, or
+   stored (his explicit direction). Source: Topps' OWN
+   official checklists — the index at
+   https://www.topps.com/pages/checklists links one text PDF
+   per product on Topps' Shopify CDN (2018–2026 for baseball,
+   2021–2026-27 for basketball, flagship + Heritage + Chrome
+   + Allen & Ginter + Bowman, which is a Topps brand, and
+   every other Topps product line). Each PDF is parsed by
+   data/pdfText.ts into card rows: number, player, team, flag
+   (Rookie / Team Card / …), and the subset the card sits in.
+   Rows carry no price (the checklists publish none) and no
+   image. The catalogs TCDB and mycardchecklist were ruled
+   out: both forbid scraping/bulk download in their terms.
+   Panini basketball has no equivalent manufacturer file
+   index (its checklist tool is a JavaScript app with no
+   public downloads), so no Panini catalog is imported —
+   stated plainly in the app and DATA-PLAN.md rather than
+   filled from a prohibited source. */
+const TOPPS_CHECKLIST_INDEX = "https://www.topps.com/pages/checklists";
+
+function toppsSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function toppsAnchorText(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ")
+    .replace(/&reg;/g, "®")
+    .replace(/&trade;/g, "™")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Which Topps index products belong to which catalog
+    (Anthony, Nov 4, 2026): Baseball splits by the name on
+    the cards — Bowman is its own tab even though Topps owns
+    it — and the Topps Alternate Universe areas (Disney,
+    Star Wars, Garbage Pail Kids, WWE) each take their named
+    products from the same official index. Filters run on
+    the lowercased anchor text. */
+type ToppsCatalogKey =
+  | "topps"
+  | "bowman"
+  | "topps-basketball"
+  | "disney-topps"
+  | "starwars-topps"
+  | "gpk"
+  | "wwe-topps";
+
+const TOPPS_CATALOG_FILTERS: Record<
+  ToppsCatalogKey,
+  (lowerName: string) => boolean
+> = {
+  topps: (n) => n.includes("baseball") && !n.includes("bowman"),
+  bowman: (n) => n.includes("baseball") && n.includes("bowman"),
+  "topps-basketball": (n) => n.includes("basketball"),
+  "disney-topps": (n) => n.includes("disney"),
+  "starwars-topps": (n) => n.includes("star wars"),
+  gpk: (n) => n.includes("garbage pail"),
+  "wwe-topps": (n) => /\bwwe\b/.test(n),
+};
+
+/** Discover one catalog's checklist files from Topps'
+    index: anchor text names the product ("2024 Topps
+    Series 1 Baseball"); only direct PDF links count (the
+    handful of XLS and "[New Digital Checklist]" entries
+    are skipped — no file, no rows). Sorted by year, then
+    name, so sections land in release order. */
+async function discoverToppsFiles(
+  game: ToppsCatalogKey,
+): Promise<{ key: string; name: string; sort: number; url: string }[]> {
+  const res = await fetch(TOPPS_CHECKLIST_INDEX, {
+    headers: { "user-agent": "VaultX catalog import" },
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error("topps checklist index unreachable");
+  const html = await res.text();
+  const keep = TOPPS_CATALOG_FILTERS[game];
+  const byKey = new Map<
+    string,
+    { key: string; name: string; sort: number; url: string }
+  >();
+  for (const a of html.matchAll(
+    /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+  )) {
+    const href = (a[1] ?? "").split("?")[0]!;
+    if (!href.toLowerCase().endsWith(".pdf")) continue;
+    if (!href.includes("cdn.shopify.com/s/files/")) continue;
+    let name = toppsAnchorText(a[2] ?? "");
+    if (!keep(name.toLowerCase())) continue;
+    name = name.replace(/\s+checklist$/i, "").trim();
+    if (!name) continue;
+    const key = toppsSlug(name);
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, { key, name, sort: 0, url: href });
+  }
+  const files = [...byKey.values()].sort((x, y) => {
+    const yx = parseInt(x.name.slice(0, 4), 10);
+    const yy = parseInt(y.name.slice(0, 4), 10);
+    const ax = Number.isFinite(yx) ? yx : 9999;
+    const ay = Number.isFinite(yy) ? yy : 9999;
+    if (ax !== ay) return ax - ay;
+    return x.name.localeCompare(y.name);
+  });
+  files.forEach((f, i) => {
+    f.sort = i;
+  });
+  return files;
+}
+
+async function importToppsChunk(
+  ctx: Ctx,
+  state: ImportState,
+  game: ToppsCatalogKey,
+): Promise<{ state: ImportState; setsTotal: number; setsDone: number; complete: boolean }> {
+  if (!state.files) {
+    state.files = await discoverToppsFiles(game);
+    state.cursor = 0;
+    state.failedFiles = [];
+  }
+  const files = state.files;
+  const FILES_PER_CALL = 4;
+  const start = state.cursor ?? 0;
+  const slice = files.slice(start, start + FILES_PER_CALL);
+  for (const file of slice) {
+    try {
+      const res = await fetch(file.url, {
+        headers: { "user-agent": "VaultX catalog import" },
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!res.ok) throw new Error(`checklist fetch ${res.status}`);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.length > 12_000_000) throw new Error("checklist too large");
+      const lines = await extractPdfLines(buf);
+      const parsed = parseChecklist(lines);
+      const rows: GameRow[] = parsed.map((r, i) => {
+        const isBase =
+          /^base( card)?( set)?$/i.test(r.subset) ||
+          /^base cards$/i.test(r.subset);
+        const finishParts: string[] = [];
+        if (r.team) finishParts.push(r.team);
+        if (!isBase && r.subset) finishParts.push(r.subset);
+        return {
+          game,
+          uid: `${game}:${file.key}:${i}`,
+          sectionKey: file.key,
+          sectionName: file.name,
+          sectionSort: file.sort,
+          slotSort: i,
+          number: r.number,
+          printed: r.number,
+          name: r.name,
+          rarity: r.flag,
+          finish: finishParts.length > 0 ? finishParts.join(" · ") : null,
+          imageUrl: null,
+          price: null,
+        };
+      });
+      await insertGameRows(ctx, rows);
+    } catch {
+      // A file that fails is skipped for this pass and named
+      // in the saved state; the download still completes and
+      // the gap stays auditable instead of silent.
+      state.failedFiles = [...(state.failedFiles ?? []), file.key];
+    }
+  }
+  const end = start + slice.length;
+  state.cursor = end;
+  return {
+    state,
+    setsTotal: files.length,
+    setsDone: end,
+    complete: end >= files.length,
+  };
+}
+
+/* Lego set detail shapes (Anthony, Nov 4, 2026 — the Lego
+   detail build-out): one shape shared by the researched-detail
+   response and the research save, so what the page renders is
+   exactly what a research task may store. Every fact is
+   nullable — null renders as "unavailable", never a guess. */
+const legoMinifigShape = z.object({
+  name: z.string(),
+  code: z.string().nullable(),
+  uniqueToSet: z.boolean(),
+  valueUsd: z.number().nullable(),
+});
+const legoSoldListingShape = z.object({
+  date: z.string(),
+  priceUsd: z.number(),
+  /** "sealed" | "used" */
+  condition: z.string(),
+  title: z.string().nullable(),
+  source: z.string(),
+  sourceUrl: z.string().nullable(),
+});
+const legoRetailerShape = z.object({
+  name: z.string(),
+  priceUsd: z.number(),
+  url: z.string().nullable(),
+});
+const legoSourceShape = z.object({
+  label: z.string(),
+  url: z.string(),
+});
+const legoDetailsShape = z.object({
+  setNum: z.string(),
+  releaseDate: z.string().nullable(),
+  retailPriceUsd: z.number().nullable(),
+  ages: z.string().nullable(),
+  upc: z.string().nullable(),
+  ean: z.string().nullable(),
+  dimensions: z.string().nullable(),
+  weightGrams: z.number().nullable(),
+  buildTime: z.string().nullable(),
+  description: z.string().nullable(),
+  availability: z.string().nullable(),
+  retiredDate: z.string().nullable(),
+  expectedRetirement: z.string().nullable(),
+  minifigs: z.array(legoMinifigShape),
+  minifigsValueUsd: z.number().nullable(),
+  partsDistinct: z.number().nullable(),
+  partsSpares: z.number().nullable(),
+  partOutValueUsd: z.number().nullable(),
+  marketSealedUsd: z.number().nullable(),
+  marketUsedUsd: z.number().nullable(),
+  usedRange: z.string().nullable(),
+  annualGrowthPct: z.number().nullable(),
+  forecast1yrUsd: z.number().nullable(),
+  forecast5yrUsd: z.number().nullable(),
+  soldListings: z.array(legoSoldListingShape),
+  retailers: z.array(legoRetailerShape),
+  sources: z.array(legoSourceShape),
+  researchedAt: z.string(),
+});
+type LegoDetails = z.infer<typeof legoDetailsShape>;
+
+function parseLegoDetailsJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function legoDetailsOf(
+  row: typeof schema.legoSetDetails.$inferSelect,
+): LegoDetails {
+  return {
+    setNum: row.setNum,
+    releaseDate: row.releaseDate,
+    retailPriceUsd: row.retailPriceUsd,
+    ages: row.ages,
+    upc: row.upc,
+    ean: row.ean,
+    dimensions: row.dimensions,
+    weightGrams: row.weightGrams,
+    buildTime: row.buildTime,
+    description: row.description,
+    availability: row.availability,
+    retiredDate: row.retiredDate,
+    expectedRetirement: row.expectedRetirement,
+    minifigs: parseLegoDetailsJson(row.minifigsJson, []),
+    minifigsValueUsd: row.minifigsValueUsd,
+    partsDistinct: row.partsDistinct,
+    partsSpares: row.partsSpares,
+    partOutValueUsd: row.partOutValueUsd,
+    marketSealedUsd: row.marketSealedUsd,
+    marketUsedUsd: row.marketUsedUsd,
+    usedRange: row.usedRange,
+    annualGrowthPct: row.annualGrowthPct,
+    forecast1yrUsd: row.forecast1yrUsd,
+    forecast5yrUsd: row.forecast5yrUsd,
+    soldListings: parseLegoDetailsJson(row.soldListingsJson, []),
+    retailers: parseLegoDetailsJson(row.retailersJson, []),
+    sources: parseLegoDetailsJson(row.sourcesJson, []),
+    researchedAt: row.researchedAt,
+  };
+}
+
+/** The catalog row's packed facts line ("2015 · 1,685 pieces ·
+    Ultimate Collector Series") unpacked for the detail page:
+    the import writes year, piece count, and leaf theme into
+    game_cards.rarity in that order, joined with " · ". */
+function legoCatalogFacts(row: typeof schema.gameCards.$inferSelect): {
+  subtheme: string | null;
+  year: number | null;
+  pieces: number | null;
+} {
+  let subtheme: string | null = null;
+  let year: number | null = null;
+  let pieces: number | null = null;
+  for (const part of (row.rarity ?? "").split(" · ")) {
+    const p = part.trim();
+    if (/^\d{4}$/.test(p)) {
+      year = parseInt(p, 10);
+    } else if (/^[\d,]+ pieces$/.test(p)) {
+      pieces = parseInt(p.replace(/[^\d]/g, ""), 10);
+    } else if (p && p !== row.sectionName) {
+      subtheme = p;
+    }
+  }
+  return { subtheme, year, pieces };
 }
 
 export const Actions = {
@@ -5989,6 +6818,12 @@ export const Actions = {
     async handler(
       ctx,
     ): Promise<{ started: boolean; taskId: string | null }> {
+      // Guest access (platform v27): agent tasks are
+      // owner-only and unavailable in the shared runtime;
+      // the daily schedule runs this locally as the owner.
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null };
+      }
       const today = new Date().toISOString().slice(0, 10);
       const result = await ctx.agent.spawnTask(
         [
@@ -6979,6 +7814,40 @@ export const Actions = {
     },
   }),
 
+  requestBuyList: defineAction({
+    description:
+      "Hands one binder section's missing-cards buy list to the signed-in collector's own Muse (restored Nov 4, 2026 at Anthony's explicit direction after he reviewed exactly what it sends): recomputes the section's missing pockets server-side and spawns an agent task carrying ONLY the missing printings' public TCGplayer product IDs and quantities, instructing the Muse to build the cart on TCGplayer under the user's own sign-in (Near Mint, his standing shipping rules) and NEVER to check out — final payment approval stays with the user. Fires only behind the client's per-run confirmed:true gate; missing pockets without a TCGplayer product ID are counted and disclosed, never sent.",
+    request: z.object({
+      groupKey: z.string().min(1),
+      confirmed: z.literal(true),
+    }),
+    response: buyListHandoffResponse,
+    async handler(ctx, args): Promise<BuyListHandoffResult> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.cards)
+        .where(eq(schema.cards.groupKey, args.groupKey))
+        .orderBy(asc(schema.cards.slotSort));
+      if (rows.length === 0) {
+        return {
+          ok: false,
+          error: "That section couldn't be found, so nothing was sent.",
+          products: 0,
+          copies: 0,
+          skippedNoId: 0,
+          taskId: null,
+        };
+      }
+      const missing = missingPocketsOf(rows);
+      return spawnBuyListHandoff(
+        ctx,
+        missing.map((m) => ({ tcgplayerId: m.tcgplayerId, qty: 1 })),
+        "set",
+      );
+    },
+  }),
+
   identifyCard: defineAction({
     description:
       "Identifies Lorcana cards in a photo (a single card, a stack scanned one after another, or a whole binder page) using vision, and matches them against the binder catalog with ownership and finish information. Only corroborated reads come back as definite matches; reads the evidence cannot pin to one printing come back as ambiguous with candidate printings for the user to pick from, so a weak read is never presented as a definite wrong card. OPTION 2 (Nov 3, 2026): the caller may pass candidateIds — the on-device fingerprint matcher's ranked finalists for the same photo — and the read's verbatim collector-number line (e.g. \"3/P3\") is then resolved among those finalists first and against the full catalog by that exact printed line second, so a printing whose on-device fingerprint is not built yet is still findable by its line. V6 (same evening, final): Anthony's hard rule is that a scan never runs longer than 5 seconds, so the server budget is 4 seconds — a read that cannot finish inside it is cut and the client lands with its on-device candidates or search fallback instead of spinning (the vision read itself takes ~18–25 seconds, which is exactly why waiting for it failed). The client fires this call the moment the photo is taken, in parallel with the on-device match, so the check is already running inside the first second or two.",
@@ -7043,6 +7912,20 @@ export const Actions = {
       unmatched: z.array(z.string()),
     }),
     async handler(ctx, args) {
+      // Guest access (platform v27): the vision read is an
+      // inference call — unavailable in the shared runtime
+      // for every viewer. Return the plain no-read result;
+      // the scanner lands on its on-device fingerprint match
+      // and search fallback, exactly as it does when a read
+      // times out.
+      if (agentCapabilityBlocked(ctx)) {
+        return {
+          binderPage: false,
+          matches: [],
+          ambiguous: [],
+          unmatched: [],
+        };
+      }
       const readSchema = z.object({
         cards: z.array(
           z.object({
@@ -8248,10 +9131,11 @@ export const Actions = {
     description:
       "Lists the storage locations the user has entered for one item (its 'Where it lives' rows on the detail view): each spot's type, place, page/pocket or row detail, and how many copies sit there. Empty until the user adds one — locations are never invented.",
     request: z.object({
-      targetKind: z.enum(["card", "sealed", "comic"]),
+      targetKind: z.enum(["card", "sealed", "comic", "game"]),
       cardId: z.number().int().positive().nullable(),
       sealedName: z.string().min(1).nullable(),
       comicId: z.string().min(1).nullable(),
+      gameCardId: z.number().int().positive().nullable().optional(),
     }),
     response: z.object({
       locations: z.array(
@@ -8283,10 +9167,18 @@ export const Actions = {
                     args.sealedName ?? "",
                   ),
                 )
-              : and(
-                  eq(schema.itemLocations.targetKind, "comic"),
-                  eq(schema.itemLocations.comicId, args.comicId ?? ""),
-                ),
+              : args.targetKind === "game"
+                ? and(
+                    eq(schema.itemLocations.targetKind, "game"),
+                    eq(
+                      schema.itemLocations.gameCardId,
+                      args.gameCardId ?? -1,
+                    ),
+                  )
+                : and(
+                    eq(schema.itemLocations.targetKind, "comic"),
+                    eq(schema.itemLocations.comicId, args.comicId ?? ""),
+                  ),
         )
         .orderBy(asc(schema.itemLocations.id));
       return {
@@ -8345,10 +9237,11 @@ export const Actions = {
     description:
       "Adds one storage location ('Where it lives') to an item: a binder (name plus page/pocket), deck box, trade box, bulk box (name plus row/section), or a free-text spot, with how many copies live there.",
     request: z.object({
-      targetKind: z.enum(["card", "sealed", "comic"]),
+      targetKind: z.enum(["card", "sealed", "comic", "game"]),
       cardId: z.number().int().positive().nullable(),
       sealedName: z.string().min(1).nullable(),
       comicId: z.string().min(1).nullable(),
+      gameCardId: z.number().int().positive().nullable().optional(),
       locType: z.enum([
         "binder",
         "deck_box",
@@ -8371,6 +9264,9 @@ export const Actions = {
       if (args.targetKind === "comic" && !args.comicId) {
         throw new Error("comicId is required for a comic location");
       }
+      if (args.targetKind === "game" && args.gameCardId == null) {
+        throw new Error("gameCardId is required for a game location");
+      }
       const db = ctx.db<typeof schema>();
       const inserted = await db
         .insert(schema.itemLocations)
@@ -8380,6 +9276,8 @@ export const Actions = {
           sealedName:
             args.targetKind === "sealed" ? args.sealedName : null,
           comicId: args.targetKind === "comic" ? args.comicId : null,
+          gameCardId:
+            args.targetKind === "game" ? (args.gameCardId ?? null) : null,
           locType: args.locType,
           place: args.place,
           spot: args.spot && args.spot.length > 0 ? args.spot : null,
@@ -9060,6 +9958,12 @@ export const Actions = {
       ctx,
       args,
     ): Promise<{ started: boolean; taskId: string | null }> {
+      // Guest access (platform v27): agent tasks are
+      // owner-only and unavailable in the shared runtime;
+      // the daily schedule runs this locally as the owner.
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null };
+      }
       const today = new Date().toISOString().slice(0, 10);
       const result = await ctx.agent.spawnTask(
         [
@@ -9319,6 +10223,7 @@ export const Actions = {
         shareCollection: (profile.shareCollection ?? 1) > 0,
         usernameChangeUsed: (profile.usernameChangeUsed ?? 0) > 0,
         gridCols: profile.gridCols ?? null,
+        onlyMine: profile.onlyMine ?? null,
         inviteCode: inviteCodeForCollector(profile.collectorCode),
       };
     },
@@ -9520,6 +10425,113 @@ export const Actions = {
         .where(eq(schema.collectorProfile.id, 1));
       ctx.invalidateQueries();
       return { ok: true, cols: args.cols };
+    },
+  }),
+
+  setOnlyMinePreference: defineAction({
+    description:
+      "Saves the user's one shared 'Only mine' list-filter choice (Anthony, Nov 5, 2026) on their collector profile: when on, every list page showing more than 15 entries hides the entries they own nothing from; off (the default) shows everything. Presentation only — no collection data changes.",
+    request: z.object({
+      on: z.boolean(),
+    }),
+    response: z.object({ ok: z.literal(true), on: z.boolean() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; on: boolean }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          onlyMine: args.on ? 1 : 0,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, 1));
+      ctx.invalidateQueries();
+      return { ok: true, on: args.on };
+    },
+  }),
+
+  getReorderPrefs: defineAction({
+    description:
+      "Returns the user's saved drag-reorder orders (Anthony, Nov 5, 2026): a map from a reorder surface's key (\"tcg-games\", \"au-areas\", \"sports\") to the saved tile-key order for that surface, from the app-wide long-press drag reorder. Empty when nothing has been arranged yet.",
+    request: z.object({}),
+    response: z.object({
+      prefs: z.record(z.string(), z.array(z.string())),
+    }),
+    async handler(
+      ctx,
+    ): Promise<{ prefs: Record<string, string[]> }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select({ reorderPrefs: schema.collectorProfile.reorderPrefs })
+        .from(schema.collectorProfile)
+        .where(eq(schema.collectorProfile.id, 1));
+      const raw = rows[0]?.reorderPrefs;
+      if (!raw) return { prefs: {} };
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const prefs: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (Array.isArray(v)) {
+            prefs[k] = v.filter(
+              (x): x is string => typeof x === "string",
+            );
+          }
+        }
+        return { prefs };
+      } catch {
+        return { prefs: {} };
+      }
+    },
+  }),
+
+  setReorderPref: defineAction({
+    description:
+      "Saves one surface's drag-reorder order (Anthony, Nov 5, 2026) on the user's collector profile, merged with the other surfaces' orders, so a long-press drag arrangement persists for them across devices. Presentation only — no collection data changes.",
+    request: z.object({
+      key: z.string().min(1).max(64),
+      order: z.array(z.string().min(1).max(128)).max(256),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select({ reorderPrefs: schema.collectorProfile.reorderPrefs })
+        .from(schema.collectorProfile)
+        .where(eq(schema.collectorProfile.id, 1));
+      let prefs: Record<string, string[]> = {};
+      const raw = rows[0]?.reorderPrefs;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          for (const [k, v] of Object.entries(parsed)) {
+            if (Array.isArray(v)) {
+              prefs[k] = v.filter(
+                (x): x is string => typeof x === "string",
+              );
+            }
+          }
+        } catch {
+          prefs = {};
+        }
+      }
+      prefs[args.key] = args.order;
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          reorderPrefs: JSON.stringify(prefs),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, 1));
+      ctx.invalidateQueries();
+      return { ok: true as const };
     },
   }),
 
@@ -12827,7 +13839,7 @@ export const Actions = {
 
   getCollectionVisibility: defineAction({
     description:
-      "Which of the six Home 'Your Collections' tiles this user has hidden in Settings, and the order they arranged the tiles in by long-hold drag on Home (Anthony, Nov 3, 2026): returns the hidden tile keys (everything not listed is shown) and the full resolved tile order (saved order first, unordered tiles in default position). Display-only — hiding or reordering deletes nothing and affects no totals.",
+      "Which 'Your Collections' tiles this user has hidden, and the order they arranged the tiles in by long-hold drag on Home (Anthony, Nov 3, 2026): returns the hidden tile keys (everything not listed is shown) and the full resolved tile order (saved order first, unordered tiles in default position). Since Nov 4, 2026 the keys cover Home's main areas (tcg, comics, lego, funko, sports) and the games inside TCG Universe (lorcana, pokemon, starwars, magic) in one list. Display-only — hiding or reordering deletes nothing and affects no totals.",
     request: z.object({}),
     response: z.object({
       hidden: z.array(z.string()),
@@ -12844,17 +13856,24 @@ export const Actions = {
 
   setCollectionOrder: defineAction({
     description:
-      "Saves the order of the Home 'Your Collections' tiles for this user (Anthony, Nov 3, 2026, late): set by long-holding a tile on Home and dragging it to a new spot; persists on their profile like the tile show/hide choices and the theme. Display-only.",
+      "Saves the order of the 'Your Collections' tiles for this user (Anthony, Nov 3, 2026, late): set by long-holding a tile on Home and dragging it to a new spot; persists on their profile like the tile show/hide choices and the theme. Display-only. Since the Nov 4, 2026 condensation the saved list carries Home's main areas and the TCG Universe games together (one order; each place renders its own keys).",
     request: z.object({
       order: z.array(
         z.enum([
+          "tcg",
+          "comics",
+          "lego",
+          "funko",
+          "sports",
+          "toppsau",
           "lorcana",
           "pokemon",
           "magic",
-          "lego",
-          "comics",
           "starwars",
-          "funko",
+          "disneytopps",
+          "starwarstopps",
+          "gpk",
+          "wwetopps",
         ]),
       ),
     }),
@@ -12886,13 +13905,20 @@ export const Actions = {
       "Shows or hides one Home 'Your Collections' tile for this user (Anthony, Nov 3, 2026): the choice persists on their profile like the theme choice and can be undone in Settings at any time. Display-only.",
     request: z.object({
       collection: z.enum([
+        "tcg",
+        "comics",
+        "lego",
+        "funko",
+        "sports",
+        "toppsau",
         "lorcana",
         "pokemon",
         "magic",
-        "lego",
-        "comics",
         "starwars",
-        "funko",
+        "disneytopps",
+        "starwarstopps",
+        "gpk",
+        "wwetopps",
       ]),
       hidden: z.boolean(),
     }),
@@ -12926,9 +13952,9 @@ export const Actions = {
 
   getGameCatalog: defineAction({
     description:
-      "One other collection's catalog overview (Pokémon, Magic: The Gathering, Star Wars: Unlimited, or Funko Pop!): its sets with printing counts and owned counts, plus the catalog download progress (sets done of total, printings cataloged, complete) from the resumable importer.",
+      "One other collection's catalog overview (Pokémon, Magic: The Gathering, Star Wars: Unlimited, Funko Pop!, Legos, or a Topps sports catalog): its sets with printing counts and owned counts, plus the catalog download progress (sets done of total, printings cataloged, complete) from the resumable importer.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
     }),
     response: z.object({
       sections: z.array(
@@ -12937,6 +13963,7 @@ export const Actions = {
           name: z.string(),
           total: z.number(),
           owned: z.number(),
+          hasArt: z.boolean(),
         }),
       ),
       cardsTotal: z.number(),
@@ -12960,6 +13987,11 @@ export const Actions = {
         .where(eq(schema.gameCards.game, args.game))
         .groupBy(schema.gameCards.sectionKey, schema.gameCards.sectionName)
         .orderBy(asc(sql`min(${schema.gameCards.sectionSort})`));
+      const artRows = await db
+        .select({ sectionKey: schema.gameSectionArt.sectionKey })
+        .from(schema.gameSectionArt)
+        .where(eq(schema.gameSectionArt.game, args.game));
+      const artKeys = new Set(artRows.map((r) => r.sectionKey));
       const meta = await readImportMeta(ctx, args.game);
       const cardsTotal = rows.reduce((s, r) => s + r.total, 0);
       return {
@@ -12968,6 +14000,7 @@ export const Actions = {
           name: r.name,
           total: r.total,
           owned: r.owned,
+          hasArt: artKeys.has(r.key),
         })),
         cardsTotal,
         ownedTotal: rows.reduce((s, r) => s + r.owned, 0),
@@ -12979,11 +14012,169 @@ export const Actions = {
     },
   }),
 
+  versionLiveStamp: defineAction({
+    description:
+      "Returns the recorded go-live instant for an app version, stamping it the first time the running copy confirms the server is serving that same version (Anthony, Nov 5, 2026 — the green 'Went live' line under the Settings up-to-date message). v1.97.0 predates the stamp table, so its moment is seeded from that build's recorded audit trail.",
+    request: z.object({
+      version: z.string().min(1).max(20),
+      servedVersion: z.string().max(20).nullable(),
+    }),
+    response: z.object({
+      wentLiveAt: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const existing = await db
+        .select()
+        .from(schema.versionLiveStamps)
+        .where(eq(schema.versionLiveStamps.version, args.version));
+      if (existing[0]) return { wentLiveAt: existing[0].wentLiveAt };
+      // v1.97.0 shipped before this table existed. Its
+      // go-live is recorded fact, not an estimate: that
+      // build's verification session closed at
+      // 2026-11-05T07:03:15Z and the platform captured the
+      // live build minutes later.
+      if (args.version === "1.97.0") {
+        const seeded = "2026-11-05T07:03:15Z";
+        await db
+          .insert(schema.versionLiveStamps)
+          .values({ version: args.version, wentLiveAt: seeded })
+          .onConflictDoNothing()
+          .run();
+        return { wentLiveAt: seeded };
+      }
+      // A version stamps its own go-live only when the copy
+      // asking is itself the version the server now serves —
+      // i.e. this build has actually landed for this user.
+      if (args.servedVersion != null && args.servedVersion === args.version) {
+        const now = new Date().toISOString();
+        await db
+          .insert(schema.versionLiveStamps)
+          .values({ version: args.version, wentLiveAt: now })
+          .onConflictDoNothing()
+          .run();
+        const rows = await db
+          .select()
+          .from(schema.versionLiveStamps)
+          .where(eq(schema.versionLiveStamps.version, args.version));
+        return { wentLiveAt: rows[0]?.wentLiveAt ?? now };
+      }
+      return { wentLiveAt: null };
+    },
+  }),
+
+  importSectionArt: defineAction({
+    description:
+      "Records official product artwork for catalog sections (sets) whose catalog source is text-only — one publisher product photo per section, stored as a source URL here and ingested into blob storage by getSectionArt (Anthony, Nov 5, 2026: Disney Topps + Garbage Pail Kids set artwork). Idempotent upsert; never touches card rows, ownership, or prices.",
+    request: z.object({
+      items: z
+        .array(
+          z.object({
+            game: z.string().min(1).max(40),
+            sectionKey: z.string().min(1).max(80),
+            imageUrl: z.string().url().max(600),
+            pageUrl: z.string().url().max(600).nullable(),
+          }),
+        )
+        .min(1)
+        .max(100),
+    }),
+    response: z.object({ ok: z.literal(true), saved: z.number() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; saved: number }> {
+      const db = ctx.db<typeof schema>();
+      let saved = 0;
+      for (const item of args.items) {
+        await db
+          .insert(schema.gameSectionArt)
+          .values({
+            game: item.game,
+            sectionKey: item.sectionKey,
+            imageUrl: item.imageUrl,
+            pageUrl: item.pageUrl,
+          })
+          .onConflictDoUpdate({
+            target: [
+              schema.gameSectionArt.game,
+              schema.gameSectionArt.sectionKey,
+            ],
+            set: { imageUrl: item.imageUrl, pageUrl: item.pageUrl },
+          })
+          .run();
+        saved += 1;
+      }
+      return { ok: true as const, saved };
+    },
+  }),
+
+  getSectionArt: defineAction({
+    description:
+      "Returns a same-origin copy of one catalog section's official product artwork (fetched server-side once and cached in blob storage), so set tiles show the publisher's product photo without hotlinking. The URL fetched is always the section-art row stored for that section — never a caller-supplied address.",
+    request: z.object({
+      game: z.string().min(1).max(40),
+      sectionKey: z.string().min(1).max(80),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      url: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: boolean; url: string | null }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameSectionArt)
+        .where(
+          and(
+            eq(schema.gameSectionArt.game, args.game),
+            eq(schema.gameSectionArt.sectionKey, args.sectionKey),
+          ),
+        );
+      const row = rows[0];
+      if (!row) return { ok: false, url: null };
+      const key = `section-art/${row.game}/${row.sectionKey}-${funkoHash(row.imageUrl)}`;
+      try {
+        const existing = await ctx.blobs.head(key);
+        if (existing) {
+          return { ok: true, url: await ctx.blobs.getUrl(key) };
+        }
+        const res = await fetch(row.imageUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            Accept:
+              "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        });
+        if (!res.ok) return { ok: false, url: null };
+        const contentType = (
+          res.headers.get("content-type") ?? ""
+        ).toLowerCase();
+        if (!contentType.startsWith("image/")) {
+          return { ok: false, url: null };
+        }
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.length === 0 || bytes.length > 3_000_000) {
+          return { ok: false, url: null };
+        }
+        await ctx.blobs.put(key, bytes, { contentType });
+        return { ok: true, url: await ctx.blobs.getUrl(key) };
+      } catch {
+        return { ok: false, url: null };
+      }
+    },
+  }),
+
   getGameSection: defineAction({
     description:
       "One set's printings inside a game catalog, in collector-number order, paged (150 at a time): name, number, rarity/finish, artwork link, price where the source publishes one, and the collector's owned count (0 = missing/ghosted).",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
       sectionKey: z.string().min(1).max(80),
       offset: z.number().int().min(0).max(200000).default(0),
     }),
@@ -13053,7 +14244,7 @@ export const Actions = {
     description:
       "Searches one game catalog by card name (a trailing number narrows to that collector number, the same rule as the Lorcana search): up to 60 printings with their set, number, artwork link, price, and owned count — the add-by-search path for the new games.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
       query: z.string().trim().min(1).max(80),
     }),
     response: z.object({
@@ -13106,11 +14297,125 @@ export const Actions = {
     },
   }),
 
+  searchAllCollectibles: defineAction({
+    description:
+      "The Search tab's universal search (Anthony, Nov 4, 2026): one query across every catalog the server holds — all five game catalogs (Pokémon, Magic, Star Wars Unlimited, Funko, Legos), the two Topps sports catalogs (baseball and basketball, data-only), plus the sealed products — grouped by type for the overlay's 'More collectibles' section. Lorcana binder cards ride the existing searchCards and graded comics are matched client-side from the in-app comics list, so this action covers the rest. Name substring match from the first letter, same as the card typeahead.",
+    request: z.object({ query: z.string().trim().min(1).max(80) }),
+    response: z.object({
+      games: z.array(
+        z.object({
+          game: z.enum([
+            "pokemon",
+            "magic",
+            "starwars",
+            "funko",
+            "lego",
+            "topps",
+            "bowman",
+            "topps-basketball",
+            "disney-topps",
+            "starwars-topps",
+            "gpk",
+            "wwe-topps",
+          ]),
+          id: z.number(),
+          sectionKey: z.string(),
+          sectionName: z.string(),
+          printed: z.string(),
+          name: z.string(),
+          rarity: z.string().nullable(),
+          finish: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          price: z.number().nullable(),
+          ownedQty: z.number(),
+          ownedSealedQty: z.number(),
+        }),
+      ),
+      sealed: z.array(
+        z.object({
+          name: z.string(),
+          setName: z.string(),
+          qty: z.number(),
+        }),
+      ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const needle = `%${args.query.trim()}%`;
+      const gameRows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(like(schema.gameCards.name, needle))
+        .orderBy(
+          desc(schema.gameCards.ownedQty),
+          asc(schema.gameCards.game),
+          asc(schema.gameCards.sectionSort),
+          asc(schema.gameCards.slotSort),
+        )
+        .limit(400);
+      // Cap per game so one huge catalog can't crowd out the
+      // others (Funko alone holds ~24k rows).
+      const perGame = new Map<string, number>();
+      const games: Array<{
+        game:
+          | "pokemon"
+          | "magic"
+          | "starwars"
+          | "funko"
+          | "lego"
+          | "topps"
+          | "bowman"
+          | "topps-basketball"
+          | "disney-topps"
+          | "starwars-topps"
+          | "gpk"
+          | "wwe-topps";
+        id: number;
+        sectionKey: string;
+        sectionName: string;
+        printed: string;
+        name: string;
+        rarity: string | null;
+        finish: string | null;
+        imageUrl: string | null;
+        price: number | null;
+        ownedQty: number;
+        ownedSealedQty: number;
+      }> = [];
+      for (const r of gameRows) {
+        const n = perGame.get(r.game) ?? 0;
+        if (n >= 6) continue;
+        perGame.set(r.game, n + 1);
+        games.push({
+          game: r.game as (typeof games)[number]["game"],
+          id: r.id,
+          sectionKey: r.sectionKey,
+          sectionName: r.sectionName,
+          printed: r.printed,
+          name: r.name,
+          rarity: r.rarity,
+          finish: r.finish,
+          imageUrl: r.imageUrl,
+          price: r.price,
+          ownedQty: r.ownedQty,
+          ownedSealedQty: r.ownedSealedQty,
+        });
+      }
+      const sealedEff = await effectiveSealed(ctx);
+      const q = args.query.trim().toLowerCase();
+      const sealed = sealedEff.items
+        .filter((i) => i.name.toLowerCase().includes(q))
+        .slice(0, 6)
+        .map((i) => ({ name: i.name, setName: i.setName, qty: i.qty }));
+      return { games, sealed };
+    },
+  }),
+
   getGameOwnedItems: defineAction({
     description:
       "Every catalog item of one game the collector owns at least one copy of (opened or sealed), in theme/set order — the Lego Sealed shelf reads its sealed rows from here.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
     }),
     response: z.object({
       items: z.array(
@@ -13162,6 +14467,68 @@ export const Actions = {
     },
   }),
 
+  getGameImageProxy: defineAction({
+    description:
+      "Returns a same-origin copy of one catalog item's artwork (fetched server-side once and cached in blob storage), so the client can cut the photo's studio background away on-device even when the source host sends no CORS headers or blocks hotlinking. The URL fetched is always the catalog row's own stored image URL — never a caller-supplied address.",
+    request: z.object({
+      id: z.number().int(),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      url: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: boolean; url: string | null }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      const source = row?.imageUrl ?? null;
+      if (!row || !source) return { ok: false, url: null };
+      const key = `game-img/${row.id}-${funkoHash(source)}`;
+      try {
+        const existing = await ctx.blobs.head(key);
+        if (existing) {
+          return { ok: true, url: await ctx.blobs.getUrl(key) };
+        }
+        const res = await fetch(source, {
+          headers: {
+            // An ordinary browser header set: HobbyDB's bot
+            // check 403s sparse scraper-style headers (a bare
+            // "Accept: image/*" was refused; a full browser
+            // set is served the photo).
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            Accept:
+              "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        });
+        if (!res.ok) return { ok: false, url: null };
+        const contentType = (
+          res.headers.get("content-type") ?? ""
+        ).toLowerCase();
+        if (!contentType.startsWith("image/")) {
+          return { ok: false, url: null };
+        }
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        // Catalog photos are a few hundred KB; anything past
+        // ~3 MB is not the product photo the row promises.
+        if (bytes.length === 0 || bytes.length > 3_000_000) {
+          return { ok: false, url: null };
+        }
+        await ctx.blobs.put(key, bytes, { contentType });
+        return { ok: true, url: await ctx.blobs.getUrl(key) };
+      } catch {
+        return { ok: false, url: null };
+      }
+    },
+  }),
+
   setGameCardOwned: defineAction({
     description:
       "Sets how many copies of one catalog item the collector owns (0 = missing, shown ghosted). For Lego sets it can also set the SEALED copy count, which Lego tracks apart from opened copies because sealed-vs-opened drives Lego value. Only owned counts change; catalog data is untouched.",
@@ -13180,6 +14547,13 @@ export const Actions = {
       args,
     ): Promise<{ ok: true; ownedQty: number; ownedSealedQty: number }> {
       const db = ctx.db<typeof schema>();
+      const before = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const beforeRow = before[0];
+      const beforeTotal =
+        (beforeRow?.ownedQty ?? 0) + (beforeRow?.ownedSealedQty ?? 0);
       await db
         .update(schema.gameCards)
         .set({
@@ -13193,6 +14567,33 @@ export const Actions = {
         .select()
         .from(schema.gameCards)
         .where(eq(schema.gameCards.id, args.id));
+      const afterRow = rows[0];
+      // Lego date-added stamp (Anthony, Nov 4, 2026): the day
+      // a Lego set first enters the collection is a real event
+      // the detail page's Your copy block shows. Stamp it on
+      // the 0-to-owned step only; an existing stamp never moves.
+      if (
+        afterRow?.game === "lego" &&
+        beforeTotal === 0 &&
+        afterRow.ownedQty + afterRow.ownedSealedQty > 0
+      ) {
+        const today = new Date().toISOString().slice(0, 10);
+        const notes = await db
+          .select()
+          .from(schema.legoOwnershipNotes)
+          .where(eq(schema.legoOwnershipNotes.gameCardId, args.id));
+        if (notes.length === 0) {
+          await db.insert(schema.legoOwnershipNotes).values({
+            gameCardId: args.id,
+            dateAdded: today,
+          });
+        } else if (notes[0] && notes[0].dateAdded == null) {
+          await db
+            .update(schema.legoOwnershipNotes)
+            .set({ dateAdded: today })
+            .where(eq(schema.legoOwnershipNotes.gameCardId, args.id));
+        }
+      }
       ctx.invalidateQueries();
       return {
         ok: true as const,
@@ -13202,11 +14603,1499 @@ export const Actions = {
     },
   }),
 
+  findGameCardByUpc: defineAction({
+    description:
+      "Matches a scanned Funko box barcode (UPC/EAN digits) to the catalog figure whose record carries that barcode. The funko-pop-data catalog ships no barcodes, so a figure matches only after its barcode has been linked (setGameCardUpc) — a scan with no linked record returns match: null and the app says so plainly and falls back to search by name. Nothing is ever fuzzy-matched.",
+    request: z.object({
+      upc: z.string().trim().min(8).max(20),
+    }),
+    response: z.object({
+      match: z
+        .object({
+          id: z.number(),
+          name: z.string(),
+          printed: z.string(),
+          sectionName: z.string(),
+          rarity: z.string().nullable(),
+          finish: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          price: z.number().nullable(),
+          ownedQty: z.number(),
+          ownedSealedQty: z.number(),
+        })
+        .nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const digits = args.upc.replace(/\D/g, "");
+      // A UPC-A read as EAN-13 gains a leading 0; try both
+      // forms so a linked 12-digit code matches either scan.
+      const candidates = new Set<string>([digits]);
+      if (digits.length === 13 && digits.startsWith("0")) {
+        candidates.add(digits.slice(1));
+      }
+      if (digits.length === 12) {
+        candidates.add(`0${digits}`);
+      }
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.game, "funko"));
+      let row = rows.find(
+        (r) => r.upc != null && candidates.has(r.upc),
+      );
+      if (!row) {
+        // Researched UPCs (data/funkoSoldPrices.ts) match too:
+        // a published box barcode from the sold-data research
+        // is a real barcode for that figure, not a guess.
+        for (const c of candidates) {
+          const snap = funkoSoldSnapshotByUpc(c);
+          if (snap) {
+            row = rows.find((r) => r.id === snap.cardId);
+            if (row) break;
+          }
+        }
+      }
+      if (!row) return { match: null };
+      return {
+        match: {
+          id: row.id,
+          name: row.name,
+          printed: row.printed,
+          sectionName: row.sectionName,
+          rarity: row.rarity,
+          finish: row.finish,
+          imageUrl: row.imageUrl,
+          price: row.price,
+          ownedQty: row.ownedQty,
+          ownedSealedQty: row.ownedSealedQty,
+        },
+      };
+    },
+  }),
+
+  setGameCardUpc: defineAction({
+    description:
+      "Links a scanned box barcode (UPC/EAN digits) to one Funko catalog figure, so future scans of that box match it. Set by the collector from the figure's own page after a no-match scan — the app never guesses which figure a barcode belongs to.",
+    request: z.object({
+      id: z.number().int(),
+      upc: z.string().trim().min(8).max(20),
+    }),
+    response: z.object({ ok: z.literal(true), upc: z.string() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; upc: string }> {
+      const db = ctx.db<typeof schema>();
+      const digits = args.upc.replace(/\D/g, "");
+      await db
+        .update(schema.gameCards)
+        .set({ upc: digits })
+        .where(
+          and(
+            eq(schema.gameCards.id, args.id),
+            eq(schema.gameCards.game, "funko"),
+          ),
+        );
+      ctx.invalidateQueries();
+      return { ok: true as const, upc: digits };
+    },
+  }),
+
+  findGradedSlabByCert: defineAction({
+    description:
+      "Looks up a grading cert number for one of the top five companies (PSA, Beckett/BGS, SGC, CGC Cards, TAG) in the collector's own vault records — NOT against any company's database. Returns the slab already saved under that company + cert, with the catalog card it is attached to, or null when the cert is new here. The cert scanner checks this before saving so a cert is never entered twice: within one company, one cert number is one physical slab.",
+    request: z.object({
+      company: z.enum(["PSA", "BGS", "SGC", "CGC", "TAG"]),
+      cert: z.string().trim().min(4).max(24),
+    }),
+    response: z.object({
+      existing: z
+        .object({
+          slab: gradedSlabZ,
+          card: z.object({
+            id: z.number(),
+            game: z.string(),
+            name: z.string(),
+            printed: z.string(),
+            sectionName: z.string(),
+            rarity: z.string().nullable(),
+            finish: z.string().nullable(),
+            imageUrl: z.string().nullable(),
+            price: z.number().nullable(),
+            ownedQty: z.number(),
+            ownedSealedQty: z.number(),
+          }),
+        })
+        .nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const cert = normalizeGradedCert(args.company, args.cert);
+      if (!cert) return { existing: null };
+      const slabRows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(
+          and(
+            eq(schema.gradedSlabs.company, args.company),
+            eq(schema.gradedSlabs.cert, cert),
+          ),
+        );
+      const slab = slabRows[0];
+      if (!slab) return { existing: null };
+      const cardRows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, slab.gameCardId));
+      const card = cardRows[0];
+      if (!card) return { existing: null };
+      return {
+        existing: {
+          slab: await gradedSlabShape(ctx, slab),
+          card: {
+            id: card.id,
+            game: card.game,
+            name: card.name,
+            printed: card.printed,
+            sectionName: card.sectionName,
+            rarity: card.rarity,
+            finish: card.finish,
+            imageUrl: card.imageUrl,
+            price: card.price,
+            ownedQty: card.ownedQty,
+            ownedSealedQty: card.ownedSealedQty,
+          },
+        },
+      };
+    },
+  }),
+
+  listGradedSlabs: defineAction({
+    description:
+      "Lists the graded slabs (cert copies from any of the top five companies) saved against one catalog card, newest first — the graded-copies section on the card's page. Each slab carries its company, cert number, grade, and what was paid for it when recorded.",
+    request: z.object({ gameCardId: z.number().int() }),
+    response: z.object({
+      slabs: z.array(gradedSlabZ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.gameCardId, args.gameCardId))
+        .orderBy(desc(schema.gradedSlabs.createdAt));
+      const slabs: z.infer<typeof gradedSlabZ>[] = [];
+      for (const r of rows) slabs.push(await gradedSlabShape(ctx, r));
+      return { slabs };
+    },
+  }),
+
+  addGradedSlab: defineAction({
+    description:
+      "Saves one graded slab (a cert copy from PSA, Beckett/BGS, SGC, CGC Cards, or TAG) against a catalog card: company, cert number, grade, and optionally what was paid. Cert format and grade are validated against the company's own published shapes (e.g. PSA has no 9.5, TAG certs carry a leading letter, SGC's long format is hyphenated). The slab counts as one owned copy of the card, so the card's owned quantity steps up by one. A cert already in the vault under the same company is refused as a duplicate — the existing slab comes back instead, because within a company one cert number is one physical slab. The cert is the collector's own record; nothing is checked against any company's database and no company pricing is attached.",
+    request: z.object({
+      gameCardId: z.number().int(),
+      company: z.enum(["PSA", "BGS", "SGC", "CGC", "TAG"]),
+      cert: z.string().trim().min(4).max(24),
+      grade: z.string().trim().min(1).max(20),
+      paid: z.number().min(0).max(100_000_000).nullable().optional(),
+      /** Set when the online cert lookup imported this
+          cert's slab photos from the grading company: the
+          blob keys it stored, where the photo came from,
+          and the company's own description line. Only keys
+          under the graded-slab prefix are accepted — the
+          client can only attach photos a lookup stored. */
+      imageKey: z.string().max(200).nullable().optional(),
+      imageBackKey: z.string().max(200).nullable().optional(),
+      imageSource: z.enum(["company", "user"]).nullable().optional(),
+      onlineLine: z.string().max(400).nullable().optional(),
+    }),
+    response: z.object({
+      added: z.boolean(),
+      duplicate: z.boolean(),
+      error: z.string().nullable(),
+      slab: gradedSlabZ.nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const cert = normalizeGradedCert(args.company, args.cert);
+      if (!gradedCertValid(args.company, cert)) {
+        return {
+          added: false,
+          duplicate: false,
+          error:
+            "That cert number doesn't match the shape printed on this company's labels — check it against the slab and try again.",
+          slab: null,
+        };
+      }
+      const grade =
+        args.grade.toLowerCase() === "authentic"
+          ? "Authentic"
+          : args.grade;
+      if (!gradedGradeValid(args.company, grade)) {
+        return {
+          added: false,
+          duplicate: false,
+          error:
+            "Pick the grade exactly as printed on the slab's label.",
+          slab: null,
+        };
+      }
+      const cardRows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.gameCardId));
+      const card = cardRows[0];
+      if (!card) {
+        return {
+          added: false,
+          duplicate: false,
+          error: "That catalog card no longer exists here.",
+          slab: null,
+        };
+      }
+      const existing = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(
+          and(
+            eq(schema.gradedSlabs.company, args.company),
+            eq(schema.gradedSlabs.cert, cert),
+          ),
+        );
+      const dup = existing[0];
+      if (dup) {
+        return {
+          added: false,
+          duplicate: true,
+          error: null,
+          slab: await gradedSlabShape(ctx, dup),
+        };
+      }
+      const now = Date.now();
+      const paid =
+        args.paid != null && Number.isFinite(args.paid)
+          ? args.paid
+          : null;
+      const imageKey =
+        args.imageKey && args.imageKey.startsWith("graded-slab/")
+          ? args.imageKey
+          : null;
+      const imageBackKey =
+        args.imageBackKey &&
+        args.imageBackKey.startsWith("graded-slab/")
+          ? args.imageBackKey
+          : null;
+      const inserted = await db
+        .insert(schema.gradedSlabs)
+        .values({
+          gameCardId: card.id,
+          company: args.company,
+          cert,
+          grade,
+          paid,
+          qty: 1,
+          imageKey,
+          imageBackKey,
+          imageSource: imageKey
+            ? (args.imageSource ?? "company")
+            : null,
+          onlineLine: args.onlineLine ?? null,
+          onlineCheckedAt:
+            args.onlineLine != null || imageKey ? now : null,
+          createdAt: now,
+        })
+        .returning();
+      // A graded copy is one of the card's owned copies.
+      await db
+        .update(schema.gameCards)
+        .set({
+          ownedQty: sql`${schema.gameCards.ownedQty} + 1`,
+        })
+        .where(eq(schema.gameCards.id, card.id));
+      ctx.invalidateQueries();
+      const row = inserted[0];
+      return {
+        added: true,
+        duplicate: false,
+        error: null,
+        slab: row ? await gradedSlabShape(ctx, row) : null,
+      };
+    },
+  }),
+
+  removeGradedSlab: defineAction({
+    description:
+      "Removes one graded slab record from a catalog card (the slab was sold, traded, or entered by mistake). The card's owned quantity steps down by one with it, never below zero.",
+    request: z.object({ id: z.number().int() }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.id, args.id));
+      const slab = rows[0];
+      if (slab) {
+        await db
+          .delete(schema.gradedSlabs)
+          .where(eq(schema.gradedSlabs.id, args.id));
+        await db
+          .update(schema.gameCards)
+          .set({
+            ownedQty: sql`max(0, ${schema.gameCards.ownedQty} - ${slab.qty})`,
+          })
+          .where(eq(schema.gameCards.id, slab.gameCardId));
+      }
+      ctx.invalidateQueries();
+      return { ok: true as const };
+    },
+  }),
+
+  lookupGradedCert: defineAction({
+    description:
+      "The online half of slab scanning (Anthony, Nov 5, 2026): after a cert is captured, read the grading company's own cert record for it and, when the company hosts a slab photo for THAT cert, import a copy of the photo into app storage (front, and back when the record has one) — never a hotlink, never another cert's photo. PSA's cert pages carry the full record and its hosted photos and are read directly; Beckett, CGC Cards, and TAG get one best-effort read each and honestly report when their sites cannot be read from here; SGC publishes no online cert record at all and says so. The result pre-fills the confirm screen — grade and the company's description line — only when a record was actually read; no company pricing is fetched or claimed, and a record the lookup could not reach changes nothing about the manual record.",
+    request: z.object({
+      company: z.enum(["PSA", "BGS", "SGC", "CGC", "TAG"]),
+      cert: z.string().trim().min(4).max(24),
+    }),
+    response: z.object({
+      status: z.enum([
+        "found",
+        "not-found",
+        "unreachable",
+        "no-online-record",
+      ]),
+      grade: z.string().nullable(),
+      line: z.string().nullable(),
+      imageKey: z.string().nullable(),
+      imageBackKey: z.string().nullable(),
+      imageUrl: z.string().nullable(),
+      imageBackUrl: z.string().nullable(),
+      sourceUrl: z.string(),
+    }),
+    async handler(ctx, args) {
+      const cert = normalizeGradedCert(args.company, args.cert);
+      const sourceUrl = gradedCertPageUrl(args.company, cert);
+      const blank = {
+        grade: null,
+        line: null,
+        imageKey: null,
+        imageBackKey: null,
+        imageUrl: null,
+        imageBackUrl: null,
+        sourceUrl,
+      };
+      if (!gradedCertValid(args.company, cert)) {
+        return { status: "not-found" as const, ...blank };
+      }
+      // SGC publishes no online cert record — its lookup is a
+      // form with no cert-carrying address — so there is
+      // nothing honest to fetch; the record stays manual.
+      if (args.company === "SGC") {
+        return { status: "no-online-record" as const, ...blank };
+      }
+      const fetchText = async (url: string): Promise<string | null> => {
+        try {
+          const res = await fetch(url, {
+            headers: { "User-Agent": GRADED_LOOKUP_UA },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!res.ok) return null;
+          return await res.text();
+        } catch {
+          return null;
+        }
+      };
+      const importImage = async (
+        url: string,
+        side: "front" | "back",
+      ): Promise<{ key: string; url: string } | null> => {
+        try {
+          const res = await fetch(url, {
+            headers: { "User-Agent": GRADED_LOOKUP_UA },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!res.ok) return null;
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          if (bytes.length < 1_000 || bytes.length > 12_000_000) {
+            return null;
+          }
+          const key = `graded-slab/${args.company.toLowerCase()}/${cert}/${side}.jpg`;
+          await ctx.blobs.put(key, bytes, {
+            contentType: "image/jpeg",
+          });
+          return { key, url: await ctx.blobs.getUrl(key) };
+        } catch {
+          return null;
+        }
+      };
+
+      if (args.company === "PSA") {
+        const html = await fetchText(sourceUrl);
+        if (html == null) {
+          return { status: "unreachable" as const, ...blank };
+        }
+        // PSA server-renders the record as a definition list;
+        // a cert PSA has no record for renders the page shell
+        // with no pairs at all — that absence is the not-found
+        // signal, never a guessed record.
+        const fields = new Map<string, string>();
+        const pairRe =
+          /<dt[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/gi;
+        for (const pm of html.matchAll(pairRe)) {
+          const k = (pm[1] ?? "")
+            .replace(/<[^>]+>/g, "")
+            .trim()
+            .toLowerCase();
+          const v = (pm[2] ?? "")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (k && v) fields.set(k, v);
+        }
+        if (fields.size === 0) {
+          return { status: "not-found" as const, ...blank };
+        }
+        const gradeText = fields.get("item grade") ?? "";
+        const grade = gradeText ? psaGradeFromText(gradeText) : null;
+        const lineParts = [
+          fields.get("year"),
+          fields.get("brand/title") ?? fields.get("brand"),
+          fields.get("subject"),
+          fields.get("card number")
+            ? `#${fields.get("card number")}`
+            : undefined,
+          fields.get("variety/pedigree") ?? fields.get("variety"),
+        ].filter((p): p is string => !!p && p.length > 0);
+        const line =
+          lineParts.length > 0 ? lineParts.join(" · ") : null;
+        // The hosted slab photos ride the page payload as a
+        // JSON images array (CloudFront URLs); PSA's gallery
+        // order is front first, back second. Import the
+        // medium variant of each — only images served for
+        // THIS cert's page are ever imported.
+        let imageKey: string | null = null;
+        let imageBackKey: string | null = null;
+        let imageUrl: string | null = null;
+        let imageBackUrl: string | null = null;
+        // The array may ride the page payload as escaped
+        // JSON (\"images\":[...\"mediumPath\":\"https://…\"]),
+        // so the extraction tolerates both quote forms and
+        // stays inside THIS cert's images array — photos from
+        // anywhere else on the page are never imported.
+        const imgKeyIdx = Math.max(
+          html.indexOf('"images"'),
+          html.indexOf('\\"images\\"'),
+        );
+        if (imgKeyIdx >= 0) {
+          const slice = html.slice(imgKeyIdx, imgKeyIdx + 8000);
+          const end = slice.indexOf("]");
+          const body = end >= 0 ? slice.slice(0, end) : slice;
+          const mediums = [
+            ...body.matchAll(
+              /mediumPath\\?"\s*:\s*\\?"(https:[^"\\]+)/g,
+            ),
+          ]
+            .map((m) => m[1] ?? "")
+            .filter((u, i, arr) => u.length > 0 && arr.indexOf(u) === i)
+            .slice(0, 2);
+          const front = mediums[0];
+          const back = mediums[1];
+          if (front) {
+            const got = await importImage(front, "front");
+            if (got) {
+              imageKey = got.key;
+              imageUrl = got.url;
+            }
+          }
+          if (back) {
+            const got = await importImage(back, "back");
+            if (got) {
+              imageBackKey = got.key;
+              imageBackUrl = got.url;
+            }
+          }
+        }
+        return {
+          status: "found" as const,
+          grade,
+          line,
+          imageKey,
+          imageBackKey,
+          imageUrl,
+          imageBackUrl,
+          sourceUrl,
+        };
+      }
+
+      if (args.company === "TAG") {
+        // TAG's public DIG API refuses anonymous reads (403),
+        // so this is one honest attempt: a real record comes
+        // back only if TAG serves it without an account.
+        try {
+          const res = await fetch(
+            `https://api.taggrading.com/graded-cards/public/detail/${encodeURIComponent(cert)}`,
+            {
+              headers: {
+                "User-Agent": GRADED_LOOKUP_UA,
+                Accept: "application/json",
+              },
+              signal: AbortSignal.timeout(12_000),
+            },
+          );
+          if (res.ok) {
+            const data: unknown = await res.json();
+            const rec = asRec(data);
+            const gradeRaw =
+              typeof rec.grade === "string"
+                ? rec.grade
+                : typeof rec.grade === "number"
+                  ? String(rec.grade)
+                  : null;
+            const grade =
+              gradeRaw != null &&
+              gradedGradeValid("TAG", gradeRaw)
+                ? gradeRaw
+                : null;
+            const line =
+              typeof rec.cardName === "string" && rec.cardName
+                ? rec.cardName
+                : typeof rec.name === "string" && rec.name
+                  ? rec.name
+                  : null;
+            if (grade != null || line != null) {
+              return {
+                status: "found" as const,
+                grade,
+                line,
+                imageKey: null,
+                imageBackKey: null,
+                imageUrl: null,
+                imageBackUrl: null,
+                sourceUrl,
+              };
+            }
+          }
+        } catch {
+          // fall through to unreachable
+        }
+        return { status: "unreachable" as const, ...blank };
+      }
+
+      if (args.company === "BGS") {
+        // Beckett's card-lookup page: one attempt per scan.
+        // Its platform has been rate-limiting automated reads
+        // (HTTP 429 at build time), so unreachable is the
+        // expected honest answer until Beckett serves it.
+        const html = await fetchText(sourceUrl);
+        if (html == null) {
+          return { status: "unreachable" as const, ...blank };
+        }
+        const gradeMatch = html.match(
+          /(?:final\s+grade|grade)["'>:\s]{0,12}(10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1)\b/i,
+        );
+        if (!gradeMatch) {
+          return { status: "unreachable" as const, ...blank };
+        }
+        return {
+          status: "found" as const,
+          grade: gradeMatch[1] ?? null,
+          line: null,
+          imageKey: null,
+          imageBackKey: null,
+          imageUrl: null,
+          imageBackUrl: null,
+          sourceUrl,
+        };
+      }
+
+      // CGC Cards: the cert-lookup page is a script-driven app
+      // whose record data automated reads could not reach at
+      // build time; try the page once and take a grade only if
+      // the served HTML actually carries this cert beside one.
+      const html = await fetchText(sourceUrl);
+      if (html == null || !html.includes(cert)) {
+        return { status: "unreachable" as const, ...blank };
+      }
+      const gradeMatch = html.match(
+        /(?:grade)["'>:\s]{0,16}(Pristine 10|Perfect 10|10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1|Authentic)\b/i,
+      );
+      if (!gradeMatch) {
+        return { status: "unreachable" as const, ...blank };
+      }
+      return {
+        status: "found" as const,
+        grade: gradeMatch[1] ?? null,
+        line: null,
+        imageKey: null,
+        imageBackKey: null,
+        imageUrl: null,
+        imageBackUrl: null,
+        sourceUrl,
+      };
+    },
+  }),
+
+  getGradedSlab: defineAction({
+    description:
+      "One saved graded slab with the full catalog card it belongs to — everything the Card / Slab View page shows: the slab record (company, cert, grade, paid, copy count, imported photos and where they came from, the company's online description line) and the card (game, name, set, number, rarity, catalog art, raw market price, total owned).",
+    request: z.object({ id: z.number().int() }),
+    response: z.object({
+      slab: gradedSlabZ.nullable(),
+      card: z
+        .object({
+          id: z.number(),
+          game: z.string(),
+          name: z.string(),
+          printed: z.string(),
+          sectionName: z.string(),
+          rarity: z.string().nullable(),
+          finish: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          price: z.number().nullable(),
+          ownedQty: z.number(),
+          ownedSealedQty: z.number(),
+        })
+        .nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.id, args.id));
+      const slab = rows[0];
+      if (!slab) return { slab: null, card: null };
+      const cardRows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, slab.gameCardId));
+      const card = cardRows[0];
+      return {
+        slab: await gradedSlabShape(ctx, slab),
+        card: card
+          ? {
+              id: card.id,
+              game: card.game,
+              name: card.name,
+              printed: card.printed,
+              sectionName: card.sectionName,
+              rarity: card.rarity,
+              finish: card.finish,
+              imageUrl: card.imageUrl,
+              price: card.price,
+              ownedQty: card.ownedQty,
+              ownedSealedQty: card.ownedSealedQty,
+            }
+          : null,
+      };
+    },
+  }),
+
+  setGradedSlabQty: defineAction({
+    description:
+      "Sets how many copies are held under one graded slab's company+cert (the Card / Slab View stepper). The card's owned quantity moves by the same delta so the slab count and the card count never disagree; setting zero removes the slab record entirely. Saves immediately, like the card steppers.",
+    request: z.object({
+      id: z.number().int(),
+      qty: z.number().int().min(0).max(999),
+    }),
+    response: z.object({
+      ok: z.literal(true),
+      qty: z.number(),
+      removed: z.boolean(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; qty: number; removed: boolean }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.id, args.id));
+      const slab = rows[0];
+      if (!slab) return { ok: true as const, qty: 0, removed: true };
+      const delta = args.qty - slab.qty;
+      if (args.qty === 0) {
+        await db
+          .delete(schema.gradedSlabs)
+          .where(eq(schema.gradedSlabs.id, args.id));
+      } else if (delta !== 0) {
+        await db
+          .update(schema.gradedSlabs)
+          .set({ qty: args.qty })
+          .where(eq(schema.gradedSlabs.id, args.id));
+      }
+      if (delta !== 0) {
+        await db
+          .update(schema.gameCards)
+          .set({
+            ownedQty:
+              delta > 0
+                ? sql`${schema.gameCards.ownedQty} + ${delta}`
+                : sql`max(0, ${schema.gameCards.ownedQty} - ${-delta})`,
+          })
+          .where(eq(schema.gameCards.id, slab.gameCardId));
+      }
+      ctx.invalidateQueries();
+      return {
+        ok: true as const,
+        qty: args.qty,
+        removed: args.qty === 0,
+      };
+    },
+  }),
+
+  updateGradedSlabPaid: defineAction({
+    description:
+      "Records (or clears) what was paid for one graded slab, from the Card / Slab View page. Per-copy price, exactly as the collector enters it — nothing is fetched or estimated.",
+    request: z.object({
+      id: z.number().int(),
+      paid: z.number().min(0).max(100_000_000).nullable(),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.gradedSlabs)
+        .set({
+          paid:
+            args.paid != null && Number.isFinite(args.paid)
+              ? args.paid
+              : null,
+        })
+        .where(eq(schema.gradedSlabs.id, args.id));
+      ctx.invalidateQueries();
+      return { ok: true as const };
+    },
+  }),
+
+  saveGradedSlabPhoto: defineAction({
+    description:
+      "Saves the collector's own photo of a graded slab (front or back) over whatever photo the slab record currently shows — the honest replacement for a missing company photo or the catalog-art stand-in. The photo is stored in app storage and the slab's photo source becomes \"user\" so the UI always says whose photo it is.",
+    request: z.object({
+      id: z.number().int(),
+      side: z.enum(["front", "back"]),
+      imageBase64: z.string().min(100).max(9_000_000),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      imageUrl: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.id, args.id));
+      const slab = rows[0];
+      if (!slab) return { ok: false, imageUrl: null };
+      let bytes: Uint8Array;
+      try {
+        const clean = args.imageBase64.replace(
+          /^data:image\/[a-z+]+;base64,/i,
+          "",
+        );
+        bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));
+      } catch {
+        return { ok: false, imageUrl: null };
+      }
+      if (bytes.length < 100 || bytes.length > 9_000_000) {
+        return { ok: false, imageUrl: null };
+      }
+      const key = `graded-slab/${slab.company.toLowerCase()}/${slab.cert}/user-${args.side}.jpg`;
+      await ctx.blobs.put(key, bytes, { contentType: "image/jpeg" });
+      if (args.side === "front") {
+        await db
+          .update(schema.gradedSlabs)
+          .set({ imageKey: key, imageSource: "user" })
+          .where(eq(schema.gradedSlabs.id, args.id));
+      } else {
+        await db
+          .update(schema.gradedSlabs)
+          .set({ imageBackKey: key })
+          .where(eq(schema.gradedSlabs.id, args.id));
+      }
+      ctx.invalidateQueries();
+      return { ok: true, imageUrl: await safeBlobUrl(ctx, key) };
+    },
+  }),
+
+  readGradedSlabPhoto: defineAction({
+    description:
+      "Reads a photo of a graded slab's label with vision and returns what is printed on it: the grading company the label belongs to, the certification number (copied character for character exactly as printed, leading zeros and TAG's leading letter kept), the grade, and the label's card description line. It reads THIS slab's label only — it does not look the cert up with any company and does not verify anything. Any field the photo does not show clearly comes back null so the collector can type it instead of the app guessing.",
+    request: z.object({
+      imageBase64: z.string().min(100).max(9_000_000),
+      /** The company the collector picked before taking the
+          photo; the read still reports the company it
+          actually sees on the label. */
+      company: z.enum(["PSA", "BGS", "SGC", "CGC", "TAG"]),
+    }),
+    response: z.object({
+      company: z
+        .enum(["PSA", "BGS", "SGC", "CGC", "TAG"])
+        .nullable(),
+      cert: z.string().nullable(),
+      grade: z.string().nullable(),
+      labelText: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      if (agentCapabilityBlocked(ctx)) {
+        return {
+          company: null,
+          cert: null,
+          grade: null,
+          labelText: null,
+        };
+      }
+      const readSchema = z.object({
+        company: z.string().nullable(),
+        certNumber: z.string().nullable(),
+        grade: z.string().nullable(),
+        cardDescription: z.string().nullable(),
+      });
+      const COMPANY_NAMES: Record<GradingCompanyKey, string> = {
+        PSA: "PSA",
+        BGS: "Beckett (BGS)",
+        SGC: "SGC",
+        CGC: "CGC Cards",
+        TAG: "TAG",
+      };
+      try {
+        const read = await Promise.race([
+          ctx.inference.complete(
+            `Read the grading label in this photo of a graded card slab. The collector believes it is a ${COMPANY_NAMES[args.company]} slab, but report what the label actually shows. The label is the printed band at the top of the slab (several companies also print a QR code and a barcode; TAG prints its text into the clear case itself). Report: company — the grading company named on the label, exactly one of PSA, BGS, SGC, CGC, TAG (Beckett labels say BECKETT and count as BGS), or null if no company name is readable; certNumber — the certification number printed on the label, copied character for character exactly as printed INCLUDING any leading zeros, any leading letter (TAG certs look like F6396638), and any hyphen (SGC's long format looks like 1234567-890); grade — the grade printed on the label: the number (for example 10, 9.5, 9, or 8.5), or Pristine 10 / Perfect 10 when the label prints those words beside a 10, or the word Authentic when the label says AUTHENTIC instead of a number; cardDescription — the card description lines printed on the label (year, brand or set, card number, player or subject, and any variety like Refractor or 1st Edition), as one line of text. If a field is not clearly readable in the photo, report null for it instead of guessing.`,
+            {
+              schema: readSchema,
+              images: [
+                {
+                  dataBase64: args.imageBase64,
+                  mimeType: "image/jpeg",
+                  caption:
+                    "Photo of a graded card slab label to read",
+                },
+              ],
+            },
+          ),
+          new Promise<never>((_resolve, reject) => {
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Label read timed out — type the cert number instead.",
+                  ),
+                ),
+              25_000,
+            );
+          }),
+        ]);
+        const seenCompany = (read.company ?? "")
+          .trim()
+          .toUpperCase();
+        const company: GradingCompanyKey | null =
+          seenCompany === "PSA" ||
+          seenCompany === "BGS" ||
+          seenCompany === "BECKETT"
+            ? seenCompany === "PSA"
+              ? "PSA"
+              : "BGS"
+            : seenCompany === "SGC" ||
+                seenCompany === "CGC" ||
+                seenCompany === "TAG"
+              ? seenCompany
+              : null;
+        const effectiveCompany = company ?? args.company;
+        const certRaw = normalizeGradedCert(
+          effectiveCompany,
+          read.certNumber ?? "",
+        );
+        const cert = gradedCertValid(effectiveCompany, certRaw)
+          ? certRaw
+          : null;
+        const rawGrade = (read.grade ?? "").trim();
+        let grade: string | null = null;
+        if (/authentic/i.test(rawGrade)) {
+          grade = "Authentic";
+        } else if (/perfect/i.test(rawGrade)) {
+          grade = "Perfect 10";
+        } else if (/pristine/i.test(rawGrade)) {
+          grade = "Pristine 10";
+        } else {
+          const m = rawGrade.match(
+            /10(?:\.0)?|9\.5|9(?:\.0)?|8\.5|8(?:\.0)?|7\.5|7(?:\.0)?|6\.5|6(?:\.0)?|5\.5|5(?:\.0)?|4\.5|4(?:\.0)?|3\.5|3(?:\.0)?|2\.5|2(?:\.0)?|1\.5|1(?:\.0)?/,
+          );
+          if (m) grade = m[0].replace(/\.0$/, "");
+        }
+        if (
+          grade != null &&
+          !gradedGradeValid(effectiveCompany, grade)
+        ) {
+          grade = null;
+        }
+        return {
+          company,
+          cert,
+          grade,
+          labelText: read.cardDescription?.trim()
+            ? read.cardDescription.trim()
+            : null,
+        };
+      } catch {
+        return {
+          company: null,
+          cert: null,
+          grade: null,
+          labelText: null,
+        };
+      }
+    },
+  }),
+
+  getGameCardMarket: defineAction({
+    description:
+      "A Funko item's market view (Anthony, Nov 4, 2026): its value history over time plus the current sold-based values, from eBay SOLD data (the researched snapshot in data/funkoSoldPrices.ts, PriceCharting's completed-sales values) and the daily recorded points. Items with no sold data return snapshot: null and the app says no recent sales are recorded — values are never invented.",
+    request: z.object({ id: z.number().int() }),
+    response: z.object({
+      snapshot: z
+        .object({
+          asOf: z.string(),
+          snapshotDate: z.string(),
+          sourceUrl: z.string(),
+          outOfBox: z.number(),
+          inBox: z.number(),
+          newSealed: z.number(),
+        })
+        .nullable(),
+      history: z.array(
+        z.object({
+          date: z.string(),
+          label: z.string(),
+          unitValue: z.number(),
+          source: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const snap = funkoSoldSnapshotFor(args.id);
+      const rows = await db
+        .select()
+        .from(schema.gameCardPriceHistory)
+        .where(eq(schema.gameCardPriceHistory.gameCardId, args.id));
+      const points = rows
+        .map((r) => ({
+          date: r.date,
+          label: r.label,
+          unitValue: r.unitValue,
+          source: r.source,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      // Backfill (Anthony, Nov 4, 2026): the researched
+      // snapshot is itself a real sold-data point at its
+      // as-of date, so the history starts there even before
+      // the first daily recording lands.
+      if (snap && !points.some((p) => p.date === snap.asOf)) {
+        points.unshift({
+          date: snap.asOf,
+          label: snap.asOf,
+          unitValue: snap.inBox,
+          source: "ebay-sold",
+        });
+        points.sort((a, b) => a.date.localeCompare(b.date));
+      }
+      return {
+        snapshot: snap
+          ? {
+              asOf: snap.asOf,
+              snapshotDate: FUNKO_SOLD_SNAPSHOT_DATE,
+              sourceUrl: snap.sourceUrl,
+              outOfBox: snap.outOfBox,
+              inBox: snap.inBox,
+              newSealed: snap.newSealed,
+            }
+          : null,
+        history: points,
+      };
+    },
+  }),
+
+  recordFunkoDailyPoints: defineAction({
+    description:
+      "Daily Funko market recording (Anthony, Nov 4, 2026): for every Funko figure with researched eBay sold data, appends today's value point (the In Box sold-based value) to its value history and refreshes its catalog price, so Funko value history accumulates on the same daily cadence as the cards' re-pricing. Idempotent per day; figures with no sold data are untouched.",
+    request: z.object({}),
+    response: z.object({ recorded: z.number() }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const today = new Date().toISOString().slice(0, 10);
+      let recorded = 0;
+      for (const snap of FUNKO_SOLD_PRICES) {
+        const existing = await db
+          .select()
+          .from(schema.gameCardPriceHistory)
+          .where(
+            and(
+              eq(schema.gameCardPriceHistory.gameCardId, snap.cardId),
+              eq(schema.gameCardPriceHistory.date, today),
+            ),
+          );
+        if (existing.length === 0) {
+          await db.insert(schema.gameCardPriceHistory).values({
+            gameCardId: snap.cardId,
+            date: today,
+            label: today,
+            unitValue: snap.inBox,
+            source: "daily",
+          });
+          recorded++;
+        }
+        await db
+          .update(schema.gameCards)
+          .set({ price: snap.inBox })
+          .where(eq(schema.gameCards.id, snap.cardId));
+      }
+      if (recorded > 0) ctx.invalidateQueries();
+      return { recorded };
+    },
+  }),
+
+  getLegoSetDetail: defineAction({
+    description:
+      "Everything a Lego set's built-out detail page shows beyond the catalog row: the catalog facts unpacked (subtheme, year, pieces), the researched product facts and market data (Brickset/BrickLink/BrickEconomy/Rebrickable/Brickfact, saved by research tasks — null until researched, and the page says so), the collector's own ownership notes (paid, condition, completeness, date added), and the set's recorded value-history points.",
+    request: z.object({ id: z.number().int() }),
+    response: z.object({
+      facts: z.object({
+        subtheme: z.string().nullable(),
+        year: z.number().nullable(),
+        pieces: z.number().nullable(),
+      }),
+      details: legoDetailsShape.nullable(),
+      notes: z
+        .object({
+          paidPriceUsd: z.number().nullable(),
+          condition: z.string().nullable(),
+          completeness: z.string().nullable(),
+          missingPieces: z.number().nullable(),
+          dateAdded: z.string().nullable(),
+        })
+        .nullable(),
+      history: z.array(
+        z.object({
+          date: z.string(),
+          label: z.string(),
+          unitValue: z.number(),
+          source: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      const facts = row
+        ? legoCatalogFacts(row)
+        : { subtheme: null, year: null, pieces: null };
+      const detailRows = await db
+        .select()
+        .from(schema.legoSetDetails)
+        .where(eq(schema.legoSetDetails.gameCardId, args.id));
+      const noteRows = await db
+        .select()
+        .from(schema.legoOwnershipNotes)
+        .where(eq(schema.legoOwnershipNotes.gameCardId, args.id));
+      const histRows = await db
+        .select()
+        .from(schema.gameCardPriceHistory)
+        .where(eq(schema.gameCardPriceHistory.gameCardId, args.id));
+      const note = noteRows[0];
+      return {
+        facts,
+        details: detailRows[0] ? legoDetailsOf(detailRows[0]) : null,
+        notes: note
+          ? {
+              paidPriceUsd: note.paidPriceUsd,
+              condition: note.condition,
+              completeness: note.completeness,
+              missingPieces: note.missingPieces,
+              dateAdded: note.dateAdded,
+            }
+          : null,
+        history: histRows
+          .map((r) => ({
+            date: r.date,
+            label: r.label,
+            unitValue: r.unitValue,
+            source: r.source,
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    },
+  }),
+
+  saveLegoSetResearch: defineAction({
+    description:
+      "Saves one Lego set's researched product facts and market data (from Brickset, BrickLink, BrickEconomy, Rebrickable, and Brickfact) for its detail page: release/retirement dates, US retail price, ages, barcodes, dimensions, the official description, the minifigure list with exclusivity and values, the parts inventory summary, part-out value, sealed vs used market values, forecasts (stored as forecasts), recent real sold listings with dates and sources, current retailer prices, dated value-history points, and the source pages used. Any field without real published data is saved as null and shows as unavailable — never invented. Also refreshes the catalog row's market price and appends today's market point to the set's value history.",
+    request: legoDetailsShape
+      .omit({ researchedAt: true })
+      .extend({
+        historyPoints: z.array(
+          z.object({
+            date: z.string(),
+            label: z.string(),
+            unitValue: z.number(),
+            source: z.string(),
+          }),
+        ),
+      }),
+    response: z.object({ ok: z.literal(true), gameCardId: z.number() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; gameCardId: number }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          and(
+            eq(schema.gameCards.game, "lego"),
+            eq(schema.gameCards.uid, `lego:${args.setNum}`),
+          ),
+        );
+      const row = rows[0];
+      if (!row) {
+        throw new Error(`No Lego catalog row for set ${args.setNum}`);
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const values = {
+        gameCardId: row.id,
+        setNum: args.setNum,
+        releaseDate: args.releaseDate,
+        retailPriceUsd: args.retailPriceUsd,
+        ages: args.ages,
+        upc: args.upc,
+        ean: args.ean,
+        dimensions: args.dimensions,
+        weightGrams: args.weightGrams,
+        buildTime: args.buildTime,
+        description: args.description,
+        availability: args.availability,
+        retiredDate: args.retiredDate,
+        expectedRetirement: args.expectedRetirement,
+        minifigsJson: JSON.stringify(args.minifigs),
+        minifigsValueUsd: args.minifigsValueUsd,
+        partsDistinct: args.partsDistinct,
+        partsSpares: args.partsSpares,
+        partOutValueUsd: args.partOutValueUsd,
+        marketSealedUsd: args.marketSealedUsd,
+        marketUsedUsd: args.marketUsedUsd,
+        usedRange: args.usedRange,
+        annualGrowthPct: args.annualGrowthPct,
+        forecast1yrUsd: args.forecast1yrUsd,
+        forecast5yrUsd: args.forecast5yrUsd,
+        soldListingsJson: JSON.stringify(args.soldListings),
+        retailersJson: JSON.stringify(args.retailers),
+        sourcesJson: JSON.stringify(args.sources),
+        researchedAt: today,
+      };
+      const existing = await db
+        .select()
+        .from(schema.legoSetDetails)
+        .where(eq(schema.legoSetDetails.gameCardId, row.id));
+      if (existing.length === 0) {
+        await db.insert(schema.legoSetDetails).values(values);
+      } else {
+        await db
+          .update(schema.legoSetDetails)
+          .set(values)
+          .where(eq(schema.legoSetDetails.gameCardId, row.id));
+      }
+      // Value history: the researcher's dated published points
+      // plus today's point at the current market value (sealed
+      // when published, else used). Deduped on date + source so
+      // a re-research never double-plots a point.
+      const points = [...args.historyPoints];
+      const marketNow = args.marketSealedUsd ?? args.marketUsedUsd;
+      if (marketNow != null) {
+        points.push({
+          date: today,
+          label: today,
+          unitValue: marketNow,
+          source: "BrickEconomy",
+        });
+      }
+      for (const p of points) {
+        const dup = await db
+          .select()
+          .from(schema.gameCardPriceHistory)
+          .where(
+            and(
+              eq(schema.gameCardPriceHistory.gameCardId, row.id),
+              eq(schema.gameCardPriceHistory.date, p.date),
+              eq(schema.gameCardPriceHistory.source, p.source),
+            ),
+          );
+        if (dup.length === 0) {
+          await db.insert(schema.gameCardPriceHistory).values({
+            gameCardId: row.id,
+            date: p.date,
+            label: p.label,
+            unitValue: p.unitValue,
+            source: p.source,
+          });
+        }
+      }
+      if (marketNow != null) {
+        await db
+          .update(schema.gameCards)
+          .set({ price: marketNow })
+          .where(eq(schema.gameCards.id, row.id));
+      }
+      ctx.invalidateQueries();
+      return { ok: true as const, gameCardId: row.id };
+    },
+  }),
+
+  researchLegoSet: defineAction({
+    description:
+      "Starts a research task for one Lego set's detail page: the agent reads the set's pages on Brickset, BrickLink, BrickEconomy, Rebrickable, and Brickfact and saves the verified product facts and market data through saveLegoSetResearch. Fields no source publishes stay empty and show as unavailable; the task never invents a number.",
+    request: z.object({ id: z.number().int() }),
+    response: z.object({
+      started: z.boolean(),
+      taskId: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ started: boolean; taskId: string | null }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      if (!row || row.game !== "lego") {
+        return { started: false, taskId: null };
+      }
+      // Guest access (platform v27): agent tasks are
+      // owner-only and unavailable in the shared runtime.
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null };
+      }
+      const setNum = row.number ?? row.printed;
+      const today = new Date().toISOString().slice(0, 10);
+      const result = await ctx.agent.spawnTask(
+        [
+          `Research the LEGO set ${setNum} "${row.name}" (theme ${row.sectionName}) for the Vault X Lego detail page, and save what you verify through the artifact's saveLegoSetResearch action.`,
+          "Read the set's pages on Brickset (brickset.com/sets/<set number>), BrickLink (catalog item page for the set), BrickEconomy (brickeconomy.com set page), Rebrickable (rebrickable.com set page), and Brickfact (brickfact.com set page). Use ONLY values those pages actually publish; if sources disagree, save the value from the most specific source for that field (BrickEconomy for market values and dates, BrickLink for inventory and part-out, Rebrickable for the parts inventory) and include every page you used in the sources list with its exact URL.",
+          "Save these fields (leave any field null when no source publishes it — never estimate, round from memory, or invent): releaseDate (yyyy-mm-dd), retailPriceUsd (US RRP at release), ages, upc, ean, dimensions (built model, source wording), weightGrams, buildTime (label estimates as estimates in the text), description (the official LEGO description, verbatim), availability, retiredDate (yyyy-mm-dd) or expectedRetirement (labeled an estimate), minifigs (each: name, code, uniqueToSet, valueUsd), minifigsValueUsd, partsDistinct, partsSpares, partOutValueUsd (BrickLink part-out total only — labelled part-out, never a set value), marketSealedUsd and marketUsedUsd (current, with usedRange when published), annualGrowthPct, forecast1yrUsd and forecast5yrUsd (only a source's published forecasts), soldListings (real completed sales only: date, priceUsd, condition sealed or used, title, source, sourceUrl — asking prices never count as sales), retailers (current listings for a sealed copy: name, priceUsd, url — these are asking prices and the app labels them so), historyPoints (dated published value points only: date, label, unitValue, source — no interpolation), sources (label + exact URL for every page used).",
+          `Call saveLegoSetResearch ONCE with setNum "${setNum}" and everything you verified. Do not change ownership, prices on any other item, or any files.`,
+        ].join("\n"),
+        {
+          expectsAction: "saveLegoSetResearch",
+          dedupeKey: `lego-research-${setNum}-${today}`,
+        },
+      );
+      return {
+        started: result.ok,
+        taskId: result.ok ? result.taskId : null,
+      };
+    },
+  }),
+
+  setLegoOwnershipNotes: defineAction({
+    description:
+      "Saves the collector's own record for one Lego set: what they paid per copy, the copy's condition, its completeness and missing-pieces count. Saving notes for an already-owned set also stamps its date added (today) when none is recorded — the date is the day the record is made, never backdated or guessed.",
+    request: z.object({
+      id: z.number().int(),
+      paidPriceUsd: z.number().min(0).max(1000000).nullable(),
+      condition: z
+        .enum([
+          "new_sealed",
+          "built_complete",
+          "built_incomplete",
+          "in_pieces",
+        ])
+        .nullable(),
+      completeness: z
+        .enum(["complete", "missing_pieces", "unknown"])
+        .nullable(),
+      missingPieces: z.number().int().min(0).max(100000).nullable(),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      const existing = await db
+        .select()
+        .from(schema.legoOwnershipNotes)
+        .where(eq(schema.legoOwnershipNotes.gameCardId, args.id));
+      const owned =
+        (row?.ownedQty ?? 0) + (row?.ownedSealedQty ?? 0) > 0;
+      const today = new Date().toISOString().slice(0, 10);
+      const dateAdded =
+        existing[0]?.dateAdded ?? (owned ? today : null);
+      const values = {
+        gameCardId: args.id,
+        paidPriceUsd: args.paidPriceUsd,
+        condition: args.condition,
+        completeness: args.completeness,
+        missingPieces: args.missingPieces,
+        dateAdded,
+      };
+      if (existing.length === 0) {
+        await db.insert(schema.legoOwnershipNotes).values(values);
+      } else {
+        await db
+          .update(schema.legoOwnershipNotes)
+          .set(values)
+          .where(eq(schema.legoOwnershipNotes.gameCardId, args.id));
+      }
+      ctx.invalidateQueries();
+      return { ok: true as const };
+    },
+  }),
+
+  purgeFunkoNonToys: defineAction({
+    description:
+      "Removes the Funko catalog's non-toy rows (apparel, pins, Pez, books, home goods, board games, shirt/glass bundles — Anthony's toys-only rule for the section; plush stays). Rows the collector owns are never deleted; they are counted and reported instead. Idempotent: a second run removes nothing.",
+    request: z.object({}),
+    response: z.object({
+      removed: z.number(),
+      keptOwned: z.number(),
+      remaining: z.number(),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.game, "funko"));
+      let removed = 0;
+      let keptOwned = 0;
+      for (const r of rows) {
+        const tags = [
+          r.sectionName,
+          ...(r.finish ? r.finish.split(", ") : []),
+        ];
+        if (!funkoIsNonToy(tags, r.name)) continue;
+        if (r.ownedQty > 0 || r.ownedSealedQty > 0) {
+          keptOwned += 1;
+          continue;
+        }
+        await db
+          .delete(schema.gameCards)
+          .where(eq(schema.gameCards.id, r.id));
+        removed += 1;
+      }
+      const after = await db
+        .select({ id: schema.gameCards.id })
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.game, "funko"));
+      ctx.invalidateQueries();
+      return { removed, keptOwned, remaining: after.length };
+    },
+  }),
+
+  getLibraryOrder: defineAction({
+    description:
+      "The signed-in collector's saved Library arrangement (shelf order and spine order from their drag-to-reorder), or empty lists when they have never arranged it.",
+    request: z.object({}),
+    response: z.object({
+      sections: z.array(z.string()),
+      entries: z.array(z.string()),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const rows = await db
+        .select()
+        .from(schema.libraryOrders)
+        .where(
+          eq(schema.libraryOrders.collectorCode, profile.collectorCode),
+        )
+        .limit(1);
+      let sections: string[] = [];
+      let entries: string[] = [];
+      try {
+        const parsed = JSON.parse(rows[0]?.orderJson ?? "{}") as {
+          sections?: unknown;
+          entries?: unknown;
+        };
+        if (Array.isArray(parsed.sections)) {
+          sections = parsed.sections.filter(
+            (s): s is string => typeof s === "string",
+          );
+        }
+        if (Array.isArray(parsed.entries)) {
+          entries = parsed.entries.filter(
+            (s): s is string => typeof s === "string",
+          );
+        }
+      } catch {
+        // A corrupt saved order falls back to natural order.
+      }
+      return { sections, entries };
+    },
+  }),
+
+  saveLibraryOrder: defineAction({
+    description:
+      "Saves the collector's Library arrangement (shelf order and spine order) from the Library's drag-to-reorder, as their own per-user preference.",
+    request: z.object({
+      sections: z.array(z.string()).max(40),
+      entries: z.array(z.string()).max(400),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const orderJson = JSON.stringify({
+        sections: args.sections,
+        entries: args.entries,
+      });
+      const existing = await db
+        .select({ collectorCode: schema.libraryOrders.collectorCode })
+        .from(schema.libraryOrders)
+        .where(
+          eq(schema.libraryOrders.collectorCode, profile.collectorCode),
+        )
+        .limit(1);
+      if (existing.length > 0) {
+        await db
+          .update(schema.libraryOrders)
+          .set({ orderJson, updatedAt: Date.now() })
+          .where(
+            eq(
+              schema.libraryOrders.collectorCode,
+              profile.collectorCode,
+            ),
+          );
+      } else {
+        await db.insert(schema.libraryOrders).values({
+          collectorCode: profile.collectorCode,
+          orderJson,
+          updatedAt: Date.now(),
+        });
+      }
+      ctx.invalidateQueries();
+      return { ok: true as const };
+    },
+  }),
+
   importGameCatalog: defineAction({
     description:
-      "Downloads the next chunk of one game's catalog from its canonical free source (Pokémon: PokemonTCG/pokemon-tcg-data; Magic: Scryfall; Star Wars: Unlimited: Fantasy Flight's official card API; Funko Pop!: the open-source funko-pop-data dataset scraped from Pop Price Guide / HobbyDB; Lego: Rebrickable's official bulk catalog downloads) into game_cards and returns the running progress. Resumable: each call continues where the last stopped until the catalog is complete; existing printings and owned counts are never overwritten.",
+      "Downloads the next chunk of one game's catalog from its canonical free source (Pokémon: PokemonTCG/pokemon-tcg-data; Magic: Scryfall; Star Wars: Unlimited: Fantasy Flight's official card API; Funko Pop!: the open-source funko-pop-data dataset scraped from Pop Price Guide / HobbyDB; Lego: Rebrickable's official bulk catalog downloads; Topps baseball, Bowman baseball, Topps basketball, Disney Topps, Star Wars Topps, Garbage Pail Kids, and WWE Topps: Topps' own official product checklists from topps.com/pages/checklists, text data only — no artwork) into game_cards and returns the running progress. Resumable: each call continues where the last stopped until the catalog is complete; existing printings and owned counts are never overwritten.",
     request: z.object({
-      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego"]),
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
     }),
     response: z.object({
       ok: z.boolean(),
@@ -13236,7 +16125,15 @@ export const Actions = {
                 ? await importFunkoChunk(ctx, state)
                 : args.game === "lego"
                   ? await importLegoChunk(ctx, state)
-                  : await importStarwarsChunk(ctx, state);
+                  : args.game === "topps" ||
+                      args.game === "bowman" ||
+                      args.game === "topps-basketball" ||
+                      args.game === "disney-topps" ||
+                      args.game === "starwars-topps" ||
+                      args.game === "gpk" ||
+                      args.game === "wwe-topps"
+                    ? await importToppsChunk(ctx, state, args.game)
+                    : await importStarwarsChunk(ctx, state);
         const cardsTotal = await saveImportMeta(
           ctx,
           args.game,
@@ -13262,7 +16159,11 @@ export const Actions = {
         // next call resumes instead of starting over.
         try {
           const setsTotal =
-            state.sets?.length ?? state.totalPages ?? meta?.setsTotal ?? 0;
+            state.sets?.length ??
+            state.files?.length ??
+            state.totalPages ??
+            meta?.setsTotal ??
+            0;
           const setsDone =
             state.cursor ??
             (state.page != null ? state.page - 1 : (meta?.setsDone ?? 0));
@@ -14100,6 +17001,42 @@ export const Actions = {
     },
   }),
 
+  requestDeckBuyList: defineAction({
+    description:
+      "Hands a deck's missing-cards buy list to the signed-in collector's own Muse (restored Nov 4, 2026 at Anthony's explicit direction after he reviewed exactly what it sends): re-runs the deck-vs-collection check server-side and spawns an agent task carrying ONLY the missing copies' public TCGplayer product IDs and quantities, instructing the Muse to build the cart on TCGplayer under the user's own sign-in (Near Mint, his standing shipping rules) and NEVER to check out — final payment approval stays with the user. Fires only behind the client's per-run confirmed:true gate; missing copies without a TCGplayer product ID are counted and disclosed, never sent.",
+    request: z.object({
+      lines: z
+        .array(
+          z.object({
+            cardId: z.number().int().positive(),
+            qty: z.number().int().min(1).max(60),
+          }),
+        )
+        .min(1)
+        .max(240),
+      confirmed: z.literal(true),
+    }),
+    response: buyListHandoffResponse,
+    async handler(ctx, args): Promise<BuyListHandoffResult> {
+      const merged = new Map<number, number>();
+      for (const l of args.lines)
+        merged.set(l.cardId, (merged.get(l.cardId) ?? 0) + l.qty);
+      const lines = [...merged.entries()].map(([cardId, qty]) => ({
+        cardId,
+        qty,
+      }));
+      const check = await checkDeckLines(ctx, lines);
+      return spawnBuyListHandoff(
+        ctx,
+        check.buyList.map((l) => ({
+          tcgplayerId: l.tcgplayerId,
+          qty: l.shortfall,
+        })),
+        "deck",
+      );
+    },
+  }),
+
   getSharingSettings: defineAction({
     description:
       "The Settings sharing controls (Anthony, Nov 3, 2026): one switch per connected friend deciding whether that friend can see the owner's collection. Every friend defaults to ON — no friend_sharing row means sharing is on for them. The friend list is the central registry's members (minus the owner) with the built-in test friend always present.",
@@ -14287,6 +17224,7 @@ export const Actions = {
           message: z.string(),
           createdAt: z.string(),
           status: z.string(),
+          completedAt: z.string().nullable(),
           assignee: z.string().nullable(),
           photoUrl: z.string().nullable(),
         }),
@@ -14309,6 +17247,7 @@ export const Actions = {
             message: r.message,
             createdAt: r.createdAt,
             status: r.status ?? "open",
+            completedAt: r.completedAt ?? null,
             assignee: r.assignee ?? null,
             photoUrl: r.photoBlobKey
               ? await ctx.blobs.getUrl(r.photoBlobKey)
@@ -14461,7 +17400,16 @@ export const Actions = {
       const db = ctx.db<typeof schema>();
       await db
         .update(schema.changeRequests)
-        .set({ status: args.status })
+        .set({
+          status: args.status,
+          // The completion stamp drives the sender's
+          // one-week rule (Nov 5, 2026): entering Completed
+          // stamps the moment; leaving it clears the stamp.
+          completedAt:
+            args.status === "completed"
+              ? new Date().toISOString()
+              : null,
+        })
         .where(eq(schema.changeRequests.id, args.id));
       return { ok: true };
     },
@@ -16608,7 +19556,7 @@ export const Actions = {
   searchCards: defineAction({
     description:
       "Searches all binder cards by name — optionally with a collector number too (e.g. \"Ariel 137\" finds Ariel #137) — and returns each match with its section and position so the UI can jump straight to it.",
-    request: z.object({ query: z.string().trim().min(2).max(80) }),
+    request: z.object({ query: z.string().trim().min(1).max(80) }),
     response: searchResponse,
     async handler(ctx, args): Promise<z.infer<typeof searchResponse>> {
       const db = ctx.db<typeof schema>();

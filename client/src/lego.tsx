@@ -141,9 +141,37 @@ export function LegoPanel({ onScan }: { onScan?: () => void }) {
     if (key === area) return;
     setArea(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    // Three-back rule (Anthony, Nov 4, 2026): area switches are
-    // main-flow navigation — replace, never push.
-    replaceNavState({ mcView: "lego", legoArea: key });
+    // BACK ROOT-CAUSE FIX (Anthony, Nov 5, 2026 — back in the
+    // Lego section kept ejecting him from the section): area
+    // switches used to REPLACE the Lego entry, so the device
+    // Back had no in-section step to land on and popped the
+    // whole Lego drill entry to Home. The FIRST area hop now
+    // PUSHES one entry over the plain Lego entry, and the
+    // sync listener above restores the area from whatever
+    // entry Back lands on — Back steps area → Sets → Home →
+    // exit, inside the three-back budget. Further hops while
+    // an area entry is already on top replace it, so the
+    // stack never grows past that one extra entry.
+    try {
+      const cur = window.history.state as {
+        legoArea?: string;
+      } | null;
+      if (typeof cur?.legoArea === "string") {
+        replaceNavState({ mcView: "lego", legoArea: key });
+      } else {
+        window.history.pushState(
+          {
+            ...((window.history.state as Record<string, unknown> | null) ??
+              {}),
+            mcView: "lego",
+            legoArea: key,
+          },
+          "",
+        );
+      }
+    } catch {
+      replaceNavState({ mcView: "lego", legoArea: key });
+    }
   };
   const current = AREAS.find((a) => a.key === area) ?? AREAS[0];
   const setsCataloged = catalog.data?.cardsTotal ?? 0;
@@ -229,7 +257,9 @@ export function LegoPanel({ onScan }: { onScan?: () => void }) {
         Catalog: Rebrickable&rsquo;s official bulk Lego data — set
         numbers, names, themes, years, piece counts, and set images.
         That source publishes no prices and no per-set minifigure
-        counts, so neither is shown.
+        counts; a set&rsquo;s own page carries researched facts and
+        market data (Brickset, BrickLink, BrickEconomy, Brickfact)
+        once it has been looked up, each labeled with its source.
       </footer>
     </div>
   );

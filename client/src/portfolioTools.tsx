@@ -731,7 +731,9 @@ function ResearchPanel({
   const search = useQuery({
     queryKey: ["search", searchText.trim()],
     queryFn: () => api.searchCards({ query: searchText.trim() }),
-    enabled: searchText.trim().length >= 2,
+    // First-letter typeahead (standing search rule, Nov 5, 2026).
+    enabled: searchText.trim().length >= 1,
+    placeholderData: (prev) => prev,
   });
   const [range, setRange] = useState<string>("90");
   const [alertOpen, setAlertOpen] = useState(false);
@@ -775,7 +777,7 @@ function ResearchPanel({
             className="w-full rounded-full border border-[var(--border)] bg-[var(--bg)] px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--dim)]"
           />
         </div>
-        {searchText.trim().length >= 2 ? (
+        {searchText.trim().length >= 1 ? (
           <div className="mt-2">
             {search.isPending ? (
               <p className="py-3 text-center text-xs text-[var(--dim)]">
@@ -1176,7 +1178,15 @@ export function PortfolioTools({
   };
 
   return (
-    <section aria-label="Track and research" className="mt-4">
+    /* Boxed like the page's other sections (Anthony, Nov 5,
+       2026): Track & Research gets the same bordered section
+       treatment as the Portfolio Value box and the Movers —
+       a proper border around the whole area, dropdown and
+       panel alike, in the active theme's tokens. */
+    <section
+      aria-label="Track and research"
+      className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
+    >
       <h2 className="font-album text-lg text-[var(--text)]">
         Track &amp; Research
       </h2>

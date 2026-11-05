@@ -21,7 +21,7 @@
 // refuses moderation from anyone not currently verified —
 // nothing about roles is asserted client-side.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { VerifiedBadge } from "./verified";
@@ -210,15 +210,49 @@ export function ForumsPanel() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // Thread drill-in entry (Anthony, Nov 5, 2026 — app-wide
+  // back re-audit): a thread page sits OVER the board, so it
+  // takes its own pushed history entry like every other
+  // drill-in — the phone's Back returns to the board in one
+  // press (the popstate listener above already syncs the
+  // open thread from the entry Back lands on) instead of
+  // exiting the app, and the in-page back consumes the same
+  // entry exactly once. A thread restored on refresh counts
+  // as pushed: its entry really is on the stack. Before this
+  // fix the thread only replaced the app entry, so Back from
+  // any thread exited Vault X outright.
+  const threadPushedRef = useRef(openThreadId != null);
   const openThread = (id: number) => {
-    // Three-back rule (Anthony, Nov 4, 2026): the thread page is
-    // main-flow navigation — replace the single app entry, never
-    // push. The device Back exits the app; the in-page back
-    // (closeThread) returns to the board in place.
-    replaceNavState({ ...(readNavState() ?? {}), lorcanaForumThread: id });
+    const cur = readNavState() ?? {};
+    const depth =
+      typeof cur.vxDepth === "number" && Number.isFinite(cur.vxDepth)
+        ? cur.vxDepth
+        : 0;
+    try {
+      if (depth >= 2) {
+        // Budget spent (windows stacked above): layer the
+        // key into the current entry instead of pushing.
+        replaceNavState({ ...cur, lorcanaForumThread: id });
+        threadPushedRef.current = false;
+      } else {
+        window.history.pushState(
+          { ...cur, lorcanaForumThread: id, vxDepth: depth + 1 },
+          "",
+        );
+        threadPushedRef.current = true;
+      }
+    } catch {
+      replaceNavState({ ...cur, lorcanaForumThread: id });
+      threadPushedRef.current = false;
+    }
     setOpenThreadId(id);
   };
   const closeThread = () => {
+    if (threadPushedRef.current) {
+      threadPushedRef.current = false;
+      window.history.back();
+      return;
+    }
     const cur = readNavState();
     if (cur?.lorcanaForumThread != null) {
       const next = { ...cur };

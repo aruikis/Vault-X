@@ -1,11 +1,17 @@
 // The sideways count dial (Anthony, Nov 3, 2026 — his exact
 // design): long-holding a + stepper opens a small horizontal
-// dial, numbers 1 through 9 in a row. Tapping a number submits
-// IMMEDIATELY — the count becomes that number ("you own nine
-// cards") — no confirm step, no scrolling list. Shared by every
-// ownership stepper in the app: card-detail finishes, the
-// Sealed shelf tiles, the Where-it-lives copies bar on card,
-// sealed, and comic details.
+// dial. Tapping a number submits IMMEDIATELY — the count
+// becomes that number ("you own nine cards") — no confirm
+// step, no scrolling list. Shared by every ownership stepper
+// in the app: card-detail finishes, the Sealed shelf tiles,
+// the Where-it-lives copies bar on card, sealed, and comic
+// details.
+//
+// NUMBER RANGE REDESIGN (Anthony, Nov 4, 2026): the quick
+// buttons are 1 through 6 ONLY — 7, 8, and 9 are deleted —
+// and right after them sits an OPEN BOX: a type-in field
+// that takes ANY number (his example: 15 copies) and saves
+// it with its Set button. Big counts are typed, not tapped.
 //
 // PLACEMENT RULE (Anthony, Nov 3, 2026, ~2:59 AM, live test):
 // the dial must open ABOVE the + button it belongs to — never
@@ -15,13 +21,14 @@
 // FULL RANGE EVERYWHERE (Anthony, Nov 3, 2026, ~3:08 AM, live
 // test): on the Sealed shelf the dial "only goes up to 4" —
 // the shelf tiles are narrow and the tile clips its content
-// (overflow-hidden), so numbers 5–9 sat past the tile's edge,
-// unreachable. The `overlay` mode fixes that for narrow
-// hosts: the dial renders as a full-width floating panel
-// (portaled to the document body, so no ancestor can clip
-// it) anchored directly above the spot where it was opened,
-// with all of 1–9 in the one row. Wide hosts (item details)
-// keep the plain in-flow dial, which fits there.
+// (overflow-hidden), so the higher numbers sat past the
+// tile's edge, unreachable. The `overlay` mode fixes that
+// for narrow hosts: the dial renders as a full-width
+// floating panel (portaled to the document body, so no
+// ancestor can clip it) anchored directly above the spot
+// where it was opened, with the whole row in reach. Wide
+// hosts (item details) keep the plain in-flow dial, which
+// fits there.
 //
 // DISMISS RULE (Anthony, Nov 3, 2026, ~3:08 AM): if the dial
 // was opened by accident, tapping anywhere else on the
@@ -64,7 +71,7 @@ export function SidewaysCountDial({
 }: {
   /** Accessible name for the dial, e.g. "Pick how many copies of X you own". */
   label: string;
-  /** The count currently in force (highlighted when it is 1-9). */
+  /** The count currently in force (highlighted when it is 1-6). */
   current: number;
   /** Tapping a number: the count becomes that number, saved at once. */
   onPick: (n: number) => void;
@@ -194,6 +201,15 @@ export function SidewaysCountDial({
     };
   }, [overlay]);
 
+  const [typed, setTyped] = useState("");
+  const submitTyped = () => {
+    const n = Number.parseInt(typed.trim(), 10);
+    if (!Number.isFinite(n) || n < 0 || n > 999) return;
+    hapticConfirm();
+    onPick(n);
+    dismissRef.current();
+  };
+
   const row = (compact: boolean) => (
     <>
       <div
@@ -203,7 +219,7 @@ export function SidewaysCountDial({
           compact ? "gap-0.5 p-1" : "gap-1 p-1.5"
         }`}
       >
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+        {[1, 2, 3, 4, 5, 6].map((n) => (
           <button
             key={n}
             type="button"
@@ -241,8 +257,38 @@ export function SidewaysCountDial({
           ✕
         </button>
       </div>
+      {/* The open box (Anthony, Nov 4, 2026): any count at
+          all, typed — for the collector with 15 copies, not
+          just the 1–6 the quick buttons cover. Enter or the
+          Set button saves it, exactly like tapping a number. */}
+      <form
+        className="mt-1.5 flex items-center gap-1.5 px-0.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submitTyped();
+        }}
+      >
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={999}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="Any number — e.g. 15"
+          aria-label="Type any number of copies"
+          className="h-9 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3.5 text-sm font-semibold tabular-nums text-[var(--text)] placeholder:font-normal placeholder:text-[var(--dim)]"
+        />
+        <button
+          type="submit"
+          disabled={typed.trim() === ""}
+          className="h-9 shrink-0 rounded-full bg-[var(--gold)] px-4 text-sm font-bold text-black disabled:opacity-50"
+        >
+          Set
+        </button>
+      </form>
       <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-[var(--dim)]">
-        Tap a number and that becomes the count, saved right away.
+        Tap a number, or type any count and tap Set — saved right away.
       </p>
     </>
   );

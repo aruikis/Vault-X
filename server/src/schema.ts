@@ -6,7 +6,13 @@
 // 2026 Shiny export (seeded once by the seedBinder action) and are editable
 // in the UI afterwards; the seed never overwrites them.
 
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
 
 export const cards = sqliteTable("cards", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -209,6 +215,20 @@ export const collectorProfile = sqliteTable("collector_profile", {
       never picked, so the default of 2 applies. Presentation
       only, like the theme. */
   gridCols: integer("grid_cols"),
+  /** "Only mine" list filter he picked (Anthony, Nov 5, 2026):
+      1 = long list pages (>15 displayed entries) hide every
+      entry he owns nothing from; 0 or null = never on / off,
+      so every list shows everything (the default). ONE shared
+      choice across every collection section, presentation
+      only — like the theme and grid density. */
+  onlyMine: integer("only_mine"),
+  /** Saved drag-reorder orders (Anthony, Nov 5, 2026): a JSON
+      object mapping a reorder surface's key ("tcg-games",
+      "au-areas", "sports") to the user's saved order of that
+      surface's tile keys, from the app-wide long-press drag
+      reorder. Presentation only — like the theme and grid
+      density; no collection data. */
+  reorderPrefs: text("reorder_prefs"),
   /** Trade availability (Anthony, Nov 2, 2026, late): how many
       copies of a card he is willing to trade or part with —
       tradeable quantity is SEPARATE from owned quantity.
@@ -787,7 +807,7 @@ export const marketplaceMeta = sqliteTable("marketplace_meta", {
     can have several rows. */
 export const itemLocations = sqliteTable("item_locations", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  /** "card" | "sealed" | "comic" */
+  /** "card" | "sealed" | "comic" | "game" */
   targetKind: text("target_kind").notNull(),
   /** Binder card id when targetKind is "card". */
   cardId: integer("card_id"),
@@ -795,6 +815,9 @@ export const itemLocations = sqliteTable("item_locations", {
   sealedName: text("sealed_name"),
   /** Client comic id when targetKind is "comic". */
   comicId: text("comic_id"),
+  /** game_cards id when targetKind is "game" (migration 0063 —
+      a Lego set's Where it lives rows). */
+  gameCardId: integer("game_card_id"),
   /** "binder" | "deck_box" | "trade_box" | "bulk_box" | "other" */
   locType: text("loc_type").notNull(),
   /** The place itself: binder name, box name, or free text. */
@@ -847,6 +870,14 @@ export const changeRequests = sqliteTable("change_requests", {
       request opens a ticket; the owner works it through the
       statuses; the Home envelope badge counts open tickets. */
   status: text("status").notNull().default("open"),
+  /** ISO instant the ticket was marked completed (Nov 5,
+      2026 — the Completed tickets rule): a completed ticket
+      stays in the sender's Your tickets list for one week
+      after this moment, then moves under their Completed
+      tickets pill. Null while open/in progress; legacy
+      completed rows without a stamp fall back to their
+      created_at for the week count. */
+  completedAt: text("completed_at"),
   /** Who the ticket is assigned to, as a display name
       (e.g. "Anthony" or "Jarvis"); null = unassigned. The
       submitter sees the assignee when following their ticket. */
@@ -995,6 +1026,117 @@ export const cardPriceHistory = sqliteTable("card_price_history", {
   source: text("source").notNull().default("export"),
 });
 
+/** One point on a game item's value-over-time chart (Funko
+    market data, Anthony, Nov 4, 2026): the item's Financial
+    view shows how its value fluctuated over time, built from
+    eBay SOLD values (see data/funkoSoldPrices.ts). The daily
+    recordFunkoDailyPoints run appends one point per day for
+    each snapshot-covered item, so the history accumulates
+    going forward the same way card history does. */
+export const gameCardPriceHistory = sqliteTable("game_card_price_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** game_cards.id of the item. */
+  gameCardId: integer("game_card_id").notNull(),
+  date: text("date").notNull(),
+  label: text("label").notNull(),
+  /** Market value per copy that day, USD. */
+  unitValue: real("unit_value").notNull(),
+  source: text("source").notNull().default("daily"),
+});
+
+/** Researched detail for one Lego set (Anthony, Nov 4, 2026 —
+    the Lego detail build-out): the product facts and market
+    data the Lego tracking sources publish per set (Brickset,
+    BrickLink, BrickEconomy, Rebrickable, Brickfact), gathered
+    by an agent research task and saved through
+    saveLegoSetResearch. Every field is nullable: a field with
+    no real published data stays null and the detail page shows
+    it plainly as unavailable — nothing here is ever estimated
+    silently (forecasts are stored in their own columns and
+    labeled forecasts in the app). Lists ride as JSON text:
+    minifigs [{name, code, uniqueToSet, valueUsd}], sold
+    listings [{date, priceUsd, condition, title, source,
+    sourceUrl}], retailers [{name, priceUsd, url}], sources
+    [{label, url}]. researched_at is the ISO date the research
+    was saved; the page shows it as the data's as-of date. */
+export const legoSetDetails = sqliteTable("lego_set_details", {
+  /** game_cards.id of the Lego set. */
+  gameCardId: integer("game_card_id").primaryKey(),
+  /** Rebrickable set number, e.g. "75095-1". */
+  setNum: text("set_num").notNull(),
+  /** Exact release date, ISO yyyy-mm-dd, when a source gives one. */
+  releaseDate: text("release_date"),
+  /** US retail price (RRP/MSRP) at release, USD. */
+  retailPriceUsd: real("retail_price_usd"),
+  /** Recommended ages as printed, e.g. "14+". */
+  ages: text("ages"),
+  upc: text("upc"),
+  ean: text("ean"),
+  /** Built-model dimensions as a display string (source wording). */
+  dimensions: text("dimensions"),
+  weightGrams: integer("weight_grams"),
+  /** Build time display string; estimates are labeled in the text. */
+  buildTime: text("build_time"),
+  /** Official LEGO set description, verbatim from the source. */
+  description: text("description"),
+  /** Availability as published, e.g. "Retired". */
+  availability: text("availability"),
+  /** Retirement date, ISO yyyy-mm-dd, when retired and known. */
+  retiredDate: text("retired_date"),
+  /** Expected retirement display string (labeled an estimate). */
+  expectedRetirement: text("expected_retirement"),
+  minifigsJson: text("minifigs_json"),
+  /** Combined market value of the set's minifigures, USD. */
+  minifigsValueUsd: real("minifigs_value_usd"),
+  /** Distinct parts in the set's inventory. */
+  partsDistinct: integer("parts_distinct"),
+  /** Spare parts in the set's inventory. */
+  partsSpares: integer("parts_spares"),
+  /** BrickLink part-out value (parts sold individually), USD —
+      labeled part-out in the app, never merged with set value. */
+  partOutValueUsd: real("part_out_value_usd"),
+  /** Current market value of a sealed copy, USD. */
+  marketSealedUsd: real("market_sealed_usd"),
+  /** Current market value of a used copy, USD. */
+  marketUsedUsd: real("market_used_usd"),
+  /** Published used-value range display string, when given. */
+  usedRange: text("used_range"),
+  /** Published annual growth of the sealed value, percent. */
+  annualGrowthPct: real("annual_growth_pct"),
+  /** Published forecasts (BrickEconomy) — always labeled
+      forecast/estimate in the app. */
+  forecast1yrUsd: real("forecast_1yr_usd"),
+  forecast5yrUsd: real("forecast_5yr_usd"),
+  soldListingsJson: text("sold_listings_json"),
+  retailersJson: text("retailers_json"),
+  sourcesJson: text("sources_json"),
+  researchedAt: text("researched_at").notNull(),
+});
+
+/** The collector's own record for one Lego set (Anthony,
+    Nov 4, 2026): what they paid per copy, the copy's
+    condition and completeness (with a missing-pieces count),
+    and the date the set first entered the collection
+    (stamped by setGameCardOwned on the 0-to-owned step, or
+    when notes are first saved for an already-owned set).
+    Entered/stamped only — never invented or backfilled with
+    guesses. */
+export const legoOwnershipNotes = sqliteTable("lego_ownership_notes", {
+  /** game_cards.id of the Lego set. */
+  gameCardId: integer("game_card_id").primaryKey(),
+  /** What the collector paid per copy, USD. */
+  paidPriceUsd: real("paid_price_usd"),
+  /** "new_sealed" | "built_complete" | "built_incomplete" |
+      "in_pieces" — the Your copy condition choice. */
+  condition: text("condition"),
+  /** "complete" | "missing_pieces" | "unknown". */
+  completeness: text("completeness"),
+  /** How many pieces are missing, when known. */
+  missingPieces: integer("missing_pieces"),
+  /** ISO date the set first entered the collection. */
+  dateAdded: text("date_added"),
+});
+
 /** Catalog rows for the other card games (Anthony, Nov 3, 2026,
     late — the three-game build): Pokémon, Magic: The Gathering,
     and Star Wars: Unlimited, cataloged the Vault X way — one row
@@ -1039,6 +1181,77 @@ export const gameCards = sqliteTable("game_cards", {
       Lego set tracks sealed copies apart from opened ones.
       Always 0 for the card games and Funko. */
   ownedSealedQty: integer("owned_sealed_qty").notNull().default(0),
+  /** Box barcode (UPC/EAN digits) where one is known (Funko,
+      migration 0061): the funko-pop-data catalog carries no
+      barcodes, so this starts null everywhere and is filled
+      only when a collector scans a box and links the barcode
+      to the figure it belongs to. Barcode matching reads this
+      column and nothing else — no UPC, no match, stated
+      plainly in the app. */
+  upc: text("upc"),
+});
+
+/** Graded slabs attached to catalog cards (Anthony, Nov 5,
+    2026 — cert scanning for the top five companies): one
+    row per physical graded copy, keyed by its certification
+    number. The five companies wired are PSA, Beckett (BGS),
+    SGC, CGC Cards, and TAG — Anthony's "top five"; every
+    other grader stays parked from Nov 3. Certs are TEXT on
+    purpose: real certs carry shapes a numeric column would
+    eat — PSA leading zeros (06139522), TAG's leading letter
+    (F6396638), SGC's hyphenated 11-character format.
+    A slab IS one of the card's owned copies — adding one
+    steps game_cards.owned_qty up, removing one steps it
+    down — and within one company a cert is unique across
+    the whole vault: one cert number, one slab, ever
+    (duplicates are refused with the existing slab shown
+    instead). No company pricing or live company
+    verification is stored or claimed: the cert is the
+    collector's own record of the slab in hand. */
+export const gradedSlabs = sqliteTable("graded_slabs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** The catalog card this graded copy is a copy of. */
+  gameCardId: integer("game_card_id").notNull(),
+  /** Grading company: "PSA" | "BGS" | "SGC" | "CGC" |
+      "TAG" — the top five (Nov 5, 2026). */
+  company: text("company").notNull().default("PSA"),
+  /** Certification number exactly as printed, leading
+      zeros kept. */
+  cert: text("cert").notNull(),
+  /** Grade as printed on the label: "10", "9", "8.5", …,
+      or "Authentic". */
+  grade: text("grade").notNull(),
+  /** What was paid for this slab, when he records it. */
+  paid: real("paid"),
+  /** Copies held under this one company+cert (Nov 5, 2026 —
+      the Card / Slab View stepper): normally 1; the stepper
+      on the slab's detail page raises it when the same cert
+      covers more than one recorded copy, and game_cards
+      owned_qty always moves by the same delta. */
+  qty: integer("qty").notNull().default(1),
+  /** Blob key of the slab's front photo when one was
+      imported from the grading company's own cert record
+      or saved from the collector's own photo. Null when no
+      photo exists — the UI then shows the catalog card art
+      in a slab frame, clearly labeled a stand-in. */
+  imageKey: text("image_key"),
+  /** Blob key of the slab's back photo, same rule. */
+  imageBackKey: text("image_back_key"),
+  /** Where the front photo came from: "company" (imported
+      from the company's cert record for THIS cert),
+      "user" (the collector's own photo), or null (no
+      photo — catalog-art fallback). The UI words each one
+      honestly and never calls the fallback a slab photo. */
+  imageSource: text("image_source"),
+  /** The grading company's own one-line description of the
+      item from its online cert record, when the lookup
+      reached one (e.g. PSA's year/brand/subject line).
+      Null when no online record was read. */
+  onlineLine: text("online_line"),
+  /** When the online cert lookup last ran for this slab
+      (epoch ms), when it ran at all. */
+  onlineCheckedAt: integer("online_checked_at"),
+  createdAt: integer("created_at").notNull(),
 });
 
 /** Forums (Anthony, Nov 4, 2026 — Direction A, "Latest-first
@@ -1108,4 +1321,51 @@ export const gameImportMeta = sqliteTable("game_import_meta", {
   cardsTotal: integer("cards_total").notNull().default(0),
   complete: integer("complete").notNull().default(0),
   updatedAt: text("updated_at").notNull(),
+});
+
+/** Per-version go-live stamps (Anthony, Nov 5, 2026):
+    the first time a shipped build is confirmed live (the
+    running copy's version equals the version the server is
+    serving), the server records that moment here, and
+    Settings shows it under the up-to-date line. One row per
+    version; the first stamp wins and is never rewritten.
+    v1.97.0 predates the table — its row is seeded from that
+    build's recorded audit trail by the versionLiveStamp
+    action. */
+export const versionLiveStamps = sqliteTable("version_live_stamps", {
+  version: text("version").primaryKey(),
+  wentLiveAt: text("went_live_at").notNull(),
+});
+
+/** Official product artwork for catalog SECTIONS (sets)
+    whose own catalog source is text-only (Anthony, Nov 5,
+    2026: Disney Topps + Garbage Pail Kids). One row per
+    section that has verified official artwork: imageUrl is
+    the publisher's own product photo (Topps' launch
+    platform), pageUrl the official product page it came
+    from. The bytes are ingested into blob storage by the
+    getSectionArt action — the client never hotlinks. */
+export const gameSectionArt = sqliteTable(
+  "game_section_art",
+  {
+    game: text("game").notNull(),
+    sectionKey: text("section_key").notNull(),
+    imageUrl: text("image_url").notNull(),
+    pageUrl: text("page_url"),
+  },
+  (t) => [primaryKey({ columns: [t.game, t.sectionKey] })],
+);
+
+/** The Library's per-collector arrangement (Anthony, Nov 4,
+    2026): shelf order and spine order inside each shelf,
+    saved when the owner drags to reorder their own Library.
+    One row per collector code; `orderJson` carries
+    { sections: string[], entries: string[] } — section keys
+    and entry ids in display order. Anything not listed keeps
+    its natural place after the listed ids, so newly owned
+    binders simply append until arranged. */
+export const libraryOrders = sqliteTable("library_orders", {
+  collectorCode: text("collector_code").primaryKey(),
+  orderJson: text("order_json").notNull().default("{}"),
+  updatedAt: integer("updated_at").notNull().default(0),
 });

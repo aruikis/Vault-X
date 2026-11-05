@@ -9,8 +9,42 @@
 // section renders this same row and wires the bar to its
 // OWN catalog search; the Scan pill opens the app's card
 // scanner.
+//
+// FOCUS FLASH FIX (Anthony, Nov 5, 2026, on-device in
+// Funko Pop, reproducible every tap): tapping the search
+// field brought the keyboard up but ALSO flashed a screen
+// of something he could not make out. The field itself has
+// no focus behavior — nothing in this row (or in the
+// panels consuming it) changes state, view, or scroll on
+// focus. The flash was the browser's own tap response: on
+// focus, the mobile browser scrolls the page so the field
+// sits above the rising keyboard, and on a long page that
+// animated scroll paints the stretch of page it travels
+// across for a few frames — a full-screen flash of the
+// content between the old and new scroll positions. The
+// fix takes over the tap: when the field is not already
+// focused, the press is claimed in onPointerDown and the
+// field is focused with preventScroll, so the page never
+// moves at all — the tap does exactly two things, focus
+// the field and open the keyboard. This row is the ONE
+// in-section search field shared by every collection
+// section (Lorcana chapters, Comics, and every GamePanel —
+// Pokémon, Magic, Star Wars Unlimited, Funko, Lego, and
+// all the Topps sports / Alternate Universe catalogs all
+// render this same component), so the fix and the audit
+// cover them all at once: there is no other in-section
+// search input in those sections to flash.
 
-export function ScanPillButton({ onScan }: { onScan: () => void }) {
+export function ScanPillButton({
+  onScan,
+  label = "Scan a card",
+}: {
+  onScan: () => void;
+  /** What the pill says: card sections scan cards; the
+      Funko section scans a box barcode instead (Anthony,
+      Nov 4, 2026), so its pill reads "Scan barcode". */
+  label?: string;
+}) {
   return (
     <button
       type="button"
@@ -30,7 +64,7 @@ export function ScanPillButton({ onScan }: { onScan: () => void }) {
         <path d="M4 8h2.2l1.6-2.4A1 1 0 0 1 8.6 5h6.8a1 1 0 0 1 .8.6L17.8 8H20a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
         <circle cx="12" cy="13.5" r="3.4" />
       </svg>
-      Scan a card
+      {label}
     </button>
   );
 }
@@ -43,6 +77,7 @@ export function SearchScanRow({
   onChange,
   onSubmit,
   onScan,
+  scanLabel,
 }: {
   inputId: string;
   label: string;
@@ -51,6 +86,7 @@ export function SearchScanRow({
   onChange: (value: string) => void;
   onSubmit?: () => void;
   onScan?: () => void;
+  scanLabel?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -83,11 +119,24 @@ export function SearchScanRow({
           type="search"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onPointerDown={(e) => {
+            // Focus flash fix (see the file header): claim
+            // the press and focus WITHOUT the browser's
+            // scroll-into-view, so tapping the field never
+            // scrolls or repaints the page — it only focuses
+            // the field and opens the keyboard. A press on
+            // the already-focused field (placing the cursor,
+            // selecting text) is left completely alone.
+            if (document.activeElement !== e.currentTarget) {
+              e.preventDefault();
+              e.currentTarget.focus({ preventScroll: true });
+            }
+          }}
           placeholder={placeholder}
           className="h-[38px] w-full rounded-full border border-[var(--accent)]/60 bg-[var(--surface)] pl-10 pr-4 text-sm font-medium text-[var(--text)] placeholder:font-normal placeholder:text-[var(--dim)]"
         />
       </form>
-      {onScan ? <ScanPillButton onScan={onScan} /> : null}
+      {onScan ? <ScanPillButton onScan={onScan} label={scanLabel} /> : null}
     </div>
   );
 }

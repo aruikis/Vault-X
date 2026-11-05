@@ -12,8 +12,13 @@
 // marketplace browse, deck editor, listing form, and price
 // alerts; any future dropdown uses this too.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { hapticTick } from "./haptics";
+import {
+  readNavState,
+  scrubWindowKeys,
+  useWindowHistory,
+} from "./historyNav";
 
 export interface VxOption {
   value: string;
@@ -46,6 +51,33 @@ export function VxSelect({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const selected = options.find((o) => o.value === value);
 
+  // Back-button discipline (Anthony, Nov 5, 2026 — the
+  // Settings back report): an open dropdown is a window, so
+  // it takes the window slot like every sheet in the app —
+  // the phone's Back then CLOSES the dropdown and stays on
+  // the page, instead of popping the app's own entry and
+  // leaving Vault X. This is the Settings case he kept
+  // hitting (the Theme and Language pickers live there),
+  // and because every dropdown in the app is this one
+  // component, the fix covers all of them at once. Closing
+  // by selection, outside tap, or Escape consumes the entry
+  // through the same contract (history.back() when this
+  // open pushed, an in-place scrub when it layered).
+  const winKey = `vxSelect-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const win = useWindowHistory(winKey, setOpen);
+  const winRef = useRef(win);
+  winRef.current = win;
+  // Unmount while open (a parent sheet closed around it):
+  // drop the key in place so nothing stale reseeds it.
+  useEffect(
+    () => () => {
+      if (readNavState()?.[winKey] != null) {
+        scrubWindowKeys([winKey]);
+      }
+    },
+    [winKey],
+  );
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
@@ -53,11 +85,11 @@ export function VxSelect({
         rootRef.current &&
         !rootRef.current.contains(e.target as Node)
       ) {
-        setOpen(false);
+        winRef.current.close();
       }
     };
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") winRef.current.close();
     };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("keydown", onKey);
@@ -77,7 +109,8 @@ export function VxSelect({
         aria-expanded={open}
         onClick={() => {
           hapticTick();
-          setOpen((v) => !v);
+          if (open) win.close();
+          else win.open();
         }}
         className={`flex w-full items-center justify-between gap-2 rounded-full border text-left font-medium text-[var(--text)] transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
           dense ? "px-3 py-2 text-xs" : "px-3.5 py-2 text-sm"
@@ -122,8 +155,8 @@ export function VxSelect({
                 aria-selected={isSel}
                 onClick={() => {
                   hapticTick();
-                  setOpen(false);
                   if (!isSel) onChange(o.value);
+                  win.close();
                 }}
                 className={`flex w-full items-center justify-between gap-3 whitespace-nowrap rounded-xl px-3 text-left transition ${
                   dense ? "py-2 text-xs" : "py-2.5 text-sm"
