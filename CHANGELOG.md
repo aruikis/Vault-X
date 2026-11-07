@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.107.0
+
+- Funko and Lego photos load faster: their pictures now start preparing the moment your shelves load (before you even open the Library), the ready-made copy and the fresh cut are prepared at the same time instead of one after the other, and a photo source that stalls gives up in about half the time so the app's own copy steps in sooner. Nothing about the shelves themselves changed — same Classic Mahogany bookcase, same signs, same boards.
+
 ## v1.106.0
 
 - New look: your Library shelves are now a traditional real-wood bookcase in Classic Mahogany — the style you picked from the shelf mockups. Rounded crown trim with a dentil strip, fluted side posts, thick mahogany shelf boards, a base plinth, and a small brass LIBRARY nameplate at the base. Every shelf wears it — Lorcana chapters, promos, quests, the comics wall, Funko, and Legos — and nothing else about the Library changed: same signs, same owned-only binders, same tap, hold, and drag.

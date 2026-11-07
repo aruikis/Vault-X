@@ -2145,58 +2145,13 @@ body::after {
   border-top: 1px solid rgba(0, 0, 0, 0.5);
   box-shadow: inset 0 0 26px rgba(0, 0, 0, 0.45);
 }
-/* The shelf board, routed (Anthony, Nov 7, 2026, evening):
-   the flat board now carries the profile a router leaves
-   on a real shelf's front edge — a rounded-over top edge
-   that catches the light, a shallow cove groove carved
-   across the front face (the ::before channel: dark inside
-   the cut, a lit lip where the bit exits), a small bead
-   ridge under it (the ::after), and a shadowed undercut
-   above the board's drop shadow. Same mahogany grain, same
-   place under every shelf's items — books, comics, Funkos,
-   and Legos all stand on this board (the comics wall's
-   board included, same classes). */
 .library-board {
-  height: 14px;
-  border-top: 1px solid rgba(255, 225, 180, 0.42);
+  height: 11px;
+  border-top: 1px solid rgba(255, 225, 180, 0.28);
   border-bottom: 2px solid #1f0d04;
-  border-radius: 0 0 3px 3px;
-  box-shadow:
-    inset 0 2px 1px rgba(255, 225, 180, 0.22),
-    inset 0 -4px 4px rgba(0, 0, 0, 0.5),
-    0 6px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.4);
   position: relative;
   z-index: 2;
-}
-.library-board::before {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    rgba(18, 7, 2, 0.8),
-    rgba(18, 7, 2, 0.3) 55%,
-    rgba(255, 225, 180, 0.22)
-  );
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.85);
-}
-.library-board::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 2px;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 225, 180, 0.3),
-    rgba(0, 0, 0, 0.4)
-  );
 }
 .library-plinth {
   height: 26px;

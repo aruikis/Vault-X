@@ -120,7 +120,7 @@ useOwnEntryWindow,
 useWindowHistory,
 } from "./historyNav";
 import { LetterAvatar } from "./letterAvatar";
-import { CutoutImg } from "./cutoutImg";
+import { CutoutImg, warmGameCutouts } from "./cutoutImg";
 import {
 evaluateBadges,
 type BadgeState,
@@ -4316,6 +4316,24 @@ function OwnProfilePage({
     ...funkoLibraryEntries,
     ...legoLibraryEntries,
   ];
+  // Photo warm-up (Anthony, Nov 7, 2026, evening — the
+  // Funko and Lego images "aren't loading or they're
+  // taking forever to load" in the Library): the moment an
+  // owned-items list lands here on the profile, each
+  // item's photo pipeline (stored-cutout check, then the
+  // live fetch-and-matte for anything without a stored
+  // copy) starts warming in the background, so by the time
+  // he opens the Library the shelf photos are ready or
+  // nearly — instead of every photo's chain starting cold
+  // at the moment its shelf tile first renders. The five
+  // shelf pieces with bundled pre-made cutouts skip the
+  // warm-up; they already render on the first frame.
+  useEffect(() => {
+    warmGameCutouts(funkoOwnedQ.data?.items ?? []);
+  }, [funkoOwnedQ.data]);
+  useEffect(() => {
+    warmGameCutouts(legoOwnedQ.data?.items ?? []);
+  }, [legoOwnedQ.data]);
   // Library shelf load states (Anthony, Nov 7, 2026 — his
   // live report that in the Library "none of the comics are
   // loading along with the Funko or Legos"): the Funko and
