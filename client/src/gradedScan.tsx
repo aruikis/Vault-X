@@ -46,9 +46,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
+useMutation,
+useQuery,
+useQueryClient,
 } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { fmtMoneyUSD } from "./i18n";
@@ -57,9 +57,9 @@ import { VxSelect } from "./vxSelect";
 import { Turntable } from "./turntable";
 import { SidewaysCountDial } from "./countDial";
 import {
-  pushWindowState,
-  readNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+scrubWindowKeys,
 } from "./historyNav";
 import type { GameKey } from "./games";
 

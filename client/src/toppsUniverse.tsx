@@ -30,9 +30,10 @@ import collectionWweTopps from "../../../../imagine_media/media-generation-wwe-t
  * - Garbage Pail Kids — Topps' own brand.
  * - WWE Topps — Topps' WWE cards.
  * Every catalog comes from Topps' own official checklists
- * (topps.com), DATA ONLY — no artwork is downloaded; the
- * artwork choices were delegated to Jarvis and Anthony
- * reviews them after landing. Back from a sub-area returns
+ * (topps.com), text data only — cards carry no artwork;
+ * SET rows carry Topps' official product photo where one
+ * exists on a Topps source (Nov 5, 2026 artwork pull), and
+ * the clean placeholder where none does. Back from a sub-area returns
  * HERE; Back from this page returns Home. Order and
  * show/hide follow the same per-user tile settings as
  * Home ("Inside Topps Alternate Universe" in the eye
@@ -104,23 +105,6 @@ export function ToppsAlternateUniversePage({
     queryKey: ["collectionVisibility"],
     queryFn: () => api.getCollectionVisibility({}),
   });
-  const disney = useQuery({
-    queryKey: ["gameCatalog", "disney-topps"],
-    queryFn: () => api.getGameCatalog({ game: "disney-topps" }),
-  });
-  const starwars = useQuery({
-    queryKey: ["gameCatalog", "starwars-topps"],
-    queryFn: () => api.getGameCatalog({ game: "starwars-topps" }),
-  });
-  const gpk = useQuery({
-    queryKey: ["gameCatalog", "gpk"],
-    queryFn: () => api.getGameCatalog({ game: "gpk" }),
-  });
-  const wwe = useQuery({
-    queryKey: ["gameCatalog", "wwe-topps"],
-    queryFn: () => api.getGameCatalog({ game: "wwe-topps" }),
-  });
-
   const hidden = new Set(visibility.data?.hidden ?? []);
   const order = visibility.data?.order ?? [];
   const areas = [...AU_AREAS].sort((a, b) => {
@@ -147,19 +131,10 @@ export function ToppsAlternateUniversePage({
     .map((k) => visibleAreas.find((a) => a.key === k))
     .filter((a) => a != null);
 
-  const countLine = (game: GameKey): string | null => {
-    const d =
-      game === "disney-topps"
-        ? disney.data
-        : game === "starwars-topps"
-          ? starwars.data
-          : game === "gpk"
-            ? gpk.data
-            : wwe.data;
-    if (!d) return null;
-    return `${d.setsTotal.toLocaleString()} sets · ${d.ownedTotal.toLocaleString()} owned`;
-  };
-
+  // No counts line under the tile names (Anthony, Nov 5,
+  // 2026 — the AU counts bug, same rule as the TCG Universe
+  // counts removal): the tiles are name only, all the same
+  // size.
   return (
     <section aria-label="Topps Alternate Universe" className="pt-4">
       <button
@@ -220,11 +195,6 @@ export function ToppsAlternateUniversePage({
                   <span className="block text-xs font-semibold leading-tight text-[var(--text)] sm:text-sm">
                     {a.label}
                   </span>
-                  {countLine(a.game) ? (
-                    <span className="mt-0.5 block text-[10px] tabular-nums leading-tight text-[var(--dim)]">
-                      {countLine(a.game)}
-                    </span>
-                  ) : null}
                 </span>
               </button>
             </div>

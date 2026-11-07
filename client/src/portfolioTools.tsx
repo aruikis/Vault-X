@@ -22,15 +22,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
+useMutation,
+useQuery,
+useQueryClient,
 } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { useCachedArt } from "./artCache";
 import { hapticConfirm, hapticTick } from "./haptics";
 import { VxSelect } from "./vxSelect";
 import { PriceAlertsList, fmtUSD } from "./priceAlerts";
+import { UatSpark, useJarvisVision } from "./uatSpark";
 
 type WatchItem = ApiResponse<typeof api, "getWatchlist">["items"][number];
 type ResearchData = ApiResponse<typeof api, "getResearchCard">;
@@ -76,6 +77,7 @@ function MenuIcon({ children }: { children: React.ReactNode }) {
     item's real tracked price points. Green when the window
     ends at or above where it started, red below. */
 function Sparkline({ points }: { points: number[] }) {
+  const jarvisVision = useJarvisVision();
   if (points.length < 2) {
     return (
       <span className="flex h-[34px] w-24 items-center justify-center text-[10px] text-[var(--dim)]">
@@ -96,7 +98,11 @@ function Sparkline({ points }: { points: number[] }) {
     .map((_, i) => `${i === 0 ? "M" : "L"}${xs[i]?.toFixed(1)},${ys[i]?.toFixed(1)}`)
     .join(" ");
   const up = (points[points.length - 1] ?? 0) >= (points[0] ?? 0);
-  const color = up ? "#3ddc97" : "#ff6b7a";
+  // New Vision 2.0 Beta (exact-match correction, Nov 5, 2026):
+  // the UAT's line is always its cyan #22d3ee with nothing
+  // filled under it — the up/down green/red and the tinted
+  // fill belong to the other themes.
+  const color = jarvisVision ? "#22d3ee" : up ? "#3ddc97" : "#ff6b7a";
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
@@ -104,7 +110,9 @@ function Sparkline({ points }: { points: number[] }) {
       aria-hidden="true"
       className="h-[34px] w-24 shrink-0"
     >
-      <path d={`${d} L${w},${h} L0,${h} Z`} fill={color} opacity="0.10" stroke="none" />
+      {jarvisVision ? null : (
+        <path d={`${d} L${w},${h} L0,${h} Z`} fill={color} opacity="0.10" stroke="none" />
+      )}
       <path
         d={d}
         fill="none"
@@ -626,6 +634,7 @@ const RANGES = [
 ] as const;
 
 function ResearchChart({ data, range }: { data: ResearchData; range: string }) {
+  const jarvisVision = useJarvisVision();
   const all = data.priceHistory;
   const anchor = all.length > 0 ? Date.parse(all[all.length - 1]?.date ?? "") : 0;
   const days = RANGES.find((r) => r.key === range)?.days ?? 0;
@@ -666,6 +675,33 @@ function ResearchChart({ data, range }: { data: ResearchData; range: string }) {
   const delta = first && last ? last.value - first.value : 0;
   const up = delta >= 0;
   const color = up ? "#3ddc97" : "#ff6b7a";
+  // New Vision 2.0 Beta (exact-match correction, Nov 5, 2026):
+  // the Research graph takes the UAT drawing too — the bare
+  // cyan Spark at the UAT card-detail height (56), keeping
+  // this chart's own first / high-low / last footer.
+  if (jarvisVision) {
+    return (
+      <div>
+        <div
+          role="img"
+          aria-label={`Price history for ${data.fullName}: from ${first ? fmtUSD(first.value) : ""} to ${last ? fmtUSD(last.value) : ""}`}
+        >
+          <UatSpark points={values} h={56} />
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-[var(--dim)]">
+          <span>
+            {first?.label} · {first ? fmtUSD(first.value) : ""}
+          </span>
+          <span>
+            high {fmtUSD(max)} · low {fmtUSD(min)}
+          </span>
+          <span>
+            {last?.label} · {last ? fmtUSD(last.value) : ""}
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div>
       <svg

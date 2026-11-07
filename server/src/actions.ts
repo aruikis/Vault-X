@@ -33,7 +33,7 @@ z,
 type ActionsModule,
 type Ctx,
 } from "@hatch/space-sdk";
-import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "./schema";
 import { catalog } from "./data/catalog";
@@ -51,10 +51,10 @@ EBAY_SOLD_WINDOW_END,
 EBAY_SOLD_WINDOW_LABEL,
 } from "./data/ebaySoldPrices";
 import {
-  FUNKO_SOLD_PRICES,
-  FUNKO_SOLD_SNAPSHOT_DATE,
-  funkoSoldSnapshotByUpc,
-  funkoSoldSnapshotFor,
+FUNKO_SOLD_PRICES,
+FUNKO_SOLD_SNAPSHOT_DATE,
+funkoSoldSnapshotByUpc,
+funkoSoldSnapshotFor,
 } from "./data/funkoSoldPrices";
 import {
 VILLAGE_AGGRO_DECK_NAME,
@@ -682,6 +682,68 @@ function cardMoney(row: typeof schema.cards.$inferSelect): {
   return { value, paid };
 }
 
+/** The price-jump test behind BOTH price defenses (Anthony,
+    Nov 6, 2026 — the Promo Set 3 mispricing, where the daily
+    re-pricing wrote wrong-printing prices onto eight owned
+    cards: Lenny - Toy Binoculars $1.58 → $266.75, Woody -
+    Jungle Guide $2.62 → $155.33 and $55.15 → $495.44, Zipper
+    $0.83 → $131.48, and four more, 8×–176× in one day).
+    A one-step move is implausible when it is at least 4× up
+    or at least 4× down AND at least $5 in absolute terms —
+    the ratio alone would false-flag penny cards wobbling by
+    cents, and the dollar floor alone would miss a $2 card
+    "jumping" to $130. Ordinary daily moves are cents; every
+    one of the eight bad Nov 6 values trips both tests, and
+    no sane point in the tracked history (Oct 25 – Nov 6)
+    does. Used by saveRepricing (refuse the write) and by
+    auditPrices (repair a bad point that already landed). */
+function isImplausiblePriceJump(prev: number, next: number): boolean {
+  if (!(prev > 0) || !(next >= 0)) return false;
+  if (Math.abs(next - prev) < 5) return false;
+  const ratio = next / prev;
+  return ratio >= 4 || ratio <= 0.25;
+}
+
+/** Current per-copy value of a card row: the quantity-weighted
+    average across its finishes (what its price-history points
+    track), falling back to the stored market value for rows
+    with no priced finishes. Null when the card has never
+    carried a value. */
+function currentUnitValue(
+  row: typeof schema.cards.$inferSelect,
+): number | null {
+  if (row.ownedQty > 0) {
+    const money = cardMoney(row);
+    if (money.value > 0) return money.value / row.ownedQty;
+  }
+  return row.marketValue ?? null;
+}
+
+/** Recently Added log (Nov 6, 2026): record an in-app ownership
+    INCREASE so Home's Recently Added rail (New Vision 2.0 Beta) has a
+    real source. Best-effort by design — a logging hiccup must never
+    fail the ownership write itself. Only increases count: lowering a
+    count is not an addition, and export-seeded ownership never passes
+    through these actions, so nothing about the Nov 1 2026 export is
+    backdated or invented. */
+async function recordRecentAddition(
+  ctx: Ctx,
+  cardId: number,
+  delta: number,
+): Promise<void> {
+  if (delta <= 0) return;
+  try {
+    const db = ctx.db<typeof schema>();
+    await db.insert(schema.recentAdditions).values({
+      cardId,
+      addedAt: new Date().toISOString(),
+      qty: delta,
+    });
+  } catch {
+    // The rail simply misses this addition; the ownership write stands.
+  }
+}
+
 /** Snapshot seed rows shared by seedBinder (inserted once, when the
     finance_snapshots table is still empty). */
 const HISTORY_ROWS = historySeed.map((h) => ({
@@ -1148,6 +1210,18 @@ const financeResponse = z.object({
   sealedValue: z.number(),
   sealedQty: z.number(),
   sealedDistinct: z.number(),
+  /** Lego / Funko owned values (Nov 7, 2026 — Portfolio's
+      Collection Distribution gained its own Legos and Funko
+      rows at Anthony's direction): live sums over the game
+      catalog of catalog price × owned copies (opened +
+      sealed for Lego), the same valuation rule Money Tracker
+      uses for game items. An owned item whose catalog price
+      was never tracked contributes $0 — its copies still
+      count in the qty fields, and no value is invented. */
+  legoValue: z.number(),
+  legoQty: z.number(),
+  funkoValue: z.number(),
+  funkoQty: z.number(),
   /** Portfolio ranges for the redesigned Portfolio page (Nov 3,
       2026): per range, the period change of the tracked Lorcana
       total (live value vs the snapshot on/before the range's
@@ -1219,6 +1293,81 @@ const financeResponse = z.object({
 });
 
 const imageResponse = z.object({ url: z.string().nullable() });
+
+// Money Tracker + Insurance & Estate report (Nov 5, 2026).
+const gameCardCostResponse = z.object({
+  ok: z.literal(true),
+  paidValue: z.number().nullable(),
+});
+
+const moneyTrackerResponse = z.object({
+  asOf: z.string(),
+  /** Total current value across every tracked category. */
+  value: z.number(),
+  /** Total recorded cost over the copies whose cost is known. */
+  costKnown: z.number(),
+  /** Current value of exactly those known-cost copies — the
+      honest base for unrealised P&L and ROI. */
+  valueKnown: z.number(),
+  unrealised: z.number(),
+  roiPct: z.number().nullable(),
+  copies: z.number(),
+  knownCopies: z.number(),
+  categories: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      value: z.number(),
+      costKnown: z.number(),
+      valueKnown: z.number(),
+      copies: z.number(),
+      knownCopies: z.number(),
+    }),
+  ),
+  sold: z.object({
+    rows: z.array(
+      z.object({
+        kind: z.enum(["sale", "trade"]),
+        date: z.string().nullable(),
+        title: z.string(),
+        detail: z.string(),
+        counterparty: z.string(),
+        qty: z.number(),
+        proceeds: z.number().nullable(),
+        cost: z.number().nullable(),
+        realised: z.number().nullable(),
+        gave: z.array(z.string()),
+        got: z.array(z.string()),
+      }),
+    ),
+    proceeds: z.number(),
+    realisedKnown: z.number(),
+    realisedCostKnown: z.number(),
+    salesCount: z.number(),
+    tradesCount: z.number(),
+  }),
+});
+
+const insuranceReportResponse = z.object({
+  generatedAt: z.string(),
+  username: z.string(),
+  collectorCode: z.string(),
+  rows: z.array(
+    z.object({
+      category: z.string(),
+      name: z.string(),
+      idLine: z.string(),
+      detail: z.string(),
+      qty: z.number(),
+      unitValue: z.number().nullable(),
+      unitPaid: z.number().nullable(),
+      location: z.string().nullable(),
+      artCardId: z.number().nullable(),
+      imageUrl: z.string().nullable(),
+    }),
+  ),
+  comicLocations: z.record(z.string(), z.string()),
+});
 
 const updateResponse = z.object({ ownedQty: z.number() });
 
@@ -6011,18 +6160,45 @@ async function importLegoChunk(
       name: s.name,
       rarity: facts.length > 0 ? facts.join(" · ") : null,
       finish: null,
-      // 76240-1 (Batmobile Tumbler) override (Anthony, Nov 5,
-      // 2026): Rebrickable's photo doesn't show the set's
-      // information plaque; LEGO's official alternate image
-      // (via Brickset) shows the Tumbler on its stand with
-      // the plaque large in the foreground. Pin it here so a
-      // fresh import keeps the good photo; the durable row
-      // was switched by migration 0068 and imports never
-      // overwrite existing rows.
+      // Owned-UCS photo overrides (Anthony, Nov 5, 2026):
+      // Rebrickable's main photos for these sets crop or hide
+      // the display stand, information plaque, and minifigure
+      // the sets ship with. Each pin is LEGO's own photography
+      // of the complete display, chosen with Anthony:
+      //  - 76240-1 Batmobile Tumbler: alt4 (via Brickset) —
+      //    LEGO's white-background studio shot: the Tumbler
+      //    on its rotating stand, information plaque leaning
+      //    at the front. (First pinned to alt3 by migration
+      //    0068, then alt17 by 0070 — a lifestyle shot whose
+      //    room background Anthony directed cropped out on
+      //    Nov 5, 2026; alt4's clean studio background is
+      //    what the app's cutout matte removes, leaving the
+      //    vehicle, stand, and plaque as a clean cutout
+      //    everywhere it appears. Migration 0072.)
+      //  - 75095-1 TIE Fighter: Rebrickable's own gallery shot
+      //    37222 — the fighter on its display stand, plaque
+      //    readable at the base, TIE Pilot minifigure beside
+      //    it, on a clean white studio background (migration
+      //    0071). Anthony confirmed the image itself is
+      //    really good; its white background gets the same
+      //    cutout matte treatment as the other two.
+      //  - 75275-1 A-Wing Starfighter: alt2 (via Brickset) —
+      //    LEGO's white-background studio shot: the ship on
+      //    its stand, information plaque at the base, its
+      //    pilot minifigure beside it. (alt19, pinned by
+      //    migration 0071, was a lifestyle shot on a black
+      //    table in a blue room — the background Anthony
+      //    directed cropped out; migration 0072.)
+      // Pins live here so a fresh import keeps the good
+      // photos; imports never overwrite existing rows.
       imageUrl:
         s.setNum === "76240-1"
-          ? "https://images.brickset.com/sets/AdditionalImages/76240-1/76240_alt3.jpg"
-          : s.img,
+          ? "https://images.brickset.com/sets/AdditionalImages/76240-1/76240_alt4.jpg"
+          : s.setNum === "75095-1"
+            ? "https://cdn.rebrickable.com/media/sets/75095-1/37222.jpg"
+            : s.setNum === "75275-1"
+              ? "https://images.brickset.com/sets/AdditionalImages/75275-1/75275_alt2.jpg"
+              : s.img,
       price: null,
     };
   });
@@ -6353,6 +6529,158 @@ function legoCatalogFacts(row: typeof schema.gameCards.$inferSelect): {
     }
   }
   return { subtheme, year, pieces };
+}
+
+/** The price audit's working body, shared by the auditPrices
+    action (the nightly cron and the Settings Run-now button)
+    and applyDataRepairs (this build's post-publish repair),
+    so every path runs the identical scan / repair / log
+    logic. See auditPrices for the audit's full description. */
+async function runPriceAuditImpl(
+  ctx: Ctx,
+  source: string,
+): Promise<{
+  scanned: number;
+  flagged: number;
+  repaired: number;
+  snapshotFixed: boolean;
+  ranAt: string;
+}> {
+  const db = ctx.db<typeof schema>();
+  const ranAt = new Date().toISOString();
+  const rows = await db.select().from(schema.cards);
+  const byUid = new Map(rows.map((r) => [r.uid, r]));
+  const allHistory = await db.select().from(schema.cardPriceHistory);
+  const byHistoryUid = new Map<string, typeof allHistory>();
+  for (const h of allHistory) {
+    const list = byHistoryUid.get(h.uid) ?? [];
+    list.push(h);
+    byHistoryUid.set(h.uid, list);
+  }
+  let scanned = 0;
+  let flagged = 0;
+  let repaired = 0;
+  const repairedDates = new Set<string>();
+  for (const [uid, points] of byHistoryUid) {
+    const row = byUid.get(uid);
+    if (!row) continue;
+    scanned += 1;
+    const sorted = [...points].sort((a, b) =>
+      a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1,
+    );
+    if (sorted.length < 2) continue;
+    const finishes = parseFinishes(row.finishes);
+    let livePrices = parseFinance(row.financeJson);
+    let cardRepaired = false;
+    // Roll back stacked bad points: while the LATEST point
+    // is a daily point making an implausible jump from the
+    // point before it, that point is a mispricing, not a
+    // market move. Only daily points are ever removed —
+    // the export-seeded history is Anthony's real record
+    // and is never rewritten.
+    while (sorted.length >= 2) {
+      const bad = sorted[sorted.length - 1];
+      const good = sorted[sorted.length - 2];
+      if (!bad || !good) break;
+      if (bad.source !== "daily") break;
+      if (!isImplausiblePriceJump(good.unitValue, bad.unitValue)) break;
+      const scale =
+        bad.unitValue > 0 ? good.unitValue / bad.unitValue : 0;
+      const next: Record<string, FinishPrice> = { ...livePrices };
+      for (const finish of Object.keys(finishes)) {
+        const p = livePrices[finish];
+        if (p) {
+          next[finish] = {
+            value: Math.round(p.value * scale * 100) / 100,
+            paid: p.paid,
+          };
+        }
+      }
+      await db
+        .update(schema.cards)
+        .set({
+          financeJson: JSON.stringify(next),
+          marketValue: good.unitValue,
+        })
+        .where(eq(schema.cards.id, row.id));
+      await db
+        .delete(schema.cardPriceHistory)
+        .where(eq(schema.cardPriceHistory.id, bad.id));
+      await db.insert(schema.priceAuditLog).values({
+        ranAt,
+        kind: "repair",
+        uid,
+        fullName: row.fullName,
+        printed: row.printed,
+        oldValue: bad.unitValue,
+        newValue: good.unitValue,
+        source,
+      });
+      livePrices = next;
+      repairedDates.add(bad.date);
+      sorted.pop();
+      cardRepaired = true;
+    }
+    if (cardRepaired) {
+      flagged += 1;
+      repaired += 1;
+    }
+  }
+  // If a repaired bad point fed that day's portfolio
+  // snapshot, recompute the newest repaired date's daily
+  // snapshot from the repaired card totals (the same
+  // totals saveRepricing writes). Older repaired dates
+  // keep their snapshots: recomputing them with today's
+  // totals would invent history.
+  let snapshotFixed = false;
+  if (repairedDates.size > 0) {
+    const newestDate = [...repairedDates].sort().pop();
+    if (newestDate) {
+      const sealedTotals = (await effectiveSealed(ctx)).totals;
+      const fresh = await db.select().from(schema.cards);
+      let bValue = 0;
+      let bPaid = 0;
+      let bCards = 0;
+      for (const r of fresh) {
+        if (r.ownedQty <= 0) continue;
+        const money = cardMoney(r);
+        bValue += money.value;
+        bPaid += money.paid;
+        bCards += r.ownedQty;
+      }
+      const value =
+        Math.round(
+          (bValue + sealedTotals.value + nonBinderTotals.value) * 100,
+        ) / 100;
+      const paid =
+        Math.round(
+          (bPaid + sealedTotals.paid + nonBinderTotals.paid) * 100,
+        ) / 100;
+      const cardsCount = bCards + sealedTotals.qty + nonBinderTotals.qty;
+      const snaps = await db
+        .select()
+        .from(schema.financeSnapshots)
+        .where(eq(schema.financeSnapshots.date, newestDate));
+      for (const s of snaps) {
+        if (s.source !== "daily") continue;
+        await db
+          .update(schema.financeSnapshots)
+          .set({ value, paid, cards: cardsCount })
+          .where(eq(schema.financeSnapshots.id, s.id));
+        snapshotFixed = true;
+      }
+    }
+  }
+  await db.insert(schema.priceAuditLog).values({
+    ranAt,
+    kind: "run",
+    scanned,
+    flagged,
+    repaired,
+    source,
+  });
+  ctx.invalidateQueries();
+  return { scanned, flagged, repaired, snapshotFixed, ranAt };
 }
 
 export const Actions = {
@@ -6838,6 +7166,134 @@ export const Actions = {
         {
           expectsAction: "saveCatalogAdditions",
           dedupeKey: `lorcana-catalog-audit-${today}`,
+        },
+      );
+      return {
+        started: result.ok,
+        taskId: result.ok ? result.taskId : null,
+      };
+    },
+  }),
+
+  refreshSectionArt: defineAction({
+    description:
+      "Starts the daily Topps Alternate Universe section-art task: spawns an agent task that finds official publisher product artwork for every AU catalog section (Disney Topps, Star Wars Topps, Garbage Pail Kids, WWE Topps) whose set tile still shows the placeholder — and replaces AU art rows whose stored source the app can no longer fetch — saving each verified image via importSectionArt and confirming it ingests via getSectionArt. Sections with no official product image anywhere stay on the clean placeholder; no URL is ever guessed.",
+    request: z.object({ force: z.boolean().optional() }),
+    response: z.object({
+      started: z.boolean(),
+      taskId: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ started: boolean; taskId: string | null }> {
+      // Guest access (platform v27): agent tasks are
+      // owner-only and unavailable in the shared runtime;
+      // the daily schedule runs this locally as the owner.
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null };
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const result = await ctx.agent.spawnTask(
+        [
+          "Source official product artwork for the Topps Alternate Universe set tiles in the lorcana-binder web artifact (Anthony, Nov 6, 2026: every set that has real publisher artwork should show it; sets with none anywhere keep the clean placeholder).",
+          "1. For each of the four AU games — disney-topps, starwars-topps, gpk, wwe-topps — call the artifact's getGameCatalog action: its sections list carries hasArt per section. Sections with hasArt=false need art. ALSO re-check these sections whose stored artwork source is known-dead (ripped.topps.com blocks the app's server fetch — verified Nov 6, 2026, getSectionArt returns ok:false for them): disney-topps 2025-topps-disneyland-70th-anniversary, disney-topps 2026-topps-disney-neon, wwe-topps 2025-topps-exalted-wwe, wwe-topps 2025-topps-universe-wwe, wwe-topps 2026-topps-chrome-wwe. A working replacement for any of them counts as a save for that section.",
+          "2. FIRST, record this already-verified pair exactly as given (2026 Topps Mint Disney — the NYCC EQL launch page's hero image, confirmed to depict that product's box): call importSectionArt with one item { game: \"disney-topps\", sectionKey: \"2026-topps-mint-disney\", imageUrl: \"https://cdn.eql.media/draw-api/0e47a410-4663-4d89-8066-815408914963/c620072e-9c42-4cd3-a02c-8cdc0bfd4ed7.png?auto=format%2Ccompress&ar=1%3A0.8041958041958043&fit=crop&ixlib=react-9.11.0&w=580\", pageUrl: \"https://nycc-topps.runfair.com/en-US/us/2026-topps-mint-disney-nycc-box-fri\" }, then confirm with getSectionArt (game disney-topps, sectionKey 2026-topps-mint-disney) that it returns ok:true.",
+          "3. For every other section needing art: find the product's official launch/product page — Topps sells these through EQL launches (launches.topps.com and its runfair domains), whose pages carry the product's box photo on cdn.eql.media — open the page, and take the hero product image URL from the page you actually loaded. The image must depict THAT product's box or packaging. Save it with importSectionArt ({ game, sectionKey, imageUrl, pageUrl }) and then call getSectionArt for that section: only an ok:true result counts as filled. If getSectionArt cannot fetch the image, try the product's other official image (a different launch format's page for the same product); if none fetches, leave the section on its placeholder and move on.",
+          "Never guess, construct, or shorten an image URL, never use a marketplace listing photo, a fan wiki image, or another product's box, and never touch card rows, prices, or ownership. Sports Cards catalogs (topps, bowman, topps-basketball) are out of scope: their set rows are text-only by design and Topps publishes those checklists as text with no per-card images. When every section is covered, finish — a run that finds nothing to do is a success.",
+        ].join("\n"),
+        {
+          expectsAction: "importSectionArt",
+          dedupeKey: args.force
+            ? `lorcana-au-section-art-${today}-force-${Date.now()}`
+            : `lorcana-au-section-art-${today}`,
+        },
+      );
+      return {
+        started: result.ok,
+        taskId: result.ok ? result.taskId : null,
+      };
+    },
+  }),
+
+  refreshCardArt: defineAction({
+    description:
+      "Starts the Topps card-art hunt: spawns an agent task that finds front photos of the exact card for Topps-family catalog cards still missing artwork. Unfocused (the daily run): Disney Topps first (Chrome Disney first inside it), then Star Wars Topps, Garbage Pail Kids, WWE Topps, and the Topps/Bowman sports catalogs. Focused on one set (game + sectionKey — Anthony, Nov 7, 2026: the 2025 Topps Chrome Disney fronts had only partly loaded, so a set's own page can send the hunt after that ONE set): the task works that single section in collector-number order until every card in it either carries a verified front or no permitted source carries one. Focused on one whole collection (game only — Anthony, Nov 7, 2026, expanded the same day: ALL Disney Topps cards in every Disney Topps set, and ALL Garbage Pail Kids cards in every GPK set, loaded wherever a lawful source exists): the task works that one game section by section in catalog order, completing each set before moving to the next. Pull source is COMC (the collector marketplace that photographs every card front; other marketplaces with standardized front photos when COMC lacks a card); the Trading Card Database is reference-only (it confirms a card's front exists — its terms bar image extraction, so its images are never taken); Collectr, the platform Anthony named, joins only via its API once his own approved key exists — it is not used until then. Each verified image is saved via importCardArt and confirmed via getGameImageProxy. Cards no permitted source carries keep the clean placeholder; no URL is ever guessed and a parallel row only ever takes that parallel's own front.",
+    request: z.object({
+      force: z.boolean().optional(),
+      game: z
+        .enum([
+          "topps",
+          "bowman",
+          "topps-basketball",
+          "disney-topps",
+          "starwars-topps",
+          "gpk",
+          "wwe-topps",
+        ])
+        .optional(),
+      sectionKey: z.string().min(1).max(80).optional(),
+    }),
+    response: z.object({
+      started: z.boolean(),
+      taskId: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ started: boolean; taskId: string | null }> {
+      // Guest access (platform v27): agent tasks are
+      // owner-only and unavailable in the shared runtime;
+      // the daily schedule runs this locally as the owner.
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null };
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const sectionFocus = Boolean(args.game && args.sectionKey);
+      const gameFocus = Boolean(args.game && !args.sectionKey);
+      const gameLines =
+        gameFocus && args.game
+          ? [
+              `FOCUSED RUN — ONE WHOLE COLLECTION (Anthony, Nov 7, 2026: after the 2025 Topps Chrome Disney report he expanded the ask to ALL of Disney Topps — every card in every Disney Topps set — and ALL of Garbage Pail Kids the same way). This run ignores every other game: its whole job is game "${args.game}", every section of it, completed set by set.`,
+              "1. TARGETS. Call getGameCatalog (game) for the collection's sections, in the catalog order it returns. Work ONE section at a time and finish it before moving to the next: inside a section call getGameSection (game, sectionKey, offset) at offsets 0, 150, 300, … until every row has been seen; a card is a target only when its imageUrl is null. Inside a section do cards with ownedQty > 0 first, then the rest in collector-number order. KEEP GOING set after set until the whole collection is finished — do not stop after a first batch the way earlier general runs did; this run exists to complete this collection. If the run's budget ends mid-collection that is acceptable (targets are computed live from imageUrl, so the next focused or daily run resumes exactly where coverage stops), but completing the collection is the goal, not a sample of it.",
+              "2. SOURCES. (a) PULL SOURCE — COMC (comc.com), the collector marketplace that photographs the front of every card it lists: the Disney Topps fronts already loaded came from img.comc.com image URLs taken off COMC pages actually loaded, and COMC's browse for a set walks its subsets (the [Base] listing in collector-number order, then each parallel/insert subset under its own listing). Take the front image URL from the COMC page you actually loaded and record that page as pageUrl with source 'COMC'. Another marketplace with standardized front photos of the actual card (e.g. Beckett Marketplace, Sportlots) is an acceptable pull source when COMC lacks the card. (b) REFERENCE ONLY — the Trading Card Database (tcdb.com): its set pages confirm which cards carry front scans and cross-check set/number/name, but its terms forbid robots, screen scraping, and bulk extraction — NEVER take, reuse, or hotlink its image files. (c) PENDING — Collectr (getcollectr.com): API-only, needs Anthony's own approved key, NOT yet granted — do not use Collectr at all; never ask anyone for the key and never accept one pasted anywhere.",
+              "3. MATCH RULES — the image must depict THAT EXACT card: same set, same collector number, same name. The catalog row's finish label names its parallel/subset: a parallel row takes ONLY a front photo of that parallel — never dress a parallel row in the base card's photo; when only the base front exists, fill the base row and skip the parallel. Autograph, sketch, and serial-numbered chase rows likewise take only their own card's image. If you cannot confirm the match from the page, skip the card.",
+              "4. SAVE + VERIFY. Save each confirmed image with importCardArt ({ game, id, imageUrl, pageUrl, source }) — id is the card's id from getGameSection. Then call getGameImageProxy ({ id }): only an ok:true result counts as filled (it proves the app's server can fetch and cache the image). If ok:false, try the same card's other image from the same source page (a larger or alternate-size URL the page itself offers) via a second importCardArt and re-verify; if none verifies, move on — the tile keeps its clean placeholder and a later run can retry.",
+              "Never guess, construct, shorten, or pattern-build an image URL; never use a fan wiki image, a social-media photo, a graded-slab photo (the card inside a holder), or another card's front; never touch prices, ownership, or any other game. In your summary report PER SET: how many fronts the set now has of its total, and which cards (if any) no permitted source carried — the app shows the same counts live in Settings > Artwork coverage.",
+            ]
+          : null;
+      const focusLines = sectionFocus
+        ? [
+            `FOCUSED RUN — ONE SET ONLY (Anthony, Nov 7, 2026: he opened the 2025 Topps Chrome Disney set in Disney Topps, saw the first base fronts loaded and the rest still placeholders, and asked for the rest of THAT set loaded in). This run ignores every other game and section: its whole job is the section "${args.sectionKey}" of game "${args.game}".`,
+            "1. TARGETS. Call getGameSection (game, sectionKey, offset) at offsets 0, 150, 300, … until you have seen every row in the section. A card is a target only when its imageUrl is null. Work targets in collector-number order, starting from the first card still missing its front, and KEEP GOING until the section is finished — do not stop after a first batch the way earlier general runs did; this run exists to complete this one set. If the run's budget ends mid-section that is acceptable (targets are computed live from imageUrl, so the next focused or daily run resumes exactly where coverage stops), but finishing the section is the goal, not a sample of it.",
+            "2. SOURCES. (a) PULL SOURCE — COMC (comc.com), the collector marketplace that photographs the front of every card it lists: this set's base fronts already loaded came from img.comc.com image URLs taken off COMC pages actually loaded, and COMC's browse for a set walks its subsets (the [Base] listing in collector-number order, then each parallel/insert subset under its own listing). Take the front image URL from the COMC page you actually loaded and record that page as pageUrl with source 'COMC'. Another marketplace with standardized front photos of the actual card (e.g. Beckett Marketplace, Sportlots) is an acceptable pull source when COMC lacks the card. (b) REFERENCE ONLY — the Trading Card Database (tcdb.com): its set pages confirm which cards carry front scans and cross-check set/number/name, but its terms forbid robots, screen scraping, and bulk extraction — NEVER take, reuse, or hotlink its image files. (c) PENDING — Collectr (getcollectr.com): API-only, needs Anthony's own approved key, NOT yet granted — do not use Collectr at all; never ask anyone for the key and never accept one pasted anywhere.",
+            "3. MATCH RULES — the image must depict THAT EXACT card: same set, same collector number, same name. The catalog row's finish label names its parallel/subset: a parallel row takes ONLY a front photo of that parallel — never dress a parallel row in the base card's photo; when only the base front exists, fill the base row and skip the parallel. Autograph, sketch, and serial-numbered chase rows likewise take only their own card's image. If you cannot confirm the match from the page, skip the card.",
+            "4. SAVE + VERIFY. Save each confirmed image with importCardArt ({ game, id, imageUrl, pageUrl, source }) — id is the card's id from getGameSection. Then call getGameImageProxy ({ id }): only an ok:true result counts as filled (it proves the app's server can fetch and cache the image). If ok:false, try the same card's other image from the same source page (a larger or alternate-size URL the page itself offers) via a second importCardArt and re-verify; if none verifies, move on — the tile keeps its clean placeholder and a later run can retry.",
+            "Never guess, construct, shorten, or pattern-build an image URL; never use a fan wiki image, a social-media photo, a graded-slab photo (the card inside a holder), or another card's front; never touch prices, ownership, or any other section or game. In your summary say how many fronts this run filled in the section, how many the section now has of its total, and which cards (if any) no permitted source carried.",
+          ]
+        : null;
+      const result = await ctx.agent.spawnTask(
+        (focusLines ?? gameLines ?? [
+          "Hunt per-card front artwork for the Topps-family catalogs in the lorcana-binder web artifact (Anthony, Nov 6, 2026: Topps' official checklists are text-only — no images exist at the publisher — so he directed this hunt to OTHER sites, collector sources in particular: 'Can we get the artwork anywhere else? … look for other areas, other ways to find the artwork from other sites. Maybe look at collector.').",
+          "1. TARGETS. Work the seven Topps-family games in this priority order: disney-topps, starwars-topps, gpk, wwe-topps, topps, bowman, topps-basketball. For each game call the artifact's getGameCatalog action for its sections, then getGameSection (game, sectionKey, offset — 150 cards per page) for their cards. A card is a target only when its imageUrl is null. Inside disney-topps, start with the Chrome Disney section (its section name contains 'Chrome Disney'), then the other Disney sections in catalog order. Inside any section, do cards with ownedQty > 0 first, then the rest in collector-number order. Targets are computed live from imageUrl, so stopping mid-section is fine — the next daily run resumes exactly where coverage stops.",
+          "2. SOURCES. (a) PULL SOURCE — COMC (comc.com), the collector marketplace that photographs the front of every card it lists, including 2025 Topps Chrome Disney base cards: take the front image URL from the card's COMC page you actually loaded, and record that page as pageUrl with source 'COMC'. Another marketplace with standardized front photos of the actual card (e.g. Beckett Marketplace, Sportlots) is an acceptable pull source when COMC lacks the card. (b) REFERENCE ONLY — the Trading Card Database (tcdb.com): its set pages show which cards carry front scans (near-complete for Chrome Disney) and are the cross-check for set/number/name, but its terms forbid robots, screen scraping, and bulk extraction — NEVER take, reuse, or hotlink its image files; it only tells you a front exists and what the exact card is. (c) PENDING — Collectr (getcollectr.com), the platform Anthony named: it joins this hunt only through its API, which needs Anthony's own approved Collectr Application Key — NOT yet granted. Do not use Collectr at all until the app has that API access; never ask anyone for the key and never accept one pasted anywhere.",
+          "3. MATCH RULES — the image must depict THAT EXACT card: same set, same collector number, same name. The catalog row's finish label names its parallel/subset (e.g. 'Base · Refractor', a team + subset for sports rows): a parallel row takes ONLY a front photo of that parallel — never dress a parallel row in the base card's photo; when only the base front exists, fill the base row and skip the parallel. Autograph, sketch, and serial-numbered chase rows likewise take only their own card's image. If you cannot confirm the match from the page, skip the card.",
+          "4. SAVE + VERIFY. Save each confirmed image with importCardArt ({ game, id, imageUrl, pageUrl, source }) — id is the card's id from getGameSection. Then call getGameImageProxy ({ id }): only an ok:true result counts as filled (it proves the app's server can fetch and cache the image). If ok:false, try the same card's other image from the same source page (a larger or alternate-size URL the page itself offers) via a second importCardArt and re-verify; if none verifies, move on — the tile keeps its clean placeholder and a later run can retry.",
+          "Never guess, construct, shorten, or pattern-build an image URL; never use a fan wiki image, a social-media photo, a graded-slab photo (the card inside a holder), or another card's front; never touch prices, ownership, or non-Topps games. Work as far down the priority order as the run allows; a run that fills part of the list is a success — say in your summary how many cards you filled, per game, and which sources carried them.",
+        ]).join("\n"),
+        {
+          expectsAction: "importCardArt",
+          dedupeKey: sectionFocus
+            ? args.force
+              ? `lorcana-topps-card-art-focus-${args.game}-${args.sectionKey}-${today}-force-${Date.now()}`
+              : `lorcana-topps-card-art-focus-${args.game}-${args.sectionKey}-${today}`
+            : gameFocus
+              ? args.force
+                ? `lorcana-topps-card-art-game-${args.game}-${today}-force-${Date.now()}`
+                : `lorcana-topps-card-art-game-${args.game}-${today}`
+              : args.force
+                ? `lorcana-topps-card-art-${today}-force-${Date.now()}`
+                : `lorcana-topps-card-art-${today}`,
         },
       );
       return {
@@ -9326,7 +9782,7 @@ export const Actions = {
 
   getFinance: defineAction({
     description:
-      "Computes the binder's financial metrics: export-scope totals (value, paid, net) from live per-finish prices plus sealed/token items, per-set export figures, live set chart data, value by rarity, price tiers, spare-copy value, the most valuable items owned, and the value-over-time history starting Oct 25 2026.",
+      "Computes the binder's financial metrics: export-scope totals (value, paid, net) from live per-finish prices plus sealed/token items, per-set export figures, live set chart data, value by rarity, price tiers, spare-copy value, the most valuable items owned, the value-over-time history starting Oct 25 2026, and the owned Lego and Funko values (catalog price × owned copies) behind Portfolio's Collection Distribution rows.",
     request: z.object({}),
     response: financeResponse,
     async handler(ctx): Promise<z.infer<typeof financeResponse>> {
@@ -9693,6 +10149,37 @@ export const Actions = {
       );
       const movers24h = movers24hAll.slice(0, 3);
 
+      // Lego / Funko owned values for the Collection
+      // Distribution rows (Nov 7, 2026): catalog price ×
+      // owned copies over the game catalog — opened +
+      // sealed copies for Lego (its sealed count is tracked
+      // apart), the same rule Money Tracker applies to game
+      // items. Untracked prices contribute $0, never a guess.
+      let legoValue = 0;
+      let legoQty = 0;
+      let funkoValue = 0;
+      let funkoQty = 0;
+      const ownedGameRows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          or(
+            gt(schema.gameCards.ownedQty, 0),
+            gt(schema.gameCards.ownedSealedQty, 0),
+          ),
+        );
+      for (const g of ownedGameRows) {
+        const qty = g.ownedQty + g.ownedSealedQty;
+        if (qty <= 0) continue;
+        if (g.game === "lego") {
+          legoQty += qty;
+          if (g.price != null) legoValue += g.price * qty;
+        } else if (g.game === "funko") {
+          funkoQty += qty;
+          if (g.price != null) funkoValue += g.price * qty;
+        }
+      }
+
       return {
         asOfLabel:
           history.length > 0
@@ -9738,6 +10225,10 @@ export const Actions = {
         sealedValue: round2(sealedTotals.value),
         sealedQty: sealedTotals.qty,
         sealedDistinct: sealedItems.filter((i) => i.qty > 0).length,
+        legoValue: round2(legoValue),
+        legoQty,
+        funkoValue: round2(funkoValue),
+        funkoQty,
         ranges,
         movers24h,
       };
@@ -9781,7 +10272,7 @@ export const Actions = {
 
   saveRepricing: defineAction({
     description:
-      "Saves current market prices fetched by the re-pricing task: updates per-finish values for the given cards (paid amounts untouched) and, when at least half the owned printings were priced, appends today's point to the value history.",
+      "Saves current market prices fetched by the re-pricing task: updates per-finish values for the given cards (paid amounts untouched) and, when at least half the owned printings were priced, appends today's point to the value history. A price whose one-day jump versus the card's tracked value is implausible (≥4× or ≤¼ and ≥$5 — the Nov 6, 2026 wrong-printing class) is REFUSED, logged to the price audit log as a quarantine, and counted in the response's quarantined field; the card keeps its tracked price.",
     request: z.object({
       prices: z
         .array(
@@ -9797,11 +10288,13 @@ export const Actions = {
       updated: z.number(),
       coveragePct: z.number(),
       snapshotAdded: z.boolean(),
+      quarantined: z.number(),
     }),
     async handler(ctx, args): Promise<{
       updated: number;
       coveragePct: number;
       snapshotAdded: boolean;
+      quarantined: number;
     }> {
       const db = ctx.db<typeof schema>();
       const rows = await db.select().from(schema.cards);
@@ -9809,10 +10302,42 @@ export const Actions = {
       const sealedTotals = (await effectiveSealed(ctx)).totals;
       const byUid = new Map(rows.map((r) => [r.uid, r]));
       let updated = 0;
+      let quarantined = 0;
+      // Quarantine writer (Nov 6, 2026 price guard): a refused
+      // price is never silent — it lands in the price audit
+      // log, where the Settings price-audit line surfaces it.
+      const logQuarantine = async (
+        row: typeof schema.cards.$inferSelect,
+        keptValue: number,
+        refusedValue: number,
+      ) => {
+        quarantined += 1;
+        await db.insert(schema.priceAuditLog).values({
+          ranAt: new Date().toISOString(),
+          kind: "quarantine",
+          uid: row.uid,
+          fullName: row.fullName,
+          printed: row.printed,
+          oldValue: keptValue,
+          newValue: refusedValue,
+          source: "save-guard",
+        });
+      };
       for (const price of args.prices) {
         const row = byUid.get(price.uid);
         if (!row) continue;
         if (row.ownedQty <= 0) {
+          // Price guard (Nov 6, 2026): an unowned printing's
+          // stored market price is its only baseline, but the
+          // same wrong-printing class applies — refuse an
+          // implausible jump against it instead of writing it.
+          if (
+            row.marketValue != null &&
+            isImplausiblePriceJump(row.marketValue, price.usd)
+          ) {
+            await logQuarantine(row, row.marketValue, price.usd);
+            continue;
+          }
           // Not owned yet: still store the market prices (paid stays
           // 0) so the Cost to Complete / missing-cards figures update
           // with the daily re-pricing. No history points for cards he
@@ -9851,6 +10376,33 @@ export const Actions = {
           }
         }
         const newUnit = qtyTotal > 0 ? total / qtyTotal : price.usd;
+        // Price guard (Nov 6, 2026): the card's tracked
+        // history is the baseline — if the incoming unit value
+        // is an implausible one-day jump from the latest
+        // tracked point, the price almost certainly belongs
+        // to a different printing (the Nov 6 Promo Set 3
+        // failure). Refuse the write entirely: no finance
+        // change, no history point, and a quarantine log row
+        // the nightly audit and the Settings line surface.
+        // A card with no tracked point yet has no baseline
+        // and is priced normally — its first point establishes
+        // one.
+        const historyPoints = (
+          await db
+            .select()
+            .from(schema.cardPriceHistory)
+            .where(eq(schema.cardPriceHistory.uid, row.uid))
+        ).sort((a, b) =>
+          a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1,
+        );
+        const baselinePoint = historyPoints[historyPoints.length - 1];
+        if (
+          baselinePoint &&
+          isImplausiblePriceJump(baselinePoint.unitValue, newUnit)
+        ) {
+          await logQuarantine(row, baselinePoint.unitValue, newUnit);
+          continue;
+        }
         await db
           .update(schema.cards)
           .set({
@@ -9865,11 +10417,7 @@ export const Actions = {
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
         ];
         const dayLabel = `${months[now.getUTCMonth()] ?? "Jan"} ${now.getUTCDate()}`;
-        const existingPoint = await db
-          .select()
-          .from(schema.cardPriceHistory)
-          .where(eq(schema.cardPriceHistory.uid, row.uid));
-        const todaysPoint = existingPoint.find(
+        const todaysPoint = historyPoints.find(
           (h) => h.source === "daily" && h.label === dayLabel,
         );
         if (todaysPoint) {
@@ -9942,7 +10490,7 @@ export const Actions = {
         snapshotAdded = true;
       }
       ctx.invalidateQueries();
-      return { updated, coveragePct, snapshotAdded };
+      return { updated, coveragePct, snapshotAdded, quarantined };
     },
   }),
 
@@ -9969,7 +10517,8 @@ export const Actions = {
         [
           "Re-price Anthony's Lorcana collection in the lorcana-binder web artifact.",
           "1. Call the artifact's getRepricingTargets action to list every printing in the catalog (uid, name, set, printed number, TCGplayer id, owned flag). Price the not-yet-owned ones too — their prices keep the app's Cost to Complete figures current.",
-          "2. For each target, find its CURRENT market price in USD. The Lorcast API is the practical source: https://api.lorcast.com/v0/cards/search?q=<url-encoded card name> returns printings with a prices object (usd for non-foil, usd_foil for foil); match the printing by set and collector number. Batch by searching per set where that is faster. Use the near-mint market price.",
+          "2. For each target, find its CURRENT market price in USD for THAT EXACT PRINTING — a price from any other printing is worse than no price (Nov 6, 2026: eight Promo Set 3 cards were written with wrong prices 8×–176× too high this way). The Lorcast API is the practical source: https://api.lorcast.com/v0/cards/search?q=<url-encoded card name> returns printings with a prices object (usd for non-foil, usd_foil for foil) AND each printing's own tcgplayer_id. A Lorcast printing counts as a match ONLY when its tcgplayer_id equals the target's TCGplayer id (or, for a target with no TCGplayer id, when set code, collector number, and name all match exactly). Batch by searching per set where that is faster. Use the near-mint market price.",
+          "2b. Promo printings (printed numbers like 49/P3) are mostly NOT in Lorcast at all — a name search returns only the main-set printing, which is a DIFFERENT product and must never be used for the promo. For a promo target that carries a TCGplayer id, price it from TCGplayer's own pricepoints for that exact product id (https://mpapi.tcgplayer.com/v2/product/<tcgplayer_id>/pricepoints — use the Foil marketPrice for foil finishes, Normal for non-foil). If neither Lorcast (exact id match) nor TCGplayer pricepoints (exact product id) prices a target, LEAVE IT OUT of the save entirely — its tracked price stays, which is correct. Never substitute another printing, another set's same-numbered card, a sealed product, or a listing median from a search results page.",
           "3. Call the saveRepricing action ONCE with the full prices array: one entry per uid — { uid, usd: <non-foil price>, usdFoil: <foil price or null> }. Include every target you could price; do not invent prices for cards you could not find — leave those out.",
           "Paid amounts are stored separately and must not be sent or changed. Do not edit any files, memory, or other artifacts.",
         ].join("\n"),
@@ -9984,6 +10533,316 @@ export const Actions = {
         started: result.ok,
         taskId: result.ok ? result.taskId : null,
       };
+    },
+  }),
+
+  auditPrices: defineAction({
+    description:
+      "Nightly price audit (Anthony, Nov 6, 2026): scans every card's tracked price history for a latest point that is an implausible one-day jump from the point before it (≥4× or ≤¼ and ≥$5 — the Nov 6, 2026 Promo Set 3 mispricing class). Each card found is repaired: its per-finish values are scaled back to the last good tracked value (paid amounts untouched), the bad history point is deleted, and a same-day daily portfolio snapshot the bad point fed is recomputed. Every repair and the run itself are logged to the price audit log. Idempotent — a clean collection scans and reports zero repairs.",
+    request: z.object({ source: z.string().optional() }),
+    response: z.object({
+      scanned: z.number(),
+      flagged: z.number(),
+      repaired: z.number(),
+      snapshotFixed: z.boolean(),
+      ranAt: z.string(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{
+      scanned: number;
+      flagged: number;
+      repaired: number;
+      snapshotFixed: boolean;
+      ranAt: string;
+    }> {
+      return runPriceAuditImpl(ctx, args.source ?? "nightly");
+    },
+  }),
+
+  applyDataRepairs: defineAction({
+    description:
+      "This build's post-publish data repairs (Nov 6, 2026), run once against the live database at publish: (1) runs the price audit immediately, repairing the eight Promo Set 3 cards the Nov 6 re-pricing mispriced; (2) records the verified official product artwork for 2026 Topps Mint Disney — the one Disney Topps set with no art row — from its EQL launch page (image visually confirmed to depict that product's box and confirmed to ingest via getSectionArt before shipping). Idempotent: both halves no-op once applied.",
+    request: z.object({}),
+    response: z.object({
+      scanned: z.number(),
+      flagged: z.number(),
+      repaired: z.number(),
+      snapshotFixed: z.boolean(),
+      artSeeded: z.number(),
+    }),
+    async handler(
+      ctx,
+    ): Promise<{
+      scanned: number;
+      flagged: number;
+      repaired: number;
+      snapshotFixed: boolean;
+      artSeeded: number;
+    }> {
+      const audit = await runPriceAuditImpl(ctx, "post-submit");
+      const db = ctx.db<typeof schema>();
+      // Verified in-session Nov 6, 2026: the image URL is the
+      // hero image of the product's own EQL launch page
+      // (opened and read), the downloaded bytes were visually
+      // confirmed to be the 2026 Topps Mint Disney box, and
+      // getSectionArt ingested them successfully.
+      const VERIFIED_SECTION_ART = [
+        {
+          game: "disney-topps",
+          sectionKey: "2026-topps-mint-disney",
+          imageUrl:
+            "https://cdn.eql.media/draw-api/0e47a410-4663-4d89-8066-815408914963/c620072e-9c42-4cd3-a02c-8cdc0bfd4ed7.png?auto=format%2Ccompress&ar=1%3A0.8041958041958043&fit=crop&ixlib=react-9.11.0&w=580",
+          pageUrl:
+            "https://nycc-topps.runfair.com/en-US/us/2026-topps-mint-disney-nycc-box-fri",
+        },
+      ];
+      let artSeeded = 0;
+      for (const item of VERIFIED_SECTION_ART) {
+        await db
+          .insert(schema.gameSectionArt)
+          .values(item)
+          .onConflictDoUpdate({
+            target: [
+              schema.gameSectionArt.game,
+              schema.gameSectionArt.sectionKey,
+            ],
+            set: { imageUrl: item.imageUrl, pageUrl: item.pageUrl },
+          })
+          .run();
+        artSeeded += 1;
+      }
+      ctx.invalidateQueries();
+      return {
+        scanned: audit.scanned,
+        flagged: audit.flagged,
+        repaired: audit.repaired,
+        snapshotFixed: audit.snapshotFixed,
+        artSeeded,
+      };
+    },
+  }),
+
+  getPriceAuditStatus: defineAction({
+    description:
+      "Returns the price audit's latest completed run (when, how many card histories it scanned, how many it flagged and repaired) plus the most recent quarantine and repair events, for the Settings > Your data & backups price-audit line. Quarantines are prices the daily re-pricing tried to write that the saveRepricing guard refused; repairs are bad tracked points the nightly audit rolled back.",
+    request: z.object({}),
+    response: z.object({
+      lastRunAt: z.string().nullable(),
+      lastScanned: z.number().nullable(),
+      lastFlagged: z.number().nullable(),
+      lastRepaired: z.number().nullable(),
+      runsRecorded: z.number(),
+      events: z.array(
+        z.object({
+          kind: z.string(),
+          fullName: z.string().nullable(),
+          printed: z.string().nullable(),
+          oldValue: z.number().nullable(),
+          newValue: z.number().nullable(),
+          ranAt: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.priceAuditLog)
+        .orderBy(desc(schema.priceAuditLog.id));
+      const runs = rows.filter((r) => r.kind === "run");
+      const last = runs[0];
+      return {
+        lastRunAt: last?.ranAt ?? null,
+        lastScanned: last?.scanned ?? null,
+        lastFlagged: last?.flagged ?? null,
+        lastRepaired: last?.repaired ?? null,
+        runsRecorded: runs.length,
+        events: rows
+          .filter((r) => r.kind !== "run")
+          .slice(0, 12)
+          .map((r) => ({
+            kind: r.kind,
+            fullName: r.fullName ?? null,
+            printed: r.printed ?? null,
+            oldValue: r.oldValue ?? null,
+            newValue: r.newValue ?? null,
+            ranAt: r.ranAt,
+          })),
+      };
+    },
+  }),
+
+  getArtworkCoverage: defineAction({
+    description:
+      "Artwork coverage report (Anthony, Nov 6, 2026 — the app-wide missing-artwork audit): for every collection area, how many sets/sections carry sourced artwork and how many individual items carry artwork, counted live from the catalog tables. sectionsWithArt is only counted for the four Topps Alternate Universe games (the areas whose set tiles render a product-art box) plus null elsewhere. Topps-family card catalogs are text-only at the source (official checklists carry no images), so their card-art counts start at zero and rise as the daily collector-source hunt (refreshCardArt → importCardArt) fills card fronts in from Collectr, the Trading Card Database, and COMC; cards still at zero render the clean placeholder.",
+    request: z.object({}),
+    response: z.object({
+      areas: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          sections: z.number(),
+          sectionsWithArt: z.number().nullable(),
+          cards: z.number(),
+          cardsWithArt: z.number(),
+          /** Per-set accounting for the four AU areas (the
+              Nov 6, 2026 request: report per set what was
+              filled and what has no artwork sourced): every
+              section with whether a product-art row exists
+              for it, plus its card-front counts (cards /
+              cardsWithArt — Nov 7, 2026: the per-set filled
+              vs still-unsourced breakdown Anthony's Chrome
+              Disney report asked for). Null for areas whose
+              set rows render no art box. */
+          sets: z
+            .array(
+              z.object({
+                name: z.string(),
+                hasArt: z.boolean(),
+                cards: z.number(),
+                cardsWithArt: z.number(),
+              }),
+            )
+            .nullable(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const GAME_LABELS: Record<string, string> = {
+        pokemon: "Pokémon",
+        magic: "Magic: The Gathering",
+        starwars: "Star Wars Unlimited",
+        funko: "Funko Pop!",
+        lego: "Legos",
+        topps: "Topps Baseball",
+        bowman: "Bowman Baseball",
+        "topps-basketball": "Topps Basketball",
+        "disney-topps": "Disney Topps",
+        "starwars-topps": "Star Wars Topps",
+        gpk: "Garbage Pail Kids",
+        "wwe-topps": "WWE Topps",
+      };
+      const AU_GAMES = new Set([
+        "disney-topps",
+        "starwars-topps",
+        "gpk",
+        "wwe-topps",
+      ]);
+      const grouped = await db
+        .select({
+          game: schema.gameCards.game,
+          sections: sql<number>`count(distinct ${schema.gameCards.sectionKey})`,
+          cards: sql<number>`count(*)`,
+          cardsWithArt: sql<number>`sum(case when ${schema.gameCards.imageUrl} is not null and ${schema.gameCards.imageUrl} <> '' then 1 else 0 end)`,
+        })
+        .from(schema.gameCards)
+        .groupBy(schema.gameCards.game);
+      const artRows = await db
+        .select({
+          game: schema.gameSectionArt.game,
+          n: sql<number>`count(*)`,
+        })
+        .from(schema.gameSectionArt)
+        .groupBy(schema.gameSectionArt.game);
+      const artByGame = new Map(artRows.map((r) => [r.game, r.n]));
+      const artKeyRows = await db
+        .select({
+          game: schema.gameSectionArt.game,
+          sectionKey: schema.gameSectionArt.sectionKey,
+        })
+        .from(schema.gameSectionArt);
+      const artKeysByGame = new Map<string, Set<string>>();
+      for (const r of artKeyRows) {
+        const set = artKeysByGame.get(r.game) ?? new Set<string>();
+        set.add(r.sectionKey);
+        artKeysByGame.set(r.game, set);
+      }
+      const areas: {
+        key: string;
+        label: string;
+        sections: number;
+        sectionsWithArt: number | null;
+        cards: number;
+        cardsWithArt: number;
+        sets:
+          | {
+              name: string;
+              hasArt: boolean;
+              cards: number;
+              cardsWithArt: number;
+            }[]
+          | null;
+      }[] = [];
+      // Lorcana first — the flagship binder.
+      const lorcana = await db
+        .select({
+          sections: sql<number>`count(distinct ${schema.cards.groupName})`,
+          cards: sql<number>`count(*)`,
+          cardsWithArt: sql<number>`sum(case when ${schema.cards.imageUrl} is not null and ${schema.cards.imageUrl} <> '' then 1 else 0 end)`,
+        })
+        .from(schema.cards);
+      const lrow = lorcana[0];
+      areas.push({
+        key: "lorcana",
+        label: "Disney Lorcana",
+        sections: lrow?.sections ?? 0,
+        sectionsWithArt: null,
+        cards: lrow?.cards ?? 0,
+        cardsWithArt: lrow?.cardsWithArt ?? 0,
+        sets: null,
+      });
+      const order = Object.keys(GAME_LABELS);
+      const sorted = [...grouped].sort(
+        (a, b) => order.indexOf(a.game) - order.indexOf(b.game),
+      );
+      for (const g of sorted) {
+        let sets:
+          | {
+              name: string;
+              hasArt: boolean;
+              cards: number;
+              cardsWithArt: number;
+            }[]
+          | null = null;
+        if (AU_GAMES.has(g.game)) {
+          const sectionRows = await db
+            .select({
+              key: schema.gameCards.sectionKey,
+              name: schema.gameCards.sectionName,
+              cards: sql<number>`count(*)`,
+              cardsWithArt: sql<number>`sum(case when ${schema.gameCards.imageUrl} is not null and ${schema.gameCards.imageUrl} <> '' then 1 else 0 end)`,
+            })
+            .from(schema.gameCards)
+            .where(eq(schema.gameCards.game, g.game))
+            .groupBy(
+              schema.gameCards.sectionKey,
+              schema.gameCards.sectionName,
+            )
+            .orderBy(asc(sql`min(${schema.gameCards.sectionSort})`));
+          const keys = artKeysByGame.get(g.game) ?? new Set<string>();
+          sets = sectionRows.map((s) => ({
+            name: s.name,
+            hasArt: keys.has(s.key),
+            cards: s.cards,
+            cardsWithArt: s.cardsWithArt ?? 0,
+          }));
+        }
+        areas.push({
+          key: g.game,
+          label: GAME_LABELS[g.game] ?? g.game,
+          sections: g.sections,
+          sectionsWithArt: AU_GAMES.has(g.game)
+            ? (artByGame.get(g.game) ?? 0)
+            : null,
+          cards: g.cards,
+          cardsWithArt: g.cardsWithArt ?? 0,
+          sets,
+        });
+      }
+      return { areas };
     },
   }),
 
@@ -10118,10 +10977,20 @@ export const Actions = {
           total += qty;
         }
       }
+      const before = await db
+        .select({ ownedQty: schema.cards.ownedQty })
+        .from(schema.cards)
+        .where(eq(schema.cards.id, args.cardId))
+        .limit(1);
       await db
         .update(schema.cards)
         .set({ ownedQty: total, finishes: JSON.stringify(clean) })
         .where(eq(schema.cards.id, args.cardId));
+      await recordRecentAddition(
+        ctx,
+        args.cardId,
+        total - (before[0]?.ownedQty ?? 0),
+      );
       ctx.invalidateQueries();
       // Cloud backup stays current on every quantity change
       // (best-effort push of just this card's rows).
@@ -10189,6 +11058,7 @@ export const Actions = {
         .update(schema.cards)
         .set({ ownedQty: total, finishes: JSON.stringify(clean) })
         .where(eq(schema.cards.id, args.cardId));
+      await recordRecentAddition(ctx, args.cardId, total - row.ownedQty);
       ctx.invalidateQueries();
       const updated = await db
         .select()
@@ -10196,6 +11066,72 @@ export const Actions = {
         .where(eq(schema.cards.id, args.cardId));
       if (updated[0]) await syncCardToCloud(ctx, updated[0]);
       return { qty: nextQty, ownedQty: total };
+    },
+  }),
+
+  getRecentlyAdded: defineAction({
+    description:
+      "Returns the cards most recently ADDED to the collection through the app itself (stepper, pocket, or scan adds recorded since the additions log began), newest first, one entry per card, for Home's Recently Added rail under the New Vision 2.0 Beta theme. Export-seeded ownership is never listed: those cards carry no recorded add date, and none is invented.",
+    request: z.object({}),
+    response: z.object({
+      items: z.array(
+        z.object({
+          cardId: z.number(),
+          name: z.string(),
+          groupName: z.string(),
+          printed: z.string().nullable(),
+          unitValue: z.number().nullable(),
+          qty: z.number(),
+          addedAt: z.string(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.recentAdditions)
+        .orderBy(desc(schema.recentAdditions.id))
+        .limit(60);
+      const seen = new Set<number>();
+      const latest: typeof rows = [];
+      for (const r of rows) {
+        if (seen.has(r.cardId)) continue;
+        seen.add(r.cardId);
+        latest.push(r);
+        if (latest.length >= 12) break;
+      }
+      if (latest.length === 0) return { items: [] };
+      const cardRows = await db
+        .select()
+        .from(schema.cards)
+        .where(
+          inArray(
+            schema.cards.id,
+            latest.map((r) => r.cardId),
+          ),
+        );
+      const byId = new Map(cardRows.map((c) => [c.id, c]));
+      const items = latest.flatMap((r) => {
+        const card = byId.get(r.cardId);
+        if (!card) return [];
+        const money = cardMoney(card);
+        return [
+          {
+            cardId: card.id,
+            name: card.fullName,
+            groupName: card.groupName,
+            printed: card.printed,
+            unitValue:
+              card.ownedQty > 0
+                ? Math.round((money.value / card.ownedQty) * 100) / 100
+                : (card.marketValue ?? null),
+            qty: r.qty,
+            addedAt: r.addedAt,
+          },
+        ];
+      });
+      return { items };
     },
   }),
 
@@ -10348,7 +11284,7 @@ export const Actions = {
 
   setThemePreference: defineAction({
     description:
-      "Saves the app theme the user picked in Settings (Vault Dark, Light, Midnight Purple, Crimson Ember, High Contrast, or Rainbow) on their collector profile, so the choice persists for them across devices. Presentation only — no collection data changes.",
+      "Saves the app theme the user picked in Settings (Vault Dark, Light, Midnight Purple, Crimson Ember, High Contrast, Rainbow, or New Vision 2.0 Beta) on their collector profile, so the choice persists for them across devices. Presentation only — no collection data changes.",
     request: z.object({
       theme: z.enum([
         "vault",
@@ -10357,6 +11293,7 @@ export const Actions = {
         "crimson",
         "contrast",
         "rainbow",
+        "jarvis",
       ]),
     }),
     response: z.object({ ok: z.literal(true), theme: z.string() }),
@@ -11949,6 +12886,487 @@ export const Actions = {
           a.finishOrLabel.localeCompare(b.finishOrLabel),
       );
       return { exportedAt: new Date().toISOString(), rows };
+    },
+  }),
+
+  getGameCardCost: defineAction({
+    description:
+      "Returns the recorded per-copy cost (what the collector paid) for one game-catalog item, or null when no cost has been recorded for it.",
+    request: z.object({ id: z.number().int().positive() }),
+    response: z.object({ paidValue: z.number().nullable() }),
+    handler: async (ctx, args) => {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select({ paidValue: schema.gameCards.paidValue })
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id))
+        .limit(1);
+      return { paidValue: rows[0]?.paidValue ?? null };
+    },
+  }),
+
+  setGameCardCost: defineAction({
+    description:
+      "Records (or clears, with null) the per-copy cost the collector paid for one game-catalog item — the Money Tracker's cost basis for Pokémon, Magic, Star Wars, Funko, Lego, and Topps items, editable from the item's own page.",
+    request: z.object({
+      id: z.number().int().positive(),
+      paidValue: z.number().min(0).max(1000000).nullable(),
+    }),
+    response: gameCardCostResponse,
+    handler: async (ctx, args): Promise<z.infer<typeof gameCardCostResponse>> => {
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.gameCards)
+        .set({ paidValue: args.paidValue })
+        .where(eq(schema.gameCards.id, args.id));
+      return { ok: true, paidValue: args.paidValue };
+    },
+  }),
+
+  getMoneyTracker: defineAction({
+    description:
+      "Money Tracker (Nov 5, 2026): the collection's cost basis vs current value — totals and per-category value, known cost, unrealised profit/loss and ROI computed ONLY over copies whose cost is actually recorded (unknown cost stays unknown, never estimated) — plus the Sold ledger: settled cash sales and completed trades out of the owner's collection, fed by the trade/marketplace settlement records, with realised profit/loss where the cost basis is known.",
+    request: z.object({}),
+    response: moneyTrackerResponse,
+    handler: async (ctx): Promise<z.infer<typeof moneyTrackerResponse>> => {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const me = profile.collectorCode;
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      type CatAcc = {
+        key: string;
+        label: string;
+        value: number;
+        costKnown: number;
+        valueKnown: number;
+        copies: number;
+        knownCopies: number;
+      };
+      const cats = new Map<string, CatAcc>();
+      const cat = (key: string, label: string): CatAcc => {
+        let c = cats.get(key);
+        if (!c) {
+          c = { key, label, value: 0, costKnown: 0, valueKnown: 0, copies: 0, knownCopies: 0 };
+          cats.set(key, c);
+        }
+        return c;
+      };
+      const addCopy = (
+        c: CatAcc,
+        qty: number,
+        unitValue: number | null,
+        unitPaid: number | null,
+      ) => {
+        if (qty <= 0) return;
+        c.copies += qty;
+        if (unitValue != null) c.value += unitValue * qty;
+        if (unitPaid != null) {
+          c.knownCopies += qty;
+          c.costKnown += unitPaid * qty;
+          if (unitValue != null) c.valueKnown += unitValue * qty;
+        }
+      };
+
+      // Lorcana cards — per finish, from the recorded export
+      // finance (paid stays as recorded, never re-priced).
+      const lorcana = cat("lorcana", "Lorcana cards");
+      const cardRows = await db.select().from(schema.cards);
+      const cardById = new Map(cardRows.map((r) => [r.id, r]));
+      for (const row of cardRows) {
+        if (row.ownedQty <= 0) continue;
+        const finishes = parseFinishes(row.finishes);
+        const prices = parseFinance(row.financeJson);
+        const entries = Object.entries(finishes).filter(([, q]) => q > 0);
+        if (entries.length === 0) {
+          addCopy(lorcana, row.ownedQty, row.marketValue, row.paidValue);
+        } else {
+          for (const [finish, qty] of entries) {
+            addCopy(
+              lorcana,
+              qty,
+              prices[finish]?.value ?? row.marketValue,
+              prices[finish]?.paid ?? row.paidValue,
+            );
+          }
+        }
+      }
+
+      // Sealed products — export paid per unit, as recorded.
+      const sealedCat = cat("sealed", "Sealed products");
+      const eff = await effectiveSealed(ctx);
+      for (const item of eff.items) {
+        if (item.qty <= 0) continue;
+        addCopy(
+          sealedCat,
+          item.qty,
+          item.unitValue,
+          item.qty > 0 ? item.paid / item.qty : null,
+        );
+      }
+
+      // Game catalogs (Pokémon, Magic, Star Wars, Funko, Lego,
+      // Topps family) — value from the catalog price; cost only
+      // where the collector recorded it on the item's page.
+      // Lego exception: a set's cost basis already lives in
+      // lego_ownership_notes (the Your copy record, Nov 4), so
+      // that record wins where it exists — the tracker counts
+      // what he actually logged there, never a second field.
+      const gameCat = cat("games", "Pokémon, Magic, Star Wars, Funko, Lego & Topps");
+      const legoNoteRows = await db
+        .select()
+        .from(schema.legoOwnershipNotes);
+      const legoPaidById = new Map(
+        legoNoteRows.map((n) => [n.gameCardId, n.paidPriceUsd]),
+      );
+      const gameRows = await db.select().from(schema.gameCards);
+      for (const g of gameRows) {
+        const qty = g.ownedQty + g.ownedSealedQty;
+        if (qty <= 0) continue;
+        addCopy(
+          gameCat,
+          qty,
+          g.price,
+          g.game === "lego"
+            ? (legoPaidById.get(g.id) ?? g.paidValue)
+            : g.paidValue,
+        );
+      }
+
+      // Graded slabs from cert scans — paid where recorded;
+      // slab market value is not tracked anywhere in the app,
+      // so slabs add cost and copies but no value figure.
+      const slabCat = cat("slabs", "Graded slabs (cert scans)");
+      const slabRows = await db.select().from(schema.gradedSlabs);
+      for (const s of slabRows) {
+        if (s.qty <= 0) continue;
+        slabCat.copies += s.qty;
+        if (s.paid != null) {
+          slabCat.knownCopies += s.qty;
+          slabCat.costKnown += s.paid * s.qty;
+        }
+      }
+
+      // Graded comics — checked values (Oct 29, 2026) from the
+      // in-app catalog mirror; no paid amounts were ever
+      // recorded for them, so their cost is honestly unknown.
+      const comicCat = cat("comics", "Graded comics");
+      for (const c of COMIC_ALERT_CATALOG) {
+        comicCat.copies += 1;
+        comicCat.value += c.value;
+      }
+
+      const categories = [...cats.values()]
+        .filter((c) => c.copies > 0 || c.value > 0)
+        .map((c) => ({
+          key: c.key,
+          label: c.label,
+          value: r2(c.value),
+          costKnown: r2(c.costKnown),
+          valueKnown: r2(c.valueKnown),
+          copies: c.copies,
+          knownCopies: c.knownCopies,
+        }));
+      const value = r2(categories.reduce((s, c) => s + c.value, 0));
+      const costKnown = r2(categories.reduce((s, c) => s + c.costKnown, 0));
+      const valueKnown = r2(categories.reduce((s, c) => s + c.valueKnown, 0));
+      const unrealised = r2(valueKnown - costKnown);
+
+      // Sold ledger — settled cash sales where the owner was
+      // the seller, and settled trades where the owner gave
+      // items away. Both feed from the settlement records the
+      // trade/marketplace flows already write on completion.
+      const soldRows: z.infer<typeof moneyTrackerResponse>["sold"]["rows"] = [];
+      let proceeds = 0;
+      let realisedKnown = 0;
+      let realisedCostKnown = 0;
+      let salesCount = 0;
+      const sales = await db
+        .select()
+        .from(schema.cashPurchases)
+        .where(
+          and(
+            eq(schema.cashPurchases.sellerCode, me),
+            isNotNull(schema.cashPurchases.settledAt),
+          ),
+        );
+      for (const s of sales) {
+        salesCount += 1;
+        const total = r2(s.unitPrice * s.qty);
+        proceeds += total;
+        const card = cardById.get(s.cardId);
+        let cost: number | null = null;
+        if (card) {
+          const prices = parseFinance(card.financeJson);
+          const unit = prices[s.finish]?.paid ?? card.paidValue;
+          if (unit != null) cost = r2(unit * s.qty);
+        }
+        if (cost != null) {
+          realisedKnown += total - cost;
+          realisedCostKnown += cost;
+        }
+        soldRows.push({
+          kind: "sale",
+          date: s.completedAt ?? s.settledAt,
+          title: s.name,
+          detail: `${s.groupName}${s.printed ? ` · #${s.printed}` : ""} · ${s.finish} · ×${s.qty}`,
+          counterparty: s.buyerUsername,
+          qty: s.qty,
+          proceeds: total,
+          cost,
+          realised: cost != null ? r2(total - cost) : null,
+          gave: [],
+          got: [],
+        });
+      }
+      let tradesCount = 0;
+      const trades = await db
+        .select()
+        .from(schema.tradeOffers)
+        .where(isNotNull(schema.tradeOffers.settledAt));
+      const fmtTradeItem = (t: {
+        name: string;
+        printed?: string | null;
+        finish: string;
+        qty: number;
+      }) =>
+        `${t.name}${t.printed ? ` #${t.printed}` : ""} · ${t.finish} · ×${t.qty}`;
+      for (const t of trades) {
+        const iAmProposer = t.proposerCode === me;
+        if (!iAmProposer && t.partnerCode !== me) continue;
+        tradesCount += 1;
+        const gave = parseTradeItems(iAmProposer ? t.giveJson : t.getJson);
+        const got = parseTradeItems(iAmProposer ? t.getJson : t.giveJson);
+        soldRows.push({
+          kind: "trade",
+          date: t.completedAt ?? t.settledAt,
+          title:
+            gave.length > 0
+              ? `${gave[0]!.name}${gave.length > 1 ? ` +${gave.length - 1} more` : ""}`
+              : "Trade",
+          detail: `Traded with ${iAmProposer ? t.partnerUsername : t.proposerUsername}`,
+          counterparty: iAmProposer ? t.partnerUsername : t.proposerUsername,
+          qty: gave.reduce((s, g) => s + g.qty, 0),
+          proceeds: null,
+          cost: null,
+          realised: null,
+          gave: gave.map(fmtTradeItem),
+          got: got.map(fmtTradeItem),
+        });
+      }
+      soldRows.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+
+      return {
+        asOf: new Date().toISOString(),
+        value,
+        costKnown,
+        valueKnown,
+        unrealised,
+        roiPct: costKnown > 0 ? r2((unrealised / costKnown) * 100) : null,
+        copies: categories.reduce((s, c) => s + c.copies, 0),
+        knownCopies: categories.reduce((s, c) => s + c.knownCopies, 0),
+        categories,
+        sold: {
+          rows: soldRows,
+          proceeds: r2(proceeds),
+          realisedKnown: r2(realisedKnown),
+          realisedCostKnown: r2(realisedCostKnown),
+          salesCount,
+          tradesCount,
+        },
+      };
+    },
+  }),
+
+  getInsuranceReport: defineAction({
+    description:
+      "Insurance & Estate report data (Nov 5, 2026): every owned item across Lorcana cards (per finish), sealed products, all game catalogs, and graded slabs — with quantity, unit paid (null when never recorded), unit current value (null where no value is tracked), identification lines, and the item's Where-it-lives storage string — plus the owner's name/Collector ID for the cover and the graded-comics storage locations (comic rows themselves live in the client catalog). The client assembles the downloadable PDF from this.",
+    request: z.object({}),
+    response: insuranceReportResponse,
+    handler: async (ctx): Promise<z.infer<typeof insuranceReportResponse>> => {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const locRows = await db.select().from(schema.itemLocations);
+      const LOC_LABELS: Record<string, string> = {
+        binder: "Binder",
+        deck_box: "Deck box",
+        trade_box: "Trade box",
+        bulk_box: "Bulk box",
+        other: "",
+      };
+      const locString = (
+        rows: { locType: string; place: string; spot: string | null; qty: number }[],
+      ): string | null => {
+        if (rows.length === 0) return null;
+        return rows
+          .map((r) => {
+            const label = LOC_LABELS[r.locType] ?? "";
+            const head = label ? `${label} · ${r.place}` : r.place;
+            const spot = r.spot ? ` · ${r.spot}` : "";
+            const qty = r.qty !== 1 || rows.length > 1 ? ` (×${r.qty})` : "";
+            return `${head}${spot}${qty}`;
+          })
+          .join("; ");
+      };
+      const byCard = new Map<number, typeof locRows>();
+      const bySealed = new Map<string, typeof locRows>();
+      const byGame = new Map<number, typeof locRows>();
+      const comicLocations: Record<string, string> = {};
+      for (const r of locRows) {
+        if (r.targetKind === "card" && r.cardId != null) {
+          byCard.set(r.cardId, [...(byCard.get(r.cardId) ?? []), r]);
+        } else if (r.targetKind === "sealed" && r.sealedName != null) {
+          bySealed.set(r.sealedName, [...(bySealed.get(r.sealedName) ?? []), r]);
+        } else if (r.targetKind === "game" && r.gameCardId != null) {
+          byGame.set(r.gameCardId, [...(byGame.get(r.gameCardId) ?? []), r]);
+        } else if (r.targetKind === "comic" && r.comicId != null) {
+          const prev = comicLocations[r.comicId];
+          const s = locString([r]);
+          if (s) comicLocations[r.comicId] = prev ? `${prev}; ${s}` : s;
+        }
+      }
+
+      type Row = z.infer<typeof insuranceReportResponse>["rows"][number];
+      const rows: Row[] = [];
+
+      const cardRows = await db.select().from(schema.cards);
+      for (const row of cardRows) {
+        if (row.ownedQty <= 0) continue;
+        const finishes = parseFinishes(row.finishes);
+        const prices = parseFinance(row.financeJson);
+        const entries = Object.entries(finishes).filter(([, q]) => q > 0);
+        const loc = locString(byCard.get(row.id) ?? []);
+        if (entries.length === 0) {
+          rows.push({
+            category: "Lorcana cards",
+            name: row.fullName,
+            idLine: `#${row.printed} · Regular`,
+            detail: row.groupName,
+            qty: row.ownedQty,
+            unitValue: row.marketValue,
+            unitPaid: row.paidValue,
+            location: loc,
+            artCardId: row.id,
+            imageUrl: null,
+          });
+        } else {
+          for (const [finish, qty] of entries) {
+            rows.push({
+              category: "Lorcana cards",
+              name: row.fullName,
+              idLine: `#${row.printed} · ${finish}`,
+              detail: row.groupName,
+              qty,
+              unitValue: prices[finish]?.value ?? row.marketValue,
+              unitPaid: prices[finish]?.paid ?? row.paidValue,
+              location: loc,
+              artCardId: row.id,
+              imageUrl: null,
+            });
+          }
+        }
+      }
+
+      const eff = await effectiveSealed(ctx);
+      for (const item of eff.items) {
+        if (item.qty <= 0) continue;
+        rows.push({
+          category: "Sealed products",
+          name: item.name,
+          idLine: "Sealed",
+          detail: item.setName,
+          qty: item.qty,
+          unitValue: item.unitValue,
+          unitPaid: item.qty > 0 ? Math.round((item.paid / item.qty) * 100) / 100 : null,
+          location: locString(bySealed.get(item.name) ?? []),
+          artCardId: null,
+          imageUrl: null,
+        });
+      }
+
+      const GAME_LABELS: Record<string, string> = {
+        pokemon: "Pokémon",
+        magic: "Magic: The Gathering",
+        starwars: "Star Wars: Unlimited",
+        funko: "Funko Pop!",
+        lego: "Lego",
+        topps: "Topps Baseball",
+        "topps-basketball": "Topps Basketball",
+        bowman: "Bowman Baseball",
+        "disney-topps": "Disney Topps",
+        "starwars-topps": "Star Wars Topps",
+        gpk: "Garbage Pail Kids",
+        "wwe-topps": "WWE Topps",
+      };
+      const legoNoteRows = await db
+        .select()
+        .from(schema.legoOwnershipNotes);
+      const legoPaidById = new Map(
+        legoNoteRows.map((n) => [n.gameCardId, n.paidPriceUsd]),
+      );
+      const gameRows = await db.select().from(schema.gameCards);
+      const gameById = new Map(gameRows.map((g) => [g.id, g]));
+      for (const g of gameRows) {
+        const qty = g.ownedQty + g.ownedSealedQty;
+        if (qty <= 0) continue;
+        rows.push({
+          category: GAME_LABELS[g.game] ?? g.game,
+          name: g.name,
+          idLine: `#${g.printed}${g.finish ? ` · ${g.finish}` : ""}${g.ownedSealedQty > 0 ? ` · ${g.ownedSealedQty} sealed` : ""}`,
+          detail: g.sectionName,
+          qty,
+          unitValue: g.price,
+          // Lego's cost basis is its Your copy record
+          // (lego_ownership_notes) where one exists.
+          unitPaid:
+            g.game === "lego"
+              ? (legoPaidById.get(g.id) ?? g.paidValue)
+              : g.paidValue,
+          location: locString(byGame.get(g.id) ?? []),
+          artCardId: null,
+          imageUrl: g.imageUrl,
+        });
+      }
+
+      const slabRows = await db.select().from(schema.gradedSlabs);
+      for (const s of slabRows) {
+        if (s.qty <= 0) continue;
+        const g = gameById.get(s.gameCardId);
+        rows.push({
+          category: "Graded slabs",
+          name: g ? g.name : "Graded card",
+          idLine: `${s.company} ${s.grade} · Cert ${s.cert}`,
+          detail: g ? `${g.sectionName} · #${g.printed}` : "",
+          qty: s.qty,
+          unitValue: null,
+          unitPaid: s.paid,
+          location: locString(byGame.get(s.gameCardId) ?? []),
+          artCardId: null,
+          imageUrl: g?.imageUrl ?? null,
+        });
+      }
+
+      const catOrder = (c: string) =>
+        c === "Lorcana cards"
+          ? 0
+          : c === "Sealed products"
+            ? 1
+            : c === "Graded slabs"
+              ? 98
+              : 50;
+      rows.sort(
+        (a, b) =>
+          catOrder(a.category) - catOrder(b.category) ||
+          a.category.localeCompare(b.category) ||
+          a.name.localeCompare(b.name) ||
+          a.idLine.localeCompare(b.idLine),
+      );
+      return {
+        generatedAt: new Date().toISOString(),
+        username: profile.username,
+        collectorCode: profile.collectorCode,
+        rows,
+        comicLocations,
+      };
     },
   }),
 
@@ -13964,6 +15382,12 @@ export const Actions = {
           total: z.number(),
           owned: z.number(),
           hasArt: z.boolean(),
+          /** How many of this set's cards carry artwork —
+              the per-set front progress the set list and the
+              collection-level artwork block render (Nov 7,
+              2026: the all-Disney-Topps / all-GPK artwork
+              completion ask). */
+          withArt: z.number(),
         }),
       ),
       cardsTotal: z.number(),
@@ -13981,6 +15405,7 @@ export const Actions = {
           name: schema.gameCards.sectionName,
           sort: sql<number>`min(${schema.gameCards.sectionSort})`,
           total: sql<number>`count(*)`,
+          withArt: sql<number>`sum(case when ${schema.gameCards.imageUrl} is not null and ${schema.gameCards.imageUrl} <> '' then 1 else 0 end)`,
           owned: sql<number>`coalesce(sum(${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty}), 0)`,
         })
         .from(schema.gameCards)
@@ -14001,6 +15426,7 @@ export const Actions = {
           total: r.total,
           owned: r.owned,
           hasArt: artKeys.has(r.key),
+          withArt: r.withArt ?? 0,
         })),
         cardsTotal,
         ownedTotal: rows.reduce((s, r) => s + r.owned, 0),
@@ -14065,7 +15491,7 @@ export const Actions = {
 
   importSectionArt: defineAction({
     description:
-      "Records official product artwork for catalog sections (sets) whose catalog source is text-only — one publisher product photo per section, stored as a source URL here and ingested into blob storage by getSectionArt (Anthony, Nov 5, 2026: Disney Topps + Garbage Pail Kids set artwork). Idempotent upsert; never touches card rows, ownership, or prices.",
+      "Records official product artwork for catalog sections (sets) whose catalog source is text-only — one publisher product photo per section, stored as a source URL here and ingested into blob storage by getSectionArt (Anthony, Nov 5, 2026: set artwork for all four Topps Alternate Universe areas — Disney Topps, Star Wars Topps, Garbage Pail Kids, WWE Topps). Idempotent upsert; never touches card rows, ownership, or prices.",
     request: z.object({
       items: z
         .array(
@@ -14109,6 +15535,91 @@ export const Actions = {
     },
   }),
 
+  importCardArt: defineAction({
+    description:
+      "Records collector-sourced front artwork for individual catalog cards whose own source is text-only (Anthony, Nov 6, 2026: Topps checklists carry no images, so card fronts are hunted where terms permit — COMC's photographed card fronts today; the Trading Card Database is an existence reference only, since its terms bar image extraction, and Collectr joins via its API once Anthony's own access is approved). Each item names one game_cards row by id; the image URL is written onto that row (what the grids and detail pages render) and kept here with its source page and site name as provenance. A row whose artwork came with its catalog is never overwritten; a row previously filled from a collector source may be re-filled (dead or wrong source replacement). Never touches ownership, prices, or any other field.",
+    request: z.object({
+      items: z
+        .array(
+          z.object({
+            game: z.string().min(1).max(40),
+            id: z.number().int(),
+            imageUrl: z.string().url().max(900),
+            pageUrl: z.string().url().max(900).nullable(),
+            source: z.string().min(1).max(80),
+          }),
+        )
+        .min(1)
+        .max(100),
+    }),
+    response: z.object({
+      ok: z.literal(true),
+      saved: z.number(),
+      skipped: z.number(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; saved: number; skipped: number }> {
+      const db = ctx.db<typeof schema>();
+      let saved = 0;
+      let skipped = 0;
+      for (const item of args.items) {
+        const rows = await db
+          .select()
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.id, item.id));
+        const row = rows[0];
+        if (!row || row.game !== item.game) {
+          skipped += 1;
+          continue;
+        }
+        const artRows = await db
+          .select({ cardId: schema.gameCardArt.cardId })
+          .from(schema.gameCardArt)
+          .where(
+            and(
+              eq(schema.gameCardArt.game, item.game),
+              eq(schema.gameCardArt.cardId, item.id),
+            ),
+          );
+        // Artwork that arrived with the card's own catalog
+        // (Pokémon, Scryfall, FFG, HobbyDB…) is authoritative
+        // and never replaced by a collector scan. Only a row
+        // this table already filled may be re-filled.
+        if (row.imageUrl && artRows.length === 0) {
+          skipped += 1;
+          continue;
+        }
+        await db
+          .insert(schema.gameCardArt)
+          .values({
+            game: item.game,
+            cardId: item.id,
+            imageUrl: item.imageUrl,
+            pageUrl: item.pageUrl,
+            source: item.source,
+          })
+          .onConflictDoUpdate({
+            target: [schema.gameCardArt.game, schema.gameCardArt.cardId],
+            set: {
+              imageUrl: item.imageUrl,
+              pageUrl: item.pageUrl,
+              source: item.source,
+            },
+          })
+          .run();
+        await db
+          .update(schema.gameCards)
+          .set({ imageUrl: item.imageUrl })
+          .where(eq(schema.gameCards.id, item.id))
+          .run();
+        saved += 1;
+      }
+      return { ok: true as const, saved, skipped };
+    },
+  }),
+
   getSectionArt: defineAction({
     description:
       "Returns a same-origin copy of one catalog section's official product artwork (fetched server-side once and cached in blob storage), so set tiles show the publisher's product photo without hotlinking. The URL fetched is always the section-art row stored for that section — never a caller-supplied address.",
@@ -14143,6 +15654,12 @@ export const Actions = {
           return { ok: true, url: await ctx.blobs.getUrl(key) };
         }
         const res = await fetch(row.imageUrl, {
+          // A hanging source fetch must not stall the set
+          // row's thumbnail indefinitely (part of the Disney
+          // Topps blank-thumbnail inconsistency, Nov 5,
+          // 2026): 20 seconds, then the row falls back to
+          // its placeholder and a later visit retries.
+          signal: AbortSignal.timeout(20000),
           headers: {
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -14172,7 +15689,7 @@ export const Actions = {
 
   getGameSection: defineAction({
     description:
-      "One set's printings inside a game catalog, in collector-number order, paged (150 at a time): name, number, rarity/finish, artwork link, price where the source publishes one, and the collector's owned count (0 = missing/ghosted).",
+      "One set's printings inside a game catalog, in collector-number order, paged (150 at a time): name, number, rarity/finish, artwork link, price where the source publishes one, and the collector's owned count (0 = missing/ghosted). Also returns withArt — how many of the set's cards carry artwork across the whole section (not just this page) — so a set view can show its artwork progress and offer the focused card-art hunt for the cards still missing a front.",
     request: z.object({
       game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
       sectionKey: z.string().min(1).max(80),
@@ -14181,6 +15698,7 @@ export const Actions = {
     response: z.object({
       sectionName: z.string(),
       total: z.number(),
+      withArt: z.number(),
       cards: z.array(
         z.object({
           id: z.number(),
@@ -14208,6 +15726,16 @@ export const Actions = {
             eq(schema.gameCards.sectionKey, args.sectionKey),
           ),
         );
+      const artRows = await db
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.gameCards)
+        .where(
+          and(
+            eq(schema.gameCards.game, args.game),
+            eq(schema.gameCards.sectionKey, args.sectionKey),
+            isNotNull(schema.gameCards.imageUrl),
+          ),
+        );
       const rows = await db
         .select()
         .from(schema.gameCards)
@@ -14223,6 +15751,7 @@ export const Actions = {
       return {
         sectionName: rows[0]?.sectionName ?? args.sectionKey,
         total: countRows[0]?.c ?? 0,
+        withArt: artRows[0]?.c ?? 0,
         cards: rows.map((r) => ({
           id: r.id,
           uid: r.uid,
@@ -14236,6 +15765,61 @@ export const Actions = {
           ownedQty: r.ownedQty,
           ownedSealedQty: r.ownedSealedQty,
         })),
+      };
+    },
+  }),
+
+  getGameCard: defineAction({
+    description:
+      "One catalog item of a game by id, in the detail sheet's shape (name, number, set, rarity/finish, artwork link, price, owned counts) — the refresh-in-place restore for an open item page, so a reload on an item's page reopens that same item instead of bouncing back to the catalog.",
+    request: z.object({
+      game: z.enum(["pokemon", "magic", "starwars", "funko", "lego", "topps", "bowman", "topps-basketball", "disney-topps", "starwars-topps", "gpk", "wwe-topps"]),
+      id: z.number().int().positive(),
+    }),
+    response: z.object({
+      card: z
+        .object({
+          id: z.number(),
+          name: z.string(),
+          printed: z.string(),
+          sectionName: z.string(),
+          rarity: z.string().nullable(),
+          finish: z.string().nullable(),
+          imageUrl: z.string().nullable(),
+          price: z.number().nullable(),
+          ownedQty: z.number(),
+          ownedSealedQty: z.number(),
+        })
+        .nullable(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          and(
+            eq(schema.gameCards.game, args.game),
+            eq(schema.gameCards.id, args.id),
+          ),
+        )
+        .limit(1);
+      const r = rows[0];
+      return {
+        card: r
+          ? {
+              id: r.id,
+              name: r.name,
+              printed: r.printed,
+              sectionName: r.sectionName,
+              rarity: r.rarity,
+              finish: r.finish,
+              imageUrl: r.imageUrl,
+              price: r.price,
+              ownedQty: r.ownedQty,
+              ownedSealedQty: r.ownedSealedQty,
+            }
+          : null,
       };
     },
   }),
@@ -14526,6 +16110,95 @@ export const Actions = {
       } catch {
         return { ok: false, url: null };
       }
+    },
+  }),
+
+  getStoredCutout: defineAction({
+    description:
+      "Returns the PRE-MADE cutout of one catalog item's photo (its studio background already removed, stored in app blob storage) when one exists. The Library shelf and item heroes render this stored copy immediately — no full-size original download, no live background-removal, and no white-background interim (Anthony, Nov 5, 2026: the Library was slow and one Lego set kept its white background because its live chain depended on a flaky source fetch). The key derives from the catalog row's own stored image URL, so a changed photo invalidates the old cutout automatically.",
+    request: z.object({
+      id: z.number().int(),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      url: z.string().nullable(),
+    }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: boolean; url: string | null }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      const source = row?.imageUrl ?? null;
+      if (!row || !source) return { ok: false, url: null };
+      const key = `game-cutout/${row.id}-${funkoHash(source)}`;
+      try {
+        const existing = await ctx.blobs.head(key);
+        if (!existing) return { ok: false, url: null };
+        return { ok: true, url: await ctx.blobs.getUrl(key) };
+      } catch {
+        return { ok: false, url: null };
+      }
+    },
+  }),
+
+  saveStoredCutout: defineAction({
+    description:
+      "Stores PRE-MADE cutouts (studio background already removed, PNG bytes as base64) for catalog items, keyed to each row's current photo URL. Used to seed the Library shelf items' finished cutouts and by the client to persist a cutout it computed once, so every later open serves the finished image straight from app storage. Items whose id has no catalog row or whose PNG payload is missing/oversized are skipped, never fatal.",
+    request: z.object({
+      items: z
+        .array(
+          z.object({
+            id: z.number().int(),
+            pngBase64: z.string().min(1).max(2_800_000),
+          }),
+        )
+        .min(1)
+        .max(50),
+    }),
+    response: z.object({ saved: z.number() }),
+    async handler(ctx, args): Promise<{ saved: number }> {
+      const db = ctx.db<typeof schema>();
+      let saved = 0;
+      for (const item of args.items) {
+        const rows = await db
+          .select()
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.id, item.id));
+        const row = rows[0];
+        const source = row?.imageUrl ?? null;
+        if (!row || !source) continue;
+        let bytes: Uint8Array;
+        try {
+          bytes = new Uint8Array(
+            Buffer.from(item.pngBase64, "base64"),
+          );
+        } catch {
+          continue;
+        }
+        // A 560px cutout PNG is a few hundred KB; anything
+        // past ~2 MB is not the cutout this row promises.
+        if (bytes.length === 0 || bytes.length > 2_000_000) continue;
+        // PNG magic bytes — never store a non-PNG payload.
+        if (
+          bytes[0] !== 0x89 ||
+          bytes[1] !== 0x50 ||
+          bytes[2] !== 0x4e ||
+          bytes[3] !== 0x47
+        ) {
+          continue;
+        }
+        const key = `game-cutout/${row.id}-${funkoHash(source)}`;
+        await ctx.blobs.put(key, bytes, {
+          contentType: "image/png",
+        });
+        saved++;
+      }
+      return { saved };
     },
   }),
 

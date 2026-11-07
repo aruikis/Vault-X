@@ -24,9 +24,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { hapticTick } from "./haptics";
 import {
-  pushWindowState,
-  readNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+scrubWindowKeys,
 } from "./historyNav";
 
 type BadgeMap = Map<

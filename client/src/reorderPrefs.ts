@@ -8,9 +8,9 @@
 // as the grid-density and Only-mine preferences.
 
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
+useMutation,
+useQuery,
+useQueryClient,
 } from "@tanstack/react-query";
 import { api } from "./api";
 

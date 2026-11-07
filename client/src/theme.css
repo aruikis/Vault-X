@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap");
 @import "tailwindcss";
 @import "tailwindcss-safe-area";
 
@@ -341,6 +342,277 @@
 
 :root[data-theme="rainbow"] .rounded-md {
   border-radius: 0.625rem;
+}
+
+/* New Vision 2.0 Beta (Anthony, Nov 5, 2026): the UAT redesign
+   he played with and loved, carried into the live app as a
+   named, clickable theme — "have everything that you I just
+   went through in UAT displayed that way." The name is his
+   final pick (it supersedes the earlier working names). The
+   palette is the UAT's own, verbatim: bg #070b1a, surface
+   #101736, raised surface #182250, text #eef0ff, muted
+   #9aa5d6, border #2a3570, accent indigo #818cf8, second
+   accent cyan #22d3ee, glow rgba(99,102,241,.55), radius 22px,
+   display face Outfit. Like Rainbow's full treatment, this is
+   not just colors: surfaces take the UAT's glassy gradient
+   depth, radii bubble up to the UAT's 20–28px world,
+   accent-filled controls take the UAT's signature
+   indigo-to-cyan gradient with its glow, the shell backdrop
+   is the UAT's clean indigo/cyan glows (no starfield), and
+   Home itself reshapes (see the Home rules below): the
+   glowing Scan bar rides at the top, the portfolio pill grows
+   into the hero, Top Movers fold into a ticker strip, TCG
+   Universe goes full-width and the other collection tiles go
+   two-across with bigger art — the UAT Home layout, on his
+   real data. Switching back to any other theme restores
+   everything.
+   EXACT-MATCH CORRECTION (Nov 5, 2026, later): Anthony
+   reviewed the landed theme and directed that it look
+   EXACTLY like the UAT, the graph included — the first pass
+   had kept the live app's filled Recharts area charts and
+   the Home pill's filled sparkline, which are not the UAT's
+   graph at all. Now, under this theme only: Home renders
+   the UAT hero card itself (pill and stacked Movers list
+   suppressed), and every value graph — Portfolio Value,
+   card/sealed/comic Price history, Research, watchlist
+   sparklines — draws through the UatSpark component, the
+   UAT Spark recipe copied verbatim (bare cyan #22d3ee
+   polyline, 2.5px, no fill/grid/axes/dots) at the UAT's own
+   heights (Home 44, Portfolio 64, Price history 56). */
+:root[data-theme="jarvis"] {
+  color-scheme: dark;
+  --bg: #070b1a;
+  --surface: #101736;
+  --text: #eef0ff;
+  --dim: #9aa5d6;
+  --border: #2a3570;
+  --accent: #818cf8;
+  --on-accent: #ffffff;
+  --radius: 22px;
+  --pocket: #0b1028;
+  --pocket-edge: #2f3a7a;
+  --gold: #818cf8;
+  --gold-soft: #a5b4fc;
+  --ghost: #8fa3c8;
+  --jarvis-accent2: #22d3ee;
+  --jarvis-glow: rgba(99, 102, 241, 0.55);
+  --jarvis-raised: #182250;
+}
+
+/* The UAT world backdrop: soft indigo from the top-left, cyan
+   from the top-right, a low indigo wash mid-page, over the deep
+   blue — no star dots, the UAT shell is clean glow. */
+:root[data-theme="jarvis"] .app-shell {
+  background-image:
+    radial-gradient(640px 400px at 10% -60px, rgba(99, 102, 241, 0.22), transparent 62%),
+    radial-gradient(560px 420px at 98% 6%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(520px 300px at 82% 36%, rgba(129, 140, 248, 0.09), transparent 60%);
+  background-size: auto, auto, auto;
+}
+
+:root[data-theme="jarvis"] body::before {
+  background-image:
+    radial-gradient(640px 400px at 10% -60px, rgba(99, 102, 241, 0.22), transparent 62%),
+    radial-gradient(560px 420px at 98% 6%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(520px 300px at 82% 36%, rgba(129, 140, 248, 0.09), transparent 60%);
+  background-size: auto, auto, auto;
+}
+
+/* The UAT display face: Outfit carries headings and display
+   numbers under New Vision 2.0 Beta (loaded at the top of this
+   file; the stack falls back to the system sans if the font
+   can't load, so nothing ever renders blank). */
+:root[data-theme="jarvis"] .font-album,
+:root[data-theme="jarvis"] h1,
+:root[data-theme="jarvis"] h2,
+:root[data-theme="jarvis"] h3 {
+  font-family:
+    "Outfit", ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+/* Surfaces take the UAT's glassy depth: an indigo-to-cyan wash
+   settling from the top edge over the flat fill, a lit top edge,
+   and a soft drop shadow — the way UAT cards sit raised in
+   their lit world instead of flat on the page. */
+:root[data-theme="jarvis"] [class*="bg-\[var\(--surface\)\]"] {
+  background-image: linear-gradient(
+    165deg,
+    rgba(129, 140, 248, 0.13),
+    rgba(34, 211, 238, 0.05) 45%,
+    rgba(34, 211, 238, 0) 78%
+  );
+  box-shadow:
+    0 10px 24px rgba(1, 2, 16, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Insets and wells take the UAT's inset tone (#0b1028, the
+   pocket tone) so inputs and code boxes sit IN the world
+   instead of reading as flat dark holes — the same three-step
+   scale the UAT uses (screen / inset / surface). */
+:root[data-theme="jarvis"] [class*="bg-\[var\(--bg\)\]"] {
+  background-color: #0b1028;
+}
+
+/* Bubbling: the common radii round up to the UAT's curvature. */
+:root[data-theme="jarvis"] .rounded-md {
+  border-radius: 0.75rem;
+}
+:root[data-theme="jarvis"] .rounded-lg {
+  border-radius: 1rem;
+}
+:root[data-theme="jarvis"] .rounded-xl {
+  border-radius: 1.375rem;
+}
+:root[data-theme="jarvis"] .rounded-2xl {
+  border-radius: 1.625rem;
+}
+:root[data-theme="jarvis"] .rounded-3xl {
+  border-radius: 2rem;
+}
+
+/* Accent-filled controls take the UAT's signature
+   indigo-to-cyan gradient plus its glow — never a flat fill.
+   Gold-token filled controls join them: under New Vision 2.0
+   Beta --gold IS the gradient's indigo end, so a gold-filled
+   primary rendered flat would read as another theme. */
+:root[data-theme="jarvis"] [class*="bg-\[var\(--accent\)\]"],
+:root[data-theme="jarvis"] [class*="bg-\[var\(--gold\)\]"] {
+  background-image: linear-gradient(90deg, #818cf8, #22d3ee);
+  box-shadow: 0 0 24px var(--jarvis-glow), 0 0 6px var(--jarvis-glow);
+  color: #ffffff;
+}
+
+:root[data-theme="jarvis"] img[class*="rounded-full"],
+:root[data-theme="jarvis"]
+  [class*="rounded-full"][class*="bg-\[var\(--accent\)\]"] {
+  box-shadow:
+    0 0 0 2px rgba(129, 140, 248, 0.4),
+    0 0 16px rgba(34, 211, 238, 0.4);
+}
+
+/* Portfolio hero joins the UAT world: raised panel tones, a
+   hairline border, and the indigo-cyan top glow at UAT
+   intensity. */
+:root[data-theme="jarvis"] .portfolio-hero {
+  background:
+    radial-gradient(
+      ellipse 95% 62% at 50% -22%,
+      rgba(129, 140, 248, 0.32),
+      rgba(34, 211, 238, 0.12) 46%,
+      transparent 72%
+    ),
+    linear-gradient(180deg, #1c2560 0%, #101736 58%, #0b1028 100%);
+  border: 1px solid rgba(129, 140, 248, 0.28);
+  box-shadow:
+    0 18px 34px rgba(1, 2, 16, 0.5),
+    0 0 28px rgba(99, 102, 241, 0.22),
+    inset 0 1px 0 rgba(199, 210, 254, 0.16),
+    inset 0 0 42px rgba(99, 102, 255, 0.06);
+}
+
+:root[data-theme="jarvis"] .portfolio-hero .recharts-cartesian-grid line {
+  stroke: rgba(129, 140, 248, 0.12);
+}
+
+/* ——— New Vision 2.0 Beta on Home (the UAT Home layout) ——— */
+
+/* The glowing Scan bar: the UAT's number-one element, a
+   full-width gradient pill with the UAT glow. Rendered only
+   while this theme is active (HomePanel). */
+.jarvis-scan-bar {
+  background-image: linear-gradient(90deg, #818cf8, #22d3ee);
+  box-shadow:
+    0 0 24px rgba(99, 102, 241, 0.55),
+    0 0 6px rgba(99, 102, 241, 0.55);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .jarvis-scan-bar {
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+  .jarvis-scan-bar:active {
+    transform: scale(0.98);
+  }
+}
+
+/* Home's portfolio snapshot under this theme is not the pill
+   at all (exact-match correction, Nov 5, 2026): HomePanel
+   renders the UAT hero card itself — rounded-28 gradient
+   panel, PORTFOLIO label, big total, the UAT Spark graph,
+   the Paid/Net/Cards strip, and Top Movers as a ticker along
+   the card's foot — and the pill plus the stacked Movers list
+   render in the other themes only. The graphs in this theme
+   are drawn by the UatSpark component (client/src/uatSpark.tsx),
+   the UAT's own Spark recipe, not by CSS: no fill, no grid,
+   no axes, cyan #22d3ee at 2.5px — Home 44px tall, Portfolio
+   64px, item Price history 56px, exactly the UAT's heights. */
+
+/* The UAT's scrollbar helper, used by the hero's movers
+   ticker (the UAT theme.css carries the same two rules). */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Your Collections reshapes to the UAT grid: TCG Universe
+   full-width and featured, the other five tiles two-across
+   with bigger art. The drag-to-reorder machinery measures
+   slots at lift time, so it follows the new geometry. */
+:root[data-theme="jarvis"] [data-tile-key="tcg"] {
+  width: 100%;
+}
+:root[data-theme="jarvis"] [data-tile-key]:not([data-tile-key="tcg"]) {
+  width: calc((100% - 0.75rem) / 2);
+}
+:root[data-theme="jarvis"] [data-tile-key="tcg"] img {
+  aspect-ratio: 21 / 9;
+}
+
+/* The bottom menu floats as UAT glass: translucent surface,
+   strong blur, the indigo glow in its shadow. */
+:root[data-theme="jarvis"] nav[class*="fixed"] > div {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: 9999px;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    0 0 22px rgba(99, 102, 241, 0.25);
+}
+
+/* UAT bottom menu, exact (Nov 6, 2026 — the UAT-match rebuild):
+   in the UAT the active tab is NOT a filled pill — its icon and
+   label simply turn cyan (--accent2) on the glass, and inactive
+   tabs stay dim. The live bar's active highlight is a filled
+   accent span, which the generic accent-gradient rule above
+   would otherwise turn into a glowing gradient block. */
+:root[data-theme="jarvis"] nav [aria-current="page"] > span {
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: #22d3ee;
+}
+
+/* UAT Home greeting header circles (Nov 6, 2026): the Admin
+   shield and Inbox mail buttons ride in 40px circular bordered
+   surface buttons beside the big name, exactly as the UAT's
+   header row draws them. The buttons themselves are the live
+   components (owner gating, unread badges and tap targets are
+   unchanged); this only gives their outer shape the UAT form. */
+:root[data-theme="jarvis"] .uat-head-circle {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+:root[data-theme="jarvis"] .uat-head-circle > button {
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 1px solid #2a3570;
+  background: #101736;
 }
 
 body {
@@ -1802,4 +2074,154 @@ body::after {
     0 18px 44px rgba(0, 0, 0, 0.6),
     0 0 22px color-mix(in srgb, var(--accent) 30%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* The Library bookcase — Classic Mahogany (Anthony, Nov 7,
+   2026: he asked for the Library shelves to look like a
+   traditional real-wood bookcase and picked Mockup 1,
+   "Classic Mahogany," from the Library Shelf Mockups —
+   Traditional page). The whole Library shelf stack now
+   stands inside ONE mahogany unit: a rounded crown cornice
+   with a dentil strip under it, fluted side posts, a dark
+   planked back panel, thick wood shelf boards the items
+   sit ON, and a base plinth carrying a small brass LIBRARY
+   nameplate. Values are the mockup's own: wood #5e2f1a,
+   highlight #7d4125, low #3f1e0f, edge #2e1408, back
+   #47220f. Every Library rule is unchanged — owned-only
+   binders, no name labels under items, item-only drag,
+   section signs keep their identities — only the furniture
+   the shelves stand in changed. */
+.library-case {
+  --wood: #5e2f1a;
+  --wood-hi: #7d4125;
+  --wood-lo: #3f1e0f;
+  --wood-edge: #2e1408;
+  --back: #47220f;
+  filter: drop-shadow(0 14px 14px rgba(0, 0, 0, 0.45));
+}
+.library-grain {
+  background-image:
+    repeating-linear-gradient(93deg, rgba(0, 0, 0, 0.1) 0 2px, rgba(0, 0, 0, 0) 2px 9px),
+    repeating-linear-gradient(88deg, rgba(255, 255, 255, 0.05) 0 1px, rgba(0, 0, 0, 0) 1px 14px),
+    linear-gradient(180deg, var(--wood-hi), var(--wood) 55%, var(--wood-lo));
+}
+.library-cornice {
+  position: relative;
+  z-index: 3;
+}
+.library-cornice-cap {
+  height: 16px;
+  border-radius: 8px 8px 0 0 / 12px 12px 0 0;
+  border: 1px solid var(--wood-edge);
+  border-bottom: none;
+}
+.library-cornice-band {
+  height: 10px;
+  border-left: 1px solid var(--wood-edge);
+  border-right: 1px solid var(--wood-edge);
+  background-image:
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.35) 0 7px, rgba(255, 225, 180, 0.16) 7px 9px, rgba(0, 0, 0, 0) 9px 15px),
+    linear-gradient(180deg, var(--wood-hi), var(--wood));
+}
+.library-cornice-step {
+  height: 7px;
+  margin: 0 6px;
+  border-left: 1px solid var(--wood-edge);
+  border-right: 1px solid var(--wood-edge);
+}
+.library-pilaster {
+  width: 20px;
+  flex: 0 0 20px;
+  border-top: 1px solid var(--wood-edge);
+  background-image:
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.4) 0 3px, rgba(255, 225, 180, 0.14) 3px 5px, rgba(0, 0, 0, 0) 5px 10px),
+    linear-gradient(90deg, var(--wood-lo), var(--wood) 50%, var(--wood-lo));
+}
+.library-back {
+  background:
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.16) 0 2px, rgba(0, 0, 0, 0) 2px 26px),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.05) 30%, rgba(0, 0, 0, 0.22)),
+    var(--back);
+  border-top: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 26px rgba(0, 0, 0, 0.45);
+}
+/* The shelf board, routed (Anthony, Nov 7, 2026, evening):
+   the flat board now carries the profile a router leaves
+   on a real shelf's front edge — a rounded-over top edge
+   that catches the light, a shallow cove groove carved
+   across the front face (the ::before channel: dark inside
+   the cut, a lit lip where the bit exits), a small bead
+   ridge under it (the ::after), and a shadowed undercut
+   above the board's drop shadow. Same mahogany grain, same
+   place under every shelf's items — books, comics, Funkos,
+   and Legos all stand on this board (the comics wall's
+   board included, same classes). */
+.library-board {
+  height: 14px;
+  border-top: 1px solid rgba(255, 225, 180, 0.42);
+  border-bottom: 2px solid #1f0d04;
+  border-radius: 0 0 3px 3px;
+  box-shadow:
+    inset 0 2px 1px rgba(255, 225, 180, 0.22),
+    inset 0 -4px 4px rgba(0, 0, 0, 0.5),
+    0 6px 8px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 2;
+}
+.library-board::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(18, 7, 2, 0.8),
+    rgba(18, 7, 2, 0.3) 55%,
+    rgba(255, 225, 180, 0.22)
+  );
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+.library-board::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 225, 180, 0.3),
+    rgba(0, 0, 0, 0.4)
+  );
+}
+.library-plinth {
+  height: 26px;
+  border-radius: 0 0 3px 3px;
+  border: 1px solid var(--wood-edge);
+  border-top: none;
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.library-nameplate {
+  width: 92px;
+  height: 13px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #d9b45f, #a97f2c);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+  color: #3a2a08;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

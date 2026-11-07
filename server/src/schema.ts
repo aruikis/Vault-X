@@ -7,11 +7,11 @@
 // in the UI afterwards; the seed never overwrites them.
 
 import {
-  integer,
-  primaryKey,
-  real,
-  sqliteTable,
-  text,
+integer,
+primaryKey,
+real,
+sqliteTable,
+text,
 } from "drizzle-orm/sqlite-core";
 
 export const cards = sqliteTable("cards", {
@@ -83,6 +83,24 @@ export const financeSnapshots = sqliteTable("finance_snapshots", {
   cards: integer("cards").notNull(),
   /** "export" for a Shiny export snapshot, "daily" for a daily re-pricing point. */
   source: text("source").notNull().default("export"),
+});
+
+/** One row per in-app ownership INCREASE of a Lorcana card (Nov 6, 2026):
+    written by updateOwnership / adjustPocketCount when a card's total
+    owned count goes UP — a stepper tap, a pocket adjustment, a scan add.
+    This is the honest source for Home's Recently Added rail under the
+    New Vision 2.0 Beta theme: the rail shows only cards actually added
+    through the app since this log began. Cards from the Nov 1 2026 Shiny
+    export have no rows here — their add dates were never recorded, and
+    none are invented for them. */
+export const recentAdditions = sqliteTable("recent_additions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** The cards row id that gained copies. */
+  cardId: integer("card_id").notNull(),
+  /** ISO instant the copies were added in the app. */
+  addedAt: text("added_at").notNull(),
+  /** How many copies that increase added. */
+  qty: integer("qty").notNull().default(1),
 });
 
 /** Owned-quantity overrides for sealed products. The sealed catalog
@@ -201,7 +219,8 @@ export const collectorProfile = sqliteTable("collector_profile", {
       its starting line. */
   bio: text("bio"),
   /** The app theme he picked in Settings ("vault" | "light" |
-      "midnight" | "crimson" | "contrast"); null = never picked, so
+      "midnight" | "crimson" | "contrast" | "rainbow" | "jarvis");
+      null = never picked, so
       the default Vault Dark applies. Presentation only — the theme
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),
@@ -1011,6 +1030,54 @@ export const catalogAuditLog = sqliteTable("catalog_audit_log", {
   source: text("source").notNull().default("daily"),
 });
 
+/** Price audit trail (Anthony, Nov 6, 2026 — the Promo Set 3
+    mispricing): the Nov 6, 2026 daily re-pricing wrote wrong-
+    printing prices onto eight owned Promo Set 3 cards (Lenny
+    - Toy Binoculars $1.58 → $266.75, Woody - Jungle Guide
+    $2.62 → $155.33 and $55.15 → $495.44, five more like them),
+    inflating the portfolio and the Top Movers rail until he
+    caught it by eye. Two defenses now write here:
+      kind "quarantine" — saveRepricing refused an incoming
+        price whose one-day jump versus the card's tracked
+        value is implausible (≥4× or ≤¼, and ≥$5); the stored
+        price was NOT changed. One row per refused price.
+      kind "repair" — the nightly auditPrices run found a
+        card whose latest tracked history point is an
+        implausible jump from the point before it, restored
+        the last good value, and deleted the bad point. One
+        row per repaired card (oldValue = the bad value that
+        was removed, newValue = the value restored).
+      kind "run" — one row per completed auditPrices run,
+        carrying the run's scanned / flagged / repaired
+        counts (uid and card fields null).
+    The Settings > Your data & backups price-audit line reads
+    the newest rows. */
+export const priceAuditLog = sqliteTable("price_audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** ISO instant this row was written. */
+  ranAt: text("ran_at").notNull(),
+  /** "quarantine" | "repair" | "run". */
+  kind: text("kind").notNull(),
+  /** Catalog uid of the affected card (null on run rows). */
+  uid: text("uid"),
+  fullName: text("full_name"),
+  printed: text("printed"),
+  /** Quarantine: the tracked value kept. Repair: the bad
+      value removed. */
+  oldValue: real("old_value"),
+  /** Quarantine: the refused incoming value. Repair: the
+      value restored. */
+  newValue: real("new_value"),
+  /** Run rows only: history series scanned / cards flagged /
+      cards repaired. */
+  scanned: integer("scanned"),
+  flagged: integer("flagged"),
+  repaired: integer("repaired"),
+  /** "nightly" for the scheduled audit, "save-guard" for
+      saveRepricing quarantines, "manual" for in-app runs. */
+  source: text("source").notNull().default("nightly"),
+});
+
 /** One point on a single card's value-over-time chart. Seeded from the five
     real Shiny exports (Oct 25 – Nov 1, 2026) with the card's weighted
     average value per copy that day; the daily re-pricing appends a point
@@ -1175,6 +1242,12 @@ export const gameCards = sqliteTable("game_cards", {
   imageUrl: text("image_url"),
   /** Market price in USD where the source publishes one. */
   price: real("price"),
+  /** What the collector paid per copy, USD, when they record
+      it on the item's page (Money Tracker, Nov 5, 2026).
+      Null = cost not recorded — shown honestly as unknown,
+      never estimated. Applies to every owned copy of the
+      printing (opened and sealed alike). */
+  paidValue: real("paid_value"),
   ownedQty: integer("owned_qty").notNull().default(0),
   /** Sealed copies owned (Lego only, migration 0058): Lego
       value turns on the sealed-vs-opened distinction, so a
@@ -1354,6 +1427,31 @@ export const gameSectionArt = sqliteTable(
     pageUrl: text("page_url"),
   },
   (t) => [primaryKey({ columns: [t.game, t.sectionKey] })],
+);
+
+/** Collector-sourced artwork for individual catalog CARDS
+    whose own catalog source is text-only (Anthony, Nov 6,
+    2026: Topps publishes checklists with no images, so he
+    directed the hunt to other sites — collector databases
+    and collector marketplaces). One row per card filled by
+    importCardArt: imageUrl is the front scan of that exact
+    card (also written onto game_cards.imageUrl, which is
+    what the grids and detail pages render), pageUrl the
+    source page it was taken from, source the site's name
+    (e.g. "Trading Card Database", "COMC"). The provenance
+    row is what lets a later pass replace a dead or wrong
+    collector image without ever touching art that came
+    with a catalog itself. */
+export const gameCardArt = sqliteTable(
+  "game_card_art",
+  {
+    game: text("game").notNull(),
+    cardId: integer("card_id").notNull(),
+    imageUrl: text("image_url").notNull(),
+    pageUrl: text("page_url"),
+    source: text("source"),
+  },
+  (t) => [primaryKey({ columns: [t.game, t.cardId] })],
 );
 
 /** The Library's per-collector arrangement (Anthony, Nov 4,

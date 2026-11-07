@@ -477,6 +477,62 @@
       "when": 1793869304663,
       "tag": "0068_ticket_completion_stamps_version_live_stamps_section_art_tumbler_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1793884192062,
+      "tag": "0069_lego_tumbler_awing_sold_research",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1793897020363,
+      "tag": "0070_lego_tumbler_new_photo_alt17",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1793897982140,
+      "tag": "0071_lego_tie_fighter_awing_new_photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1793903484710,
+      "tag": "0072_lego_studio_photos_for_cutouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1793933758057,
+      "tag": "0073_game_card_paid_value",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1793997586811,
+      "tag": "0074_recent_additions_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1794025003659,
+      "tag": "0075_add_price_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1794027024181,
+      "tag": "0076_add_game_card_art",
+      "breakpoints": true
     }
   ]
 }

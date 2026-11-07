@@ -6,10 +6,10 @@ import { GamePanel, type GameKey } from "./games";
 import { useDragReorder } from "./dragReorder";
 import { useSavedOrder } from "./reorderPrefs";
 import {
-  pushWindowState,
-  readNavState,
-  replaceNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+replaceNavState,
+scrubWindowKeys,
 } from "./historyNav";
 import sportsBaseball from "./assets/sports-baseball-tile-opt1.webp";
 import sportsBasketball from "./assets/sports-basketball-tile-opt1.webp";

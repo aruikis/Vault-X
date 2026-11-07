@@ -14,7 +14,8 @@ export type ThemeId =
   | "midnight"
   | "crimson"
   | "contrast"
-  | "rainbow";
+  | "rainbow"
+  | "jarvis";
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -63,6 +64,13 @@ export const THEMES: ThemeMeta[] = [
       "The Trades look, everywhere — deep navy lit by blue and violet glows, with the blue-to-violet gradient on accents.",
     swatches: { bg: "#070a14", surface: "#141a2e", accent: "#9a5cf5" },
   },
+  {
+    id: "jarvis",
+    name: "New Vision 2.0 Beta",
+    blurb:
+      "The UAT redesign as a live theme — deep-blue glow, the big glowing Scan bar on Home, portfolio hero, bubbly rounded glass, and the indigo-to-cyan gradient everywhere.",
+    swatches: { bg: "#070b1a", surface: "#101736", accent: "#818cf8" },
+  },
 ];
 
 export const DEFAULT_THEME: ThemeId = "vault";
@@ -76,7 +84,8 @@ export function isThemeId(value: unknown): value is ThemeId {
     value === "midnight" ||
     value === "crimson" ||
     value === "contrast" ||
-    value === "rainbow"
+    value === "rainbow" ||
+    value === "jarvis"
   );
 }
 
@@ -109,6 +118,7 @@ const THEME_BG: Record<ThemeId, string> = {
   crimson: "#090505",
   contrast: "#000000",
   rainbow: "#0b0f1e",
+  jarvis: "#070b1a",
 };
 
 export function syncThemeColorMeta(theme: ThemeId): void {

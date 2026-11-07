@@ -26,16 +26,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { hapticTick } from "./haptics";
 import {
-  pushWindowState,
-  readNavState,
-  replaceNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+replaceNavState,
+scrubWindowKeys,
 } from "./historyNav";
 import { Turntable } from "./turntable";
 import { SearchScanRow } from "./searchScanRow";
 import { OwnedLocationBar } from "./whereItLives";
 import { PriceAlertBox } from "./priceAlerts";
 import { WatchToggleButton } from "./portfolioTools";
+import { UatSpark, useJarvisVision } from "./uatSpark";
 import {
 Area,
 AreaChart,
@@ -993,6 +994,7 @@ export function ComicSheet({
   comic: Comic;
   onClose: () => void;
 }) {
+  const jarvisVision = useJarvisVision();
   const [photo, setPhoto] = useState<"slabfront" | "label">("slabfront");
   // A refresh with the Price alerts page open over this comic
   // reopens on the Performance tab — the alerts box lives there,
@@ -1254,6 +1256,16 @@ export function ComicSheet({
                 </dd>
               </div>
               <div className="flex items-baseline justify-between gap-3 rounded-lg bg-[var(--bg)] px-3 py-2">
+                <dt className="text-[var(--dim)]">What you paid</dt>
+                <dd className="text-[var(--text)]">
+                  Not recorded
+                  <span className="ml-1.5 text-xs font-normal text-[var(--dim)]">
+                    (no paid amount was ever logged for this slab, so
+                    the Money Tracker counts its cost as unknown)
+                  </span>
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3 rounded-lg bg-[var(--bg)] px-3 py-2">
                 <dt className="text-[var(--dim)]">Checked</dt>
                 <dd className="text-[var(--text)]">{COMICS_VALUE_CHECKED}</dd>
               </div>
@@ -1298,12 +1310,20 @@ export function ComicSheet({
                 invented points. */}
             <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
               <p className="text-sm font-semibold text-[var(--text)]">
-                Value over time
+                {jarvisVision ? "Price history" : "Value over time"}
               </p>
               <div
                 role="img"
                 aria-label={`Chart of this comic's tracked value: one valuation so far, about ${fmtUSD(comic.value, 0)} checked ${COMICS_VALUE_CHECKED}.`}
               >
+                {jarvisVision ? (
+                  /* New Vision 2.0 Beta (exact-match correction,
+                     Nov 5, 2026): the UAT Price history drawing —
+                     the bare cyan Spark at 56. One tracked
+                     valuation draws as the flat line at its own
+                     level, exactly what the single point means. */
+                  <UatSpark points={[comic.value]} h={56} />
+                ) : (
                 <ResponsiveContainer width="100%" height={150}>
                   <AreaChart
                     data={[{ label: "Oct 29", value: comic.value }]}
@@ -1369,6 +1389,7 @@ export function ComicSheet({
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+                )}
               </div>
               <p className="mt-1 text-xs text-[var(--dim)]">
                 One valuation tracked so far — the {COMICS_VALUE_CHECKED}{" "}

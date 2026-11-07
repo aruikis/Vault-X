@@ -15,9 +15,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { hapticTick } from "./haptics";
 import {
-  readNavState,
-  scrubWindowKeys,
-  useWindowHistory,
+readNavState,
+scrubWindowKeys,
+useWindowHistory,
 } from "./historyNav";
 
 export interface VxOption {

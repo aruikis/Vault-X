@@ -1,5 +1,10 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "./api";
+import seedCutout22002 from "./assets/cutouts/cutout-22002.webp";
+import seedCutout23406 from "./assets/cutouts/cutout-23406.webp";
+import seedCutout64974 from "./assets/cutouts/cutout-64974.webp";
+import seedCutout65280 from "./assets/cutouts/cutout-65280.webp";
+import seedCutout65858 from "./assets/cutouts/cutout-65858.webp";
 
 /**
  * Studio-background removal for product photos (Anthony,
@@ -48,12 +53,16 @@ function loadImage(
     // A blackholed connection (a host that accepts and
     // never answers) fires neither load nor error — without
     // a deadline the whole rescue chain hangs on it and
-    // the photo never appears. Seven seconds is generous
-    // for a catalog photo; past it, the proxied copy gets
-    // its turn.
+    // the photo never appears. The deadline is 3.5 seconds
+    // (Anthony, Nov 7, 2026, evening — the Funko and Lego
+    // photos "aren't loading or take forever"): a catalog
+    // photo that has not arrived by then is not coming
+    // quickly, and every extra second here is a second the
+    // shelf stands empty before the proxied copy gets its
+    // turn.
     const timer = setTimeout(
       () => reject(new Error("image load timed out")),
-      7000,
+      3500,
     );
     img.onload = () => {
       clearTimeout(timer);
@@ -443,30 +452,224 @@ export function getCutout(
 }
 
 /**
- * The best display state for a photo: its cutout once one
- * is ready (isCutout true), the original src until then
- * (and forever, when no cutout is possible).
+ * PRE-MADE STORED CUTOUTS (Anthony, Nov 5, 2026 — the
+ * Library speed + white-background fix): a catalog item's
+ * finished cutout, once one exists in app storage
+ * (getStoredCutout), is served straight from the app — no
+ * full-size original download, no live matte, and NEVER
+ * the raw white-background photo as an interim. The live
+ * matte below now runs only for items with no stored
+ * cutout yet, and when it lands the result is PERSISTED
+ * (saveStoredCutout), so every item heals itself into
+ * storage after its first successful cut. The Library
+ * shelf items' cutouts are pre-made and seeded, so the
+ * shelf renders finished figures immediately.
+ */
+const storedCutoutCache = new Map<number, Promise<string | null>>();
+const cutoutPersisted = new Set<number>();
+
+/** The same djb2 hash the server keys stored copies by
+    (funkoHash in server/src/actions.ts), so a bundled seed
+    cutout is only ever used for the exact photo it was cut
+    from — a changed catalog photo misses the seed and
+    falls through to the stored/live paths. */
+function srcHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
+
+/** Bundled pre-made cutouts for the Library shelf pieces
+    (Anthony, Nov 5, 2026): cut offline with this file's
+    exact matte and shipped inside the app, so the shelf
+    renders finished figures on the very first frame — no
+    server round trip, no original download, no matte.
+    Keyed by game_cards id, guarded by the photo hash:
+    22002 Han Solo in the Millennium Falcon, 23406 Dr.
+    Peter Venkman with Firehouse, 64974 TIE Fighter,
+    65280 A-Wing Starfighter (the white-background case —
+    its Brickset photo's rescue fetch fails
+    intermittently, which is why this seed exists),
+    65858 Batmobile Tumbler. */
+const SEED_CUTOUTS: Record<number, { hash: string; url: string }> = {
+  22002: { hash: "1rhhrvq", url: seedCutout22002 },
+  23406: { hash: "2qrwvj", url: seedCutout23406 },
+  64974: { hash: "hu0fd4", url: seedCutout64974 },
+  65280: { hash: "1029otx", url: seedCutout65280 },
+  65858: { hash: "1iqar6x", url: seedCutout65858 },
+};
+
+function seedCutoutFor(
+  id: number | null | undefined,
+  src: string | null,
+): string | null {
+  if (id == null || !src) return null;
+  const seed = SEED_CUTOUTS[id];
+  if (!seed || seed.hash !== srcHash(src)) return null;
+  return seed.url;
+}
+
+function getStoredCutoutUrl(id: number): Promise<string | null> {
+  let pending = storedCutoutCache.get(id);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const r = await api.getStoredCutout({ id });
+        return r.ok ? r.url : null;
+      } catch {
+        return null;
+      }
+    })();
+    storedCutoutCache.set(id, pending);
+  }
+  return pending;
+}
+
+function persistCutout(id: number, dataUrl: string): void {
+  if (cutoutPersisted.has(id)) return;
+  const marker = "base64,";
+  const at = dataUrl.indexOf(marker);
+  if (!dataUrl.startsWith("data:image/png") || at < 0) return;
+  cutoutPersisted.add(id);
+  void api
+    .saveStoredCutout({
+      items: [{ id, pngBase64: dataUrl.slice(at + marker.length) }],
+    })
+    .catch(() => {
+      cutoutPersisted.delete(id);
+    });
+}
+
+/**
+ * Warms the photo pipeline for a set of catalog items
+ * (Anthony, Nov 7, 2026, evening — the Funko/Lego slow-
+ * loading report): the stored-cutout check and, when no
+ * stored copy exists, the live fetch-and-matte all start
+ * NOW, while the collector is still on the page that
+ * loaded the items, instead of each photo's chain only
+ * starting when its tile first renders. Every promise
+ * here is the module's cached one, so the tile that later
+ * asks for the same photo rides the work already in
+ * flight (or done) instead of starting cold. Items with a
+ * bundled seed cutout already render instantly and are
+ * skipped.
+ */
+export function warmGameCutouts(
+  items: { id: number; imageUrl: string | null }[],
+): void {
+  for (const item of items) {
+    if (!item.imageUrl) continue;
+    if (seedCutoutFor(item.id, item.imageUrl)) continue;
+    const src = item.imageUrl;
+    void getStoredCutoutUrl(item.id).then((stored) => {
+      if (!stored) void getCutout(src, item.id);
+    });
+  }
+}
+
+/**
+ * The best display state for a photo. With a catalog id
+ * (proxyId), a PRE-MADE stored cutout wins outright and
+ * the original photo is never shown first (pending is
+ * true while storage is checked — callers render their
+ * placeholder, not the white-background original). With
+ * no stored cutout, the live matte runs as before and its
+ * result is persisted for every later open. Without an
+ * id, the original shows until the live matte lands (and
+ * forever, when no cutout is possible).
  */
 export function useCutoutState(
   src: string | null,
   proxyId?: number | null,
-): { url: string | null; isCutout: boolean } {
+): { url: string | null; isCutout: boolean; pending: boolean } {
   const [state, setState] = useState<{
     url: string | null;
     isCutout: boolean;
-  }>({ url: src, isCutout: false });
+  }>(() => {
+    const seed = seedCutoutFor(proxyId, src);
+    return seed
+      ? { url: seed, isCutout: true }
+      : { url: src, isCutout: false };
+  });
+  const [pending, setPending] = useState(false);
   useEffect(() => {
-    setState({ url: src, isCutout: false });
-    if (!src) return;
     let live = true;
-    void getCutout(src, proxyId).then((cut) => {
-      if (live && cut) setState({ url: cut, isCutout: true });
-    });
+    if (!src) {
+      setState({ url: null, isCutout: false });
+      setPending(false);
+      return;
+    }
+    const seed = seedCutoutFor(proxyId, src);
+    if (seed) {
+      // Bundled pre-made cutout: already the finished
+      // image — no check, no download, no matte.
+      setState({ url: seed, isCutout: true });
+      setPending(false);
+      return;
+    }
+    if (proxyId == null) {
+      setState({ url: src, isCutout: false });
+      setPending(false);
+      void getCutout(src, null).then((cut) => {
+        if (live && cut) setState({ url: cut, isCutout: true });
+      });
+      return () => {
+        live = false;
+      };
+    }
+    const id = proxyId;
+    setState({ url: null, isCutout: false });
+    setPending(true);
+    void (async () => {
+      // The stored-cutout check and the live matte now run
+      // CONCURRENTLY (Anthony, Nov 7, 2026, evening — the
+      // Funko/Lego "taking forever to load" report): they
+      // used to run in series, so every photo waited out a
+      // full server round trip for the storage check before
+      // its download even started, and then the whole
+      // fetch-and-matte chain after that. Both start now;
+      // the stored copy still wins the moment it lands (it
+      // is the pre-made finished image), and a live matte
+      // that beats it shows first and is persisted as
+      // before. The placeholder is held throughout (pending,
+      // url null) — the raw studio photo is NEVER the
+      // interim (Anthony's standing rule, Nov 5, 2026:
+      // finished cutout or clean placeholder, never the
+      // white-background original half-loaded). Only a
+      // photo the matte cannot cut at all (not a studio
+      // sweep, or every fetch failed) falls back to the
+      // original, whole, once both paths have answered.
+      let settled = false;
+      const finish = (
+        url: string,
+        isCut: boolean,
+        persist = false,
+      ) => {
+        if (!live || settled) return;
+        settled = true;
+        setState({ url, isCutout: isCut });
+        if (persist) persistCutout(id, url);
+        setPending(false);
+      };
+      const storedP = getStoredCutoutUrl(id);
+      const cutP = getCutout(src, id);
+      void storedP.then((stored) => {
+        if (stored) finish(stored, true);
+      });
+      void cutP.then((cut) => {
+        if (cut) finish(cut, true, true);
+      });
+      const [stored, cut] = await Promise.all([storedP, cutP]);
+      if (!live) return;
+      if (!stored && !cut) finish(src, false);
+    })();
     return () => {
       live = false;
     };
   }, [src, proxyId]);
-  return state;
+  return { ...state, pending };
 }
 
 /**
@@ -530,10 +733,12 @@ export function CutoutImg({
   }, [shown]);
   // Watchdog, in two stages so a slow-but-working rescue
   // is never latched off early: if the shown photo neither
-  // loads nor errors within seven seconds (a blackholed
-  // host), stage one takes the proxied copy for display;
-  // if there is still nothing seven seconds after that,
-  // the clean placeholder settles it. A tile must never
+  // loads nor errors within four seconds (a blackholed
+  // host — the stage deadline was seven seconds until
+  // Anthony's Nov 7, 2026 slow-loading report), stage one
+  // takes the proxied copy for display; if there is still
+  // nothing four seconds after that, the clean placeholder
+  // settles it. A tile must never
   // sit empty forever on a hung connection — and a
   // finished cutout always overrides a latched failure,
   // because it still may land after the placeholder.
@@ -555,7 +760,7 @@ export function CutoutImg({
       } else {
         setFailed(true);
       }
-    }, 7000);
+    }, 4000);
     return () => clearTimeout(timer);
   }, [shown, loaded, failed, proxyId, rescued, isCutout, watchdogStage]);
   if (failed || !shown) {
@@ -575,6 +780,7 @@ export function CutoutImg({
       src={shown}
       alt={alt}
       loading="lazy"
+      draggable={false}
       ref={(el) => {
         // A cached copy can finish before the load event
         // is observed; never leave a loaded photo invisible.

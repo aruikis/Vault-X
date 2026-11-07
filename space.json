@@ -14,6 +14,24 @@
       "schedule": "daily 07:15 America/Chicago"
     },
     {
+      "action": "auditPrices",
+      "id": "lorcana-binder-nightly-price-audit",
+      "purpose": "Nightly price audit (requested by Anthony Nov 6, 2026 after the Promo Set 3 mispricing): scans every card's tracked price history for an implausible latest one-day jump (≥4x or ≤1/4 and ≥$5), restores the last good value, deletes the bad history point, recomputes a same-day portfolio snapshot the bad point fed, and logs the run plus every repair to the price audit log shown in Settings. Runs after the 06:30 re-pricing so that day's writes are audited the same morning.",
+      "schedule": "daily 07:45 America/Chicago"
+    },
+    {
+      "action": "refreshSectionArt",
+      "id": "lorcana-binder-daily-au-section-art",
+      "purpose": "Daily Topps Alternate Universe section-art sourcing: finds official publisher product artwork for AU set tiles (Disney Topps, Star Wars Topps, Garbage Pail Kids, WWE Topps) still on the placeholder and replaces art rows whose stored source the app can no longer fetch, saving each verified image via importSectionArt. Sets with no official product image anywhere keep the clean placeholder.",
+      "schedule": "daily 06:50 America/Chicago"
+    },
+    {
+      "action": "refreshCardArt",
+      "id": "lorcana-binder-daily-card-art",
+      "purpose": "Daily collector-source card-art hunt (Anthony, Nov 6, 2026: Topps checklists are text-only, so he directed the hunt to other sites, naming Collectr): finds front photos of the exact card for Topps-family cards still missing artwork. Pull source is COMC's photographed card fronts (other marketplaces with standardized front photos when COMC lacks a card); the Trading Card Database is reference-only (confirms a front exists — its terms bar image extraction); Collectr joins via its API only once Anthony's own key is approved and is not used until then. Disney Topps (Chrome Disney first), then Star Wars Topps, Garbage Pail Kids, WWE Topps, and the Topps/Bowman sports catalogs, saving each verified image via importCardArt. Cards no permitted source carries keep the clean placeholder; no URL is ever guessed, and prices/ownership are never touched.",
+      "schedule": "daily 06:55 America/Chicago"
+    },
+    {
       "action": "recordFunkoDailyPoints",
       "id": "lorcana-binder-daily-funko-market",
       "purpose": "Daily Funko market recording: appends today's sold-based value point to each researched Funko figure's value history (eBay sold data) and refreshes its catalog price, so Funko value history accumulates on the same cadence as card re-pricing.",

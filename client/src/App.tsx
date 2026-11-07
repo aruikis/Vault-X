@@ -1,5 +1,5 @@
 import {
-useEffect, useMemo,
+memo, useCallback, useEffect, useMemo,
 useRef,
 useState,
 type ReactNode,
@@ -35,8 +35,8 @@ import { GamePanel, GAME_TITLES } from "./games";
 import { TcgUniversePage } from "./tcgUniverse";
 import { useDragReorder } from "./dragReorder";
 import {
-  ToppsAlternateUniversePage,
-  type AuAreaView,
+ToppsAlternateUniversePage,
+type AuAreaView,
 } from "./toppsUniverse";
 import { SportsCardsPage } from "./sports";
 import {
@@ -70,6 +70,9 @@ import { Turntable } from "./turntable";
 import { OwnedLocationBar } from "./whereItLives";
 import { PriceAlertBox } from "./priceAlerts";
 import { PortfolioTools, WatchToggleButton } from "./portfolioTools";
+import { UatSpark, useJarvisVision } from "./uatSpark";
+import { MoneyTrackerSection } from "./moneyTracker";
+import { InsuranceReportButton } from "./insuranceReport";
 import { ForumsPanel } from "./forums";
 import { VerifiedBadge, VerifiedExplainerSheet } from "./verified";
 import { SidewaysCountDial } from "./countDial";
@@ -79,20 +82,20 @@ GridColsToggle,
 useGridCols,
 } from "./gridCols";
 import {
-  ONLY_MINE_THRESHOLD,
-  OnlyMineToggle,
-  useOnlyMine,
+ONLY_MINE_THRESHOLD,
+OnlyMineToggle,
+useOnlyMine,
 } from "./onlyMine";
 import { VxSelect } from "./vxSelect";
 import {
-  LANGUAGES,
-  applyLanguage,
-  fmtMoneyUSD,
-  initLanguageFromStorage,
-  isLangId,
-  translate,
-  useT,
-  type LangId,
+LANGUAGES,
+applyLanguage,
+fmtMoneyUSD,
+initLanguageFromStorage,
+isLangId,
+translate,
+useT,
+type LangId,
 } from "./i18n";
 import { SearchScanRow } from "./searchScanRow";
 import { SlabCapturePanel, SlabDetailView } from "./gradedScan";
@@ -109,12 +112,12 @@ hapticsEnabled,
 setHapticsEnabled,
 } from "./haptics";
 import {
-  pushWindowState,
-  readNavState,
-  replaceNavState,
-  scrubWindowKeys,
-  useOwnEntryWindow,
-  useWindowHistory,
+pushWindowState,
+readNavState,
+replaceNavState,
+scrubWindowKeys,
+useOwnEntryWindow,
+useWindowHistory,
 } from "./historyNav";
 import { LetterAvatar } from "./letterAvatar";
 import { CutoutImg } from "./cutoutImg";
@@ -131,25 +134,25 @@ type ThemeId,
 } from "./themes";
 import tcgplayerLogo from "./assets/tcgplayer-logo.png";
 import vaultXRingArtwork from "./assets/vault-x-ring-artwork.webp";
-import setLogo1 from "./assets/set-logos/set-1.png";
-import setLogo2 from "./assets/set-logos/set-2.png";
-import setLogo3 from "./assets/set-logos/set-3.png";
-import setLogo4 from "./assets/set-logos/set-4.png";
-import setLogo5 from "./assets/set-logos/set-5.png";
-import setLogo6 from "./assets/set-logos/set-6.png";
-import setLogo7 from "./assets/set-logos/set-7.png";
-import setLogo8 from "./assets/set-logos/set-8.png";
-import setLogo9 from "./assets/set-logos/set-9.png";
-import setLogo10 from "./assets/set-logos/set-10.png";
-import setLogo11 from "./assets/set-logos/set-11.png";
-import setLogo12 from "./assets/set-logos/set-12.png";
-import setLogo13 from "./assets/set-logos/set-13.png";
-import setLogo14 from "./assets/set-logos/set-14.png";
-import promoD23Art from "./assets/set-logos/promo-d23.png";
-import promoIcon from "./assets/set-logos/promo-icon.png";
-import questArtQ1 from "./assets/set-logos/quest-q1.png";
-import questArtQ2 from "./assets/set-logos/quest-q2.png";
-import questArtQ3 from "./assets/set-logos/quest-q3.png";
+import setLogo1 from "./assets/set-logos/set-1.webp";
+import setLogo2 from "./assets/set-logos/set-2.webp";
+import setLogo3 from "./assets/set-logos/set-3.webp";
+import setLogo4 from "./assets/set-logos/set-4.webp";
+import setLogo5 from "./assets/set-logos/set-5.webp";
+import setLogo6 from "./assets/set-logos/set-6.webp";
+import setLogo7 from "./assets/set-logos/set-7.webp";
+import setLogo8 from "./assets/set-logos/set-8.webp";
+import setLogo9 from "./assets/set-logos/set-9.webp";
+import setLogo10 from "./assets/set-logos/set-10.webp";
+import setLogo11 from "./assets/set-logos/set-11.webp";
+import setLogo12 from "./assets/set-logos/set-12.webp";
+import setLogo13 from "./assets/set-logos/set-13.webp";
+import setLogo14 from "./assets/set-logos/set-14.webp";
+import promoD23Art from "./assets/set-logos/promo-d23.webp";
+import promoIcon from "./assets/set-logos/promo-icon.webp";
+import questArtQ1 from "./assets/set-logos/quest-q1.webp";
+import questArtQ2 from "./assets/set-logos/quest-q2.webp";
+import questArtQ3 from "./assets/set-logos/quest-q3.webp";
 import questTileQ1 from "./assets/set-logos/quest-q1-keyart.webp";
 import questTileQ2 from "./assets/set-logos/quest-q2-keyart.webp";
 import questTileQ3 from "./assets/set-logos/quest-q3-keyart.webp";
@@ -601,7 +604,14 @@ function CompositeArt({
   );
 }
 
-function Pocket({
+// Speed pass (Nov 5, 2026): Pocket is memoized — a section
+// renders up to a few hundred pockets inside the root component,
+// whose state changes constantly (search text, sheets, badges).
+// With a stable onOpen (openCard is a useCallback in the root)
+// and the section query's structurally shared card objects, a
+// root re-render now skips every pocket whose card didn't
+// actually change instead of re-running all of them.
+const Pocket = memo(function Pocket({
   card,
   onOpen,
 }: {
@@ -832,7 +842,7 @@ function Pocket({
       </div>
     </div>
   );
-}
+});
 
 /** The honed-in card on its turntable (Anthony's Courtyard-style
     reference photo): the card hovers above a soft oval pedestal and
@@ -1567,6 +1577,7 @@ function CardValueChart({
 }: {
   history: CardDetail["priceHistory"];
 }) {
+  const jarvisVision = useJarvisVision();
   if (history.length === 0) {
     return (
       <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -1577,6 +1588,36 @@ function CardValueChart({
           No tracked prices yet for this card — its value-over-time
           chart starts with the next daily re-pricing.
         </p>
+      </div>
+    );
+  }
+  // New Vision 2.0 Beta (exact-match correction, Nov 5, 2026):
+  // the graph IS the UAT's Price history block — the bare cyan
+  // Spark at the UAT's card-detail height (56), a Low/High
+  // footer, nothing else. Real tracked points, UAT drawing.
+  if (jarvisVision) {
+    const values = history.map((p) => p.value);
+    return (
+      <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+        <p className="text-sm font-semibold text-[var(--text)]">
+          Price history
+        </p>
+        <div
+          role="img"
+          aria-label={`Line chart of this card's value per copy from ${history[0]?.label} to ${history[history.length - 1]?.label}. Latest value ${fmtUSD(history[history.length - 1]?.value ?? 0)} per copy.`}
+        >
+          <UatSpark points={values} h={56} />
+        </div>
+        <div className="flex justify-between text-[11px] text-[var(--dim)]">
+          <span>
+            {history.length} point{history.length === 1 ? "" : "s"} ·
+            tracked series
+          </span>
+          <span>
+            Low {fmtUSD(Math.min(...values))} · High{" "}
+            {fmtUSD(Math.max(...values))}
+          </span>
+        </div>
       </div>
     );
   }
@@ -1851,9 +1892,64 @@ function MoverThumb({
   );
 }
 
+/** One card on Home's Recently Added rail (Nov 6, 2026 —
+    UAT-match rebuild): the UAT rail's card shape — real card
+    art across the top, the name, then set · current unit
+    value — fed by the additions log (cards actually added
+    through the app; see getRecentlyAdded). Renders only under
+    the New Vision 2.0 Beta theme. */
+function RecentRailCard({
+  item,
+  onOpen,
+}: {
+  item: ApiResponse<typeof api, "getRecentlyAdded">["items"][number];
+  onOpen: () => void;
+}) {
+  const { url } = useCachedArt(item.cardId, "grid", true);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open ${item.name}`}
+      className="w-32 shrink-0 overflow-hidden rounded-[20px] border text-left"
+      style={{ borderColor: "#2a3570", background: "#101736" }}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          className="h-20 w-full object-cover object-top"
+        />
+      ) : (
+        <span
+          className="block h-20 w-full"
+          style={{ background: "#182250" }}
+          aria-hidden="true"
+        />
+      )}
+      <span className="block p-2.5">
+        <span className="line-clamp-2 block text-xs font-bold leading-tight text-[var(--text)]">
+          {item.name}
+        </span>
+        <span
+          className="mt-1 block truncate text-[11px]"
+          style={{ color: "#9aa5d6" }}
+        >
+          {item.groupName}
+          {item.unitValue != null ? ` · ${fmtUSD(item.unitValue)}` : ""}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 /** Collection Distribution card — the breakdown of the grand
     collection total into Ungraded Cards / Sealed Products /
-    Graded Comics with percentage bars. It lived on Home until
+    Graded Comics / Legos / Funko with percentage bars (Legos
+    and Funko joined Nov 7, 2026 at Anthony's direction — each
+    its own row with its owned value worked into the total,
+    never lumped in with the cards). It lived on Home until
     Nov 3, 2026 (late), when Anthony moved it to the Portfolio:
     off Home entirely, no copy or summary left behind, and in
     Portfolio it sits between the value-over-time chart and the
@@ -1929,11 +2025,14 @@ function CollectionDistributionCard({
     collection value is the GRAND total across everything cataloged —
     the same rule as Home (Anthony's direction, Nov 2, 2026): the
     Lorcana finance total (binder cards plus sealed products, tokens,
-    and puzzle pieces) PLUS his graded comics at their recorded values.
-    Paid / gain / loss stay Lorcana scope — no purchase amounts are
-    recorded for the comics — and the value-over-time chart keeps
-    tracking the Lorcana export history, since the comics have only
-    one recorded valuation. */
+    and puzzle pieces) PLUS his graded comics at their recorded values
+    PLUS his owned Legos and Funkos at their tracked catalog values
+    (Nov 7, 2026 — the Collection Distribution expansion: each gets
+    its own row below, worked into this same total). Paid / gain /
+    loss stay Lorcana scope — no purchase amounts are recorded for
+    the comics — and the value-over-time chart keeps tracking the
+    Lorcana export history, since the comics have only one recorded
+    valuation and Lego/Funko values are current snapshots. */
 function FinancePanel({
   finance,
   onOpenCard,
@@ -1943,6 +2042,7 @@ function FinancePanel({
   onOpenCard: (id: number) => void;
   onOpenSealed: (name: string) => void;
 }) {
+  const jarvisVision = useJarvisVision();
   const refresh = useMutation({
     mutationFn: (force: boolean) => api.refreshFinance({ force }),
   });
@@ -1950,9 +2050,15 @@ function FinancePanel({
   const netPct =
     finance.paid > 0 ? (finance.net / finance.paid) * 100 : 0;
   // Grand total across everything cataloged (same rule as Home):
-  // Lorcana finance total + graded comics.
+  // Lorcana finance total + graded comics + owned Legos + owned
+  // Funkos (Nov 7, 2026 — the last two are live server sums over
+  // the game catalog: tracked catalog price × owned copies,
+  // $0 where no price is tracked, never invented).
   const comicsValue = COMICS_TOTAL_VALUE;
-  const grandValue = finance.value + comicsValue;
+  const legoValue = finance.legoValue ?? 0;
+  const funkoValue = finance.funkoValue ?? 0;
+  const grandValue =
+    finance.value + comicsValue + legoValue + funkoValue;
 
   // Portfolio redesign (Anthony, Nov 3, 2026 — "one scroll, one
   // selector, everything in sync", the approved layout from the
@@ -2101,8 +2207,227 @@ function FinancePanel({
     </ol>
   );
 
+  // Section blocks shared by both Portfolio layouts (Nov 6,
+  // 2026 — UAT-match rebuild): under New Vision 2.0 Beta the
+  // page composes them in the UAT Portfolio's order (hero,
+  // stat boxes, Money Tracker, Track & Research, Collection
+  // Distribution, then Movers and Most Valuable); every other
+  // theme keeps the long-standing order and hero blocks below.
+  const toolsEl = (
+    <PortfolioTools
+      onOpenCard={onOpenCard}
+      onOpenSealed={onOpenSealed}
+      sealedPhotoFor={(name) => SEALED_PHOTOS[name] ?? sealedBoosterFront}
+      comicCoverFor={(id) => COMICS.find((c) => c.id === id)?.cover}
+    />
+  );
+  const distEl = (
+    <CollectionDistributionCard
+      rows={[
+        {
+          label: "Ungraded Cards",
+          amount: finance.value - finance.sealedValue,
+        },
+        { label: "Sealed Products", amount: finance.sealedValue },
+        { label: "Graded Comics", amount: comicsValue },
+        // Legos + Funko rows (Anthony, Nov 7, 2026): each
+        // collection gets its own row with its owned value,
+        // worked into the grand total above — the rows always
+        // render, so a collection whose tracked value is $0
+        // so far still shows its place in the breakdown.
+        { label: "Legos", amount: legoValue },
+        { label: "Funko", amount: funkoValue },
+      ]}
+      total={grandValue}
+      fmtAmount={fmtM}
+    />
+  );
+  const moneyEl = (
+    <MoneyTrackerSection
+      fmtM={fmtM}
+      sealedPhotoFor={(name) => SEALED_PHOTOS[name]}
+      comicPhotoFor={(id) => {
+        const comic = COMICS.find((c) => c.id === id);
+        return comic?.slab ?? comic?.cover;
+      }}
+    />
+  );
+  // UAT Portfolio hero figures (Nov 6, 2026): the change over
+  // the whole tracked history, the way the UAT's sample hero
+  // footed its curve (window left, change right).
+  const portFirst = finance.history[0];
+  const portLast = finance.history[finance.history.length - 1];
+  const portPct =
+    portFirst && portLast && portFirst.value > 0
+      ? ((portLast.value - portFirst.value) / portFirst.value) * 100
+      : 0;
+
   return (
-    <div className="mt-4 space-y-6">
+    <div className={jarvisVision ? "mt-4 space-y-4" : "mt-4 space-y-6"}>
+      {jarvisVision ? (
+        <>
+          {/* The UAT Portfolio (Nov 6, 2026 — UAT-match
+              rebuild): title with the hide-values eye beside
+              it, then the hero — TOTAL VALUE label, the big
+              total, the bare cyan Spark at the UAT Portfolio
+              height (64) on the real tracked history, and the
+              UAT footer (tracked-from left, change right) —
+              then the three stat boxes, Money Tracker, Track
+              & Research, and Collection Distribution in the
+              UAT's order. Movers and Most Valuable continue
+              below in their live sections. The Re-price
+              buttons the live hero carries stay reachable as
+              the small pill row under the stat boxes. */}
+          <div className="flex items-center justify-between">
+            <h1 className="font-album text-2xl font-extrabold text-[var(--text)]">
+              Portfolio
+            </h1>
+            <button
+              type="button"
+              onClick={() => setHideVals((v) => !v)}
+              aria-label={hideVals ? "Show values" : "Hide values"}
+              aria-pressed={hideVals}
+              className="flex h-10 w-10 items-center justify-center rounded-full border text-[var(--text)]"
+              style={{ borderColor: "#2a3570", background: "#101736" }}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z" />
+                <circle cx="12" cy="12" r="3" />
+                {hideVals ? <path d="M4 4l16 16" /> : null}
+              </svg>
+            </button>
+          </div>
+          <section
+            aria-label="Collection value summary"
+            className="relative overflow-hidden rounded-[28px] border p-5"
+            style={{
+              background: "linear-gradient(150deg, #182250, #101736)",
+              borderColor: "#2a3570",
+            }}
+          >
+            <p
+              className="text-xs font-bold tracking-widest"
+              style={{ color: "#9aa5d6" }}
+            >
+              TOTAL VALUE
+            </p>
+            <p className="font-album mt-1 text-4xl font-black tabular-nums text-[var(--text)]">
+              {fmtM(grandValue)}
+            </p>
+            <div className="mt-2">
+              <UatSpark
+                points={finance.history.map(
+                  (h) => h.value + comicsValue + legoValue + funkoValue,
+                )}
+                h={64}
+              />
+            </div>
+            <div
+              className="flex justify-between text-[11px]"
+              style={{ color: "#9aa5d6" }}
+            >
+              <span>
+                Tracked from{" "}
+                {portFirst
+                  ? portFirst.label.replace(/ \(.*\)$/, "")
+                  : "Oct 25, 2026"}
+              </span>
+              <span
+                style={{ color: portPct >= 0 ? "#34d399" : "#fb7185" }}
+              >
+                {portPct >= 0 ? "▲" : "▼"} {Math.abs(portPct).toFixed(2)}%
+              </span>
+            </div>
+          </section>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {[
+              {
+                l: "Cards",
+                v: hideVals ? "••" : finance.cards.toLocaleString(),
+                color: undefined as string | undefined,
+              },
+              {
+                l: "Paid",
+                v: fmtM(finance.paid),
+                color: undefined as string | undefined,
+              },
+              {
+                l: "Net",
+                v: `${finance.net < 0 ? "−" : "+"}${fmtM(Math.abs(finance.net))}`,
+                color: finance.net >= 0 ? "#34d399" : "#fb7185",
+              },
+            ].map((s) => (
+              <div
+                key={s.l}
+                className="rounded-[20px] border py-3"
+                style={{ background: "#101736", borderColor: "#2a3570" }}
+              >
+                <p className="text-[11px]" style={{ color: "#9aa5d6" }}>
+                  {s.l}
+                </p>
+                <p
+                  className="font-album font-extrabold tabular-nums text-[var(--text)]"
+                  style={s.color ? { color: s.color } : undefined}
+                >
+                  {s.v}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                disabled={refresh.isPending}
+                onClick={() => refresh.mutate(false)}
+                className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                style={{ borderColor: "#2a3570", color: "#c9d8ff" }}
+              >
+                {refresh.isPending ? "Starting…" : "Re-price now"}
+              </button>
+              <button
+                type="button"
+                disabled={refresh.isPending}
+                onClick={() => refresh.mutate(true)}
+                aria-label="Reprice Force — start a fresh re-pricing run even if today's already ran"
+                className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                style={{ borderColor: "#2a3570", color: "#c9d8ff" }}
+              >
+                Reprice Force
+              </button>
+            </div>
+            {refresh.isSuccess ? (
+              <p
+                className="mt-1 text-right text-xs"
+                style={{ color: "#9aa5d6" }}
+              >
+                {refresh.data.started
+                  ? "Daily re-pricing started in the background — totals and a new chart point land when it finishes."
+                  : "A re-pricing run is already in progress."}
+              </p>
+            ) : null}
+            {refresh.isError ? (
+              <p className="mt-1 text-right text-xs text-red-300">
+                Re-pricing couldn&rsquo;t start — try again.
+              </p>
+            ) : null}
+          </div>
+          {moneyEl}
+          {toolsEl}
+          {distEl}
+        </>
+      ) : (
+        <>
       {/* Page title in a clean bordered window (Anthony, Nov 3,
           2026), matching the bordered section headers he has
           been approving (Sealed intro, Social intro/Friends) —
@@ -2355,6 +2680,43 @@ function FinancePanel({
             ))}
           </div>
         </div>
+        {/* New Vision 2.0 Beta (exact-match correction, Nov 5,
+            2026): the graph IS the UAT's — the bare cyan Spark
+            at the UAT Portfolio height (64) with the UAT's own
+            footer shape (window on the left, the period change
+            on the right), no fill, no grid, no axes. The range
+            pills above still drive the window, the header
+            change line, and the Movers, exactly as before;
+            the Paid-line toggle belongs to the area chart and
+            does not render in this theme. */}
+        {jarvisVision ? (
+          <div className="mt-2">
+            <div
+              role="img"
+              aria-label={`Line chart of Lorcana collection market value for the ${range} range. Latest value ${fmtM(finance.value)}.`}
+            >
+              <UatSpark
+                points={chartData.map((h) => h.value)}
+                h={64}
+              />
+            </div>
+            <div className="flex justify-between text-[11px] text-[#9aa5d6]">
+              <span>
+                {rangeData?.clamped
+                  ? `Tracked from ${rangeData.baselineLabel}`
+                  : `${RANGE_PILLS.find((p) => p.key === range)?.label ?? range} · tracked history`}
+              </span>
+              <span
+                style={{
+                  color: grandDeltaPct >= 0 ? "#34d399" : "#fb7185",
+                }}
+              >
+                {grandDeltaPct >= 0 ? "▲" : "▼"}{" "}
+                {Math.abs(grandDeltaPct).toFixed(2)}%
+              </span>
+            </div>
+          </div>
+        ) : (
         <div className="mt-2">
           <div
             role="img"
@@ -2453,7 +2815,8 @@ function FinancePanel({
               History starts Oct 25, 2026 (your first Shiny export);
               longer ranges measure from that day until daily points
               build up. The chart tracks Lorcana only — the graded
-              comics are counted in the total above.
+              comics, Legos, and Funkos are counted in the total
+              above.
             </p>
             <button
               type="button"
@@ -2470,6 +2833,7 @@ function FinancePanel({
             </button>
           </div>
         </div>
+        )}
       </section>
 
       {/* Track & Research (Anthony, Nov 4, 2026, approved
@@ -2480,30 +2844,27 @@ function FinancePanel({
           call after seeing v1.76 live). The Re-price pills
           stay icon-free; the icons live only inside this
           dropdown's menu. */}
-      <PortfolioTools
-        onOpenCard={onOpenCard}
-        onOpenSealed={onOpenSealed}
-        sealedPhotoFor={(name) => SEALED_PHOTOS[name] ?? sealedBoosterFront}
-        comicCoverFor={(id) => COMICS.find((c) => c.id === id)?.cover}
-      />
+      {toolsEl}
 
       {/* Collection Distribution — moved here from Home
           (Anthony, Nov 3, 2026, late; final order walked
           through by him: graph, then this, then the Movers).
           Same rows and bars it had on Home, with this page's
           hide-values-aware money formatting. */}
-      <CollectionDistributionCard
-        rows={[
-          {
-            label: "Ungraded Cards",
-            amount: finance.value - finance.sealedValue,
-          },
-          { label: "Sealed Products", amount: finance.sealedValue },
-          { label: "Graded Comics", amount: comicsValue },
-        ]}
-        total={grandValue}
-        fmtAmount={fmtM}
-      />
+      {distEl}
+
+      {/* Money Tracker (Anthony, Nov 5, 2026 — the
+          competitor-gap review's #1, approved "Add it."):
+          ADDED here inside Portfolio, replacing nothing —
+          cost vs value with honest unknown-cost handling, the
+          Sold ledger on its Held/Sold flip, and the Insurance
+          & Estate PDF button at its foot. The hero, the
+          Portfolio Value graph, Track & Research, Distribution,
+          Movers, and Most Valuable above and below are exactly
+          as they were. */}
+      {moneyEl}
+        </>
+      )}
 
       {/* Movers — top gainers/losers among YOUR cards for the
           selected range, under the Collection Distribution.
@@ -3688,9 +4049,30 @@ function OwnProfilePage({
   );
   const badgesSheet = useHistorySheet("lorcanaBadges", setBadgesOpen,
   );
-  const decksSheet = useHistorySheet("lorcanaDecks", setDecksOpen,
+  // My Decks takes its OWN pushed entry above the profile
+  // (Anthony, Nov 5, 2026, later — the decks back bug: from
+  // a deck's card list he backed to My Decks, and the next
+  // Back landed on Home instead of this profile). The plain
+  // sheet hook LAYERS into the profile's entry — the profile
+  // already holds the one window slot (vxWin) — so decks and
+  // profile shared a single history entry and one device
+  // Back popped both at once, closing the profile with the
+  // decks and landing on Home. The own-entry variant (the
+  // mail-over-Inbox pattern from the Nov 4 back audit)
+  // always pushes: Home entry + profile entry + decks entry,
+  // and a deck opened from the shelves pushes its detail
+  // entry above that, so Back peels one screen at a time —
+  // deck → My Decks → profile → Home. The { openSheet,
+  // closeSheet } adapter keeps every existing call site.
+  const decksWin = useOwnEntryWindow(
+    "lorcanaDecks",
+    setDecksOpen,
     readHistoryState()?.lorcanaDecks === true,
   );
+  const decksSheet = {
+    openSheet: decksWin.open,
+    closeSheet: decksWin.close,
+  };
   // Refresh-in-place: keep the stored copy in step.
   useEffect(() => {
     writeStoredProfileNav({ decksOpen });
@@ -3726,6 +4108,25 @@ function OwnProfilePage({
   useEffect(() => {
     writeStoredProfileNav({ libraryOpen });
   }, [libraryOpen]);
+  // Quick-action adoption (Nov 6, 2026 — UAT-match rebuild):
+  // when this page mounts with My Decks or the Library already
+  // seeded open from the stored nav copy but WITHOUT their
+  // history entries — the Home Quick Actions path, which wrote
+  // the stored copy and opened the profile — adopt the entry
+  // now, so one Back still peels just that page back to the
+  // profile instead of closing the whole stack to Home. On a
+  // refresh restore the surviving entry already carries the
+  // key, so this does nothing.
+  useEffect(() => {
+    if (decksOpen && readHistoryState()?.lorcanaDecks !== true) {
+      decksSheet.openSheet();
+    }
+    if (libraryOpen && readHistoryState()?.lorcanaLibrary !== true) {
+      librarySheet.openSheet();
+    }
+    // Mount-only: adoption is decided by the first render's seeds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The flip-through binder (Anthony, Nov 3, 2026,
   // ~11:52 AM): opening a Lorcana spine in the Library
   // opens the table-scene FlipBinder OVER the Library. Its
@@ -3915,6 +4316,54 @@ function OwnProfilePage({
     ...funkoLibraryEntries,
     ...legoLibraryEntries,
   ];
+  // Library shelf load states (Anthony, Nov 7, 2026 — his
+  // live report that in the Library "none of the comics are
+  // loading along with the Funko or Legos"): the Funko and
+  // Lego shelves are built from the owned-items queries
+  // above, and until now a query that was still in flight —
+  // or one that failed outright (a stalled action call, a
+  // busy server) — silently produced an EMPTY shelf: no
+  // sign, no message, the family simply missing from the
+  // Library, indistinguishable from owning nothing. Each
+  // shelf now carries its query's state into the Library
+  // page, which keeps the signed shelf standing with a
+  // loading note, or a "couldn't load" note with a working
+  // Try again that refetches that shelf's own query. A
+  // shelf with items in hand renders the items as always;
+  // the state only ever shows while there is nothing to
+  // show yet, so a slow refresh never blanks a full shelf.
+  const libraryShelfStatus: Partial<
+    Record<
+      "funko" | "lego",
+      { state: "loading" | "error"; onRetry: () => void }
+    >
+  > = {};
+  if (funkoOwnedQ.data == null) {
+    if (funkoOwnedQ.isError) {
+      libraryShelfStatus.funko = {
+        state: "error",
+        onRetry: () => void funkoOwnedQ.refetch(),
+      };
+    } else if (funkoOwnedQ.isPending) {
+      libraryShelfStatus.funko = {
+        state: "loading",
+        onRetry: () => void funkoOwnedQ.refetch(),
+      };
+    }
+  }
+  if (legoOwnedQ.data == null) {
+    if (legoOwnedQ.isError) {
+      libraryShelfStatus.lego = {
+        state: "error",
+        onRetry: () => void legoOwnedQ.refetch(),
+      };
+    } else if (legoOwnedQ.isPending) {
+      libraryShelfStatus.lego = {
+        state: "loading",
+        onRetry: () => void legoOwnedQ.refetch(),
+      };
+    }
+  }
   const shelfBinderGroups = (binderQ.data?.groups ?? []).filter(
     (g) => g.kind !== "puzzle",
   );
@@ -4123,7 +4572,10 @@ function OwnProfilePage({
   });
   const grandValue =
     finance.data != null
-      ? finance.data.value + COMICS_TOTAL_VALUE
+      ? finance.data.value +
+        COMICS_TOTAL_VALUE +
+        (finance.data.legoValue ?? 0) +
+        (finance.data.funkoValue ?? 0)
       : null;
   const collected =
     finance.data != null ? finance.data.cards + COMICS.length : null;
@@ -4476,6 +4928,7 @@ function OwnProfilePage({
             ownerName={username}
             entries={libraryEntries}
             arrangeable
+            shelfStatus={libraryShelfStatus}
             comicsWall={<LibraryComicWall />}
             onClose={librarySheet.closeSheet}
             onOpenEntry={(entry) => {
@@ -4574,7 +5027,17 @@ function CollectorIdCard({
   envelope,
   orderMail,
   adminBadge,
+  jarvisVision,
 }: {
+  /** New Vision 2.0 Beta (Nov 6, 2026 — UAT-match rebuild):
+      while that theme is active this card renders the UAT's
+      greeting header instead of the compact corner chip —
+      "Good evening," over the big name, the Admin and Inbox
+      buttons as circles beside it, and the @handle · code
+      pill with the yellow Update pill under it. Every tap
+      target is the same live one (profile, Admin window,
+      Inbox, update flow); only the arrangement is the UAT's. */
+  jarvisVision?: boolean;
   onOpenCard?: (cardId: number) => void;
   onOpenSealed?: (name: string) => void;
   /** Opens a binder section (or "comics") from the own
@@ -4843,6 +5306,24 @@ function CollectorIdCard({
     return () =>
       window.removeEventListener("vaultx:go-home", onGoHome);
   }, []);
+  // Home Quick Actions (Nov 6, 2026 — UAT-match rebuild): the
+  // UAT Home's My Decks and Library quick actions open those
+  // pages, which live above this profile. The quick action
+  // first records which page it wants in the stored profile
+  // nav (the same copy a refresh restores from), then fires
+  // this event; opening the profile mounts OwnProfilePage,
+  // which seeds the requested page open from that stored copy.
+  useEffect(() => {
+    const onOpenProfileEvent = () => openProfile();
+    window.addEventListener("vaultx:open-profile", onOpenProfileEvent);
+    return () =>
+      window.removeEventListener(
+        "vaultx:open-profile",
+        onOpenProfileEvent,
+      );
+    // openProfile is stable in practice (refs + state setters).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Refresh-in-place: keep the stored copy in step so a
   // pull-to-refresh reload reopens the ID view / profile
   // exactly where he was standing (and leaves them closed
@@ -4856,6 +5337,16 @@ function CollectorIdCard({
 
   const data = profile.data;
   const username = data?.username ?? "…";
+  // UAT greeting (Nov 6, 2026): the UAT header opens with a
+  // time-of-day greeting over the big name. The hour is the
+  // viewer's own, read at render.
+  const greetingHour = new Date().getHours();
+  const greeting =
+    greetingHour < 12
+      ? "Good morning"
+      : greetingHour < 18
+        ? "Good afternoon"
+        : "Good evening";
   // The photo save/remove mutations that used to live here
   // moved to OwnProfilePage with the photo editor itself
   // (Anthony, Nov 3, 2026, ~11:51 PM).
@@ -4898,6 +5389,85 @@ function CollectorIdCard({
           instead: tapping it opens a dress-rehearsal walkthrough
           of the whole update flow, and the test note is gone for
           good once he finishes it. */}
+      {jarvisVision ? (
+        /* The UAT greeting header (Nov 6, 2026 — UAT-match
+           rebuild): "Good evening," in dim over the big name;
+           the Admin shield and the Inbox mail ride as 40px
+           circles beside the name (their live buttons, shaped
+           by the .uat-head-circle rules in theme.css; the
+           ticket envelope joins them when it has something to
+           show); below, the @handle pill — verified badge and
+           Collector ID on one line, no photo, no QR thumbnail,
+           the UAT's pill — opening the same profile, and the
+           yellow Update pill when an update (or its one-time
+           test) is waiting. */
+        <div>
+          <p className="text-sm" style={{ color: "#9aa5d6" }}>
+            {greeting},
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h1 className="font-album mr-1 text-3xl font-black leading-none text-[var(--text)]">
+              {username}
+            </h1>
+            {adminBadge ? (
+              <span className="uat-head-circle">{adminBadge}</span>
+            ) : null}
+            {orderMail ? (
+              <span className="uat-head-circle">{orderMail}</span>
+            ) : null}
+            {envelope ? (
+              <span className="uat-head-circle">{envelope}</span>
+            ) : null}
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={openProfile}
+              disabled={!data}
+              aria-label={`Your profile: ${username}, ${data?.collectorCode ?? ""}. Tap to open your profile page.`}
+              className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold text-[var(--text)] disabled:opacity-60"
+              style={{ borderColor: "#2a3570", background: "#101736" }}
+            >
+              @{username}
+              <VerifiedBadge
+                collectorCode={data?.collectorCode}
+                username={username}
+                className="h-4 w-4"
+              />
+              <span style={{ color: "#9aa5d6" }}>
+                · {data?.collectorCode ?? "Generating…"}
+              </span>
+            </button>
+            {updateAvailable ? (
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  onOpenUpdate?.();
+                }}
+                aria-label="Update available — tap to read what's new and choose to update"
+                className="shrink-0 rounded-full px-2.5 py-1.5 text-[11px] font-black transition active:scale-[0.97]"
+                style={{ background: "#facc15", color: "#1a1400" }}
+              >
+                Update
+              </button>
+            ) : showUpdateTest ? (
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  onOpenUpdateTest?.();
+                }}
+                aria-label="Test of the update note — tap to walk through the update flow"
+                className="shrink-0 rounded-full px-2.5 py-1.5 text-[11px] font-black transition active:scale-[0.97]"
+                style={{ background: "#facc15", color: "#1a1400" }}
+              >
+                Update
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
       <div className="flex w-full items-center gap-2">
         <div className="flex items-center gap-1">
           {adminBadge ?? null}
@@ -4962,6 +5532,7 @@ function CollectorIdCard({
           </button>
         </div>
       </div>
+      )}
 
       {/* Full ID view: big photo, username, code, and a large
           scannable QR. Display-only (Anthony, Nov 3, 2026,
@@ -5153,6 +5724,11 @@ function CollectorIdCard({
     sealed), Sealed Products, and Graded Comics, so the three rows
     sum to the headline total. Collections with nothing cataloged
     yet (Pokémon, Magic, Lego, Star Wars Unlimited) contribute $0.
+    Nov 7, 2026: the grand total — here and in Portfolio — also
+    counts his owned Legos and Funkos at their tracked catalog
+    values (getFinance's legoValue / funkoValue), and the
+    Distribution card carries a row for each, so its five rows
+    still sum to the headline total.
     Triggered price alerts sit at the very top as a
     deep-red oval banner (deeper, slightly dimmer red at his
     request). */
@@ -6447,8 +7023,23 @@ function HomePanel({
   onOpenUpdateTest,
   onOpenChangeRequests,
   onOpenOrderMail,
+  jarvisVision,
+  onScanVision,
+  onOpenTrade,
 }: {
+  /** UAT Quick Actions (Nov 6, 2026): the Trade quick action
+      on Home under New Vision 2.0 Beta goes to the Social tab,
+      the UAT Trade view's live home. */
+  onOpenTrade?: () => void;
   value: number | null;
+  /** New Vision 2.0 Beta theme active (Anthony, Nov 5, 2026):
+      Home carries the UAT redesign's signature element — the
+      big glowing Scan bar at the top — only while that theme
+      is picked; every other theme's Home is untouched. The
+      rest of the Vision (hero pill, movers ticker, tile grid)
+      is theme.css presentation under the same theme. */
+  jarvisVision?: boolean;
+  onScanVision?: () => void;
   /** The condensed TCG Universe tile (Nov 4, 2026): the
       four TCG games live behind it now. */
   onOpenTcgUniverse: () => void;
@@ -6568,6 +7159,19 @@ function HomePanel({
       writeHomeSnapshotSection("funko", funkoCatalog.data);
   }, [funkoCatalog.data]);
   const [exampleOpen, setExampleOpen] = useState(false);
+  // UAT hero eye (Nov 6, 2026 — UAT-match rebuild): the UAT
+  // Portfolio hero carries a hide-values eye at its top right;
+  // under New Vision 2.0 Beta the Home hero does too, masking
+  // the total / Paid / Net / Cards figures while it's on.
+  const [heroHide, setHeroHide] = useState(false);
+  // Recently Added rail (Nov 6, 2026): real in-app additions
+  // only (see getRecentlyAdded) — fetched only while the New
+  // Vision 2.0 Beta theme is active, the only place it renders.
+  const recentlyAdded = useQuery({
+    queryKey: ["recentlyAdded"],
+    queryFn: () => api.getRecentlyAdded({}),
+    enabled: jarvisVision === true,
+  });
   // Back-gesture trap (Anthony, Nov 4, 2026 — the app-wide
   // rule: an open window eats the phone's Back first). The
   // example-alert explainer was plain state; it now uses the
@@ -7071,7 +7675,17 @@ function HomePanel({
     void queryClient.invalidateQueries({ queryKey: ["priceAlerts"] });
   };
   const comicsValue = COMICS_TOTAL_VALUE;
-  const totalValue = value != null ? value + comicsValue : null;
+  // Grand total (same rule as Portfolio, Nov 7, 2026): Lorcana
+  // finance total + graded comics + owned Legos + owned Funkos
+  // at their tracked catalog values (from the shared finance
+  // payload; $0 while a snapshot predates those fields).
+  const totalValue =
+    value != null
+      ? value +
+        comicsValue +
+        (homeFinance.data?.legoValue ?? 0) +
+        (homeFinance.data?.funkoValue ?? 0)
+      : null;
   // FIRST-PAINT COORDINATION (Anthony, Nov 4, 2026): Home
   // used to populate piecemeal — the portfolio pill, Top
   // Movers, and Your Collections popping in one at a time
@@ -7134,8 +7748,44 @@ function HomePanel({
       </div>
     );
   }
+  // The Collector ID element, defined once and placed by
+  // theme (Nov 6, 2026 — UAT-match rebuild): under New Vision
+  // 2.0 Beta it renders the UAT greeting header, which stands
+  // FIRST on Home, above the Scan bar; every other theme keeps
+  // it in its long-standing slot under the (absent) Scan bar.
+  const collectorIdEl = (
+    <CollectorIdCard
+      onOpenCard={onOpenCard}
+      onOpenSealed={onOpenSealed}
+      onOpenBinderGroup={onOpenBinderGroup}
+      onOpenSealedSection={onOpenSealedSection}
+      onOpenBinderGroupFromProfile={onOpenBinderGroupFromProfile}
+      onOpenBinderHomeFromProfile={onOpenBinderHomeFromProfile}
+      onOpenSealedSectionFromProfile={
+        onOpenSealedSectionFromProfile
+      }
+      updateAvailable={updateAvailable}
+      onOpenUpdate={onOpenUpdate}
+      onOpenUpdateTest={onOpenUpdateTest}
+      envelope={
+        onOpenChangeRequests ? (
+          <OwnerEnvelope onOpen={onOpenChangeRequests} />
+        ) : undefined
+      }
+      orderMail={
+        onOpenOrderMail ? (
+          <OrderMailIndicator onOpen={onOpenOrderMail} />
+        ) : undefined
+      }
+      adminBadge={
+        <HomeAdminBadge onOpen={adminSheet.openSheet} />
+      }
+      jarvisVision={jarvisVision}
+    />
+  );
   return (
     <div className="mt-4">
+      {jarvisVision ? collectorIdEl : null}
       {/* Home header REMOVED (Anthony, Nov 2, 2026, late): the
           small centered Vault X ring + "Vault X" label that sat
           here duplicated the app name the shell already shows
@@ -7146,66 +7796,152 @@ function HomePanel({
           ID pill below is the first thing on the page. The ring
           artwork itself still lives in Settings → About this
           app, where he approved it. */}
-      {/* The oval Collector ID sits at the very top of Home
-          (Anthony's request) — above even the price-alert banners. */}
-      <CollectorIdCard
-        onOpenCard={onOpenCard}
-        onOpenSealed={onOpenSealed}
-        onOpenBinderGroup={onOpenBinderGroup}
-        onOpenSealedSection={onOpenSealedSection}
-        onOpenBinderGroupFromProfile={onOpenBinderGroupFromProfile}
-        onOpenBinderHomeFromProfile={onOpenBinderHomeFromProfile}
-        onOpenSealedSectionFromProfile={
-          onOpenSealedSectionFromProfile
-        }
-        updateAvailable={updateAvailable}
-        onOpenUpdate={onOpenUpdate}
-        onOpenUpdateTest={onOpenUpdateTest}
-        envelope={
-          onOpenChangeRequests ? (
-            <OwnerEnvelope onOpen={onOpenChangeRequests} />
-          ) : undefined
-        }
-        orderMail={
-          onOpenOrderMail ? (
-            <OrderMailIndicator onOpen={onOpenOrderMail} />
-          ) : undefined
-        }
-        adminBadge={
-          <HomeAdminBadge onOpen={adminSheet.openSheet} />
-        }
-      />
-      {triggeredAlerts.map((a) => (
+      {/* New Vision 2.0 Beta — the glowing Scan bar (Anthony,
+          Nov 5, 2026): in the UAT redesign the camera is the
+          heart of the app, so Scan sits in the number-one slot
+          as a big glowing gradient pill, above everything else
+          on Home. It renders ONLY while the New Vision 2.0 Beta
+          theme is active (every other theme keeps the Collector
+          ID at the very top, as below) and opens the real
+          scanner, exactly like the scanner entries elsewhere.
+          Price alerts pin directly under the ID card, as in
+          the UAT they pinned under the bar's header row. */}
+      {jarvisVision && onScanVision ? (
         <button
-          key={a.id}
           type="button"
-          role="alert"
-          onClick={() => {
-            if (a.targetKind === "card" && a.cardId != null) {
-              onOpenCard(a.cardId);
-            } else if (a.targetKind === "sealed" && a.sealedName) {
-              onOpenSealed(a.sealedName);
-            } else if (a.targetKind === "comic") {
-              onOpenComics();
-            }
-          }}
-          className="mb-3 block w-full rounded-full border border-red-800/60 bg-red-900/30 px-6 py-2.5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+          onClick={onScanVision}
+          aria-label="Scan a card"
+          className="jarvis-scan-bar mb-3 flex w-full items-center justify-center gap-2.5 rounded-full px-5 py-4 text-lg font-extrabold text-white"
         >
-          <p className="flex items-center justify-center gap-2 text-sm font-bold uppercase tracking-wide text-red-100">
-            Price alert
-            <span aria-hidden="true" className="text-red-100">
-              ›
-            </span>
-          </p>
-          <p className="mt-0.5 text-sm leading-snug text-red-100/90">
-            {a.label} is now{" "}
-            {a.currentValue != null ? fmtUSD(a.currentValue) : "—"} — your
-            alert was {a.direction === "below" ? "at or below" : "at or above"}{" "}
-            {fmtUSD(a.threshold)}. Tap to open it.
-          </p>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-6 w-6"
+          >
+            <path d="M4 8V5a1 1 0 0 1 1-1h3" />
+            <path d="M16 4h3a1 1 0 0 1 1 1v3" />
+            <path d="M20 16v3a1 1 0 0 1-1 1h-3" />
+            <path d="M8 20H5a1 1 0 0 1-1-1v-3" />
+            <path d="M3 12h18" />
+          </svg>
+          Scan a card
         </button>
-      ))}
-      {showExampleAlert ? (
+      ) : null}
+      {/* The oval Collector ID sits at the very top of Home
+          (Anthony's request) — above even the price-alert banners.
+          Under New Vision 2.0 Beta the same element already
+          rendered above the Scan bar as the UAT greeting header,
+          so this slot renders it only for the other themes. */}
+      {!jarvisVision ? collectorIdEl : null}
+      {triggeredAlerts.map((a) => {
+        const openAlert = () => {
+          if (a.targetKind === "card" && a.cardId != null) {
+            onOpenCard(a.cardId);
+          } else if (a.targetKind === "sealed" && a.sealedName) {
+            onOpenSealed(a.sealedName);
+          } else if (a.targetKind === "comic") {
+            onOpenComics();
+          }
+        };
+        if (jarvisVision) {
+          // The UAT price-alert pill (Nov 6, 2026 — UAT-match
+          // rebuild): one line, yellow border on the UAT
+          // surface, bell first — "Price alert · {item}
+          // {price} — under your {target} target". Same live
+          // alert, same tap destination; only the form is the
+          // UAT's.
+          return (
+            <button
+              key={a.id}
+              type="button"
+              role="alert"
+              onClick={openAlert}
+              aria-label={`Price alert: ${a.label} ${a.currentValue != null ? fmtUSD(a.currentValue) : ""}, target ${fmtUSD(a.threshold)}`}
+              className="mb-3 flex w-full items-center gap-2 rounded-full border px-4 py-2.5 text-left text-sm font-semibold text-[var(--text)]"
+              style={{ borderColor: "#facc15", background: "#101736" }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#facc15"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4 shrink-0"
+                aria-hidden="true"
+              >
+                <path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z" />
+                <path d="M10 20a2.2 2.2 0 0 0 4 0" />
+              </svg>
+              <span className="min-w-0">
+                Price alert · {a.label}{" "}
+                <b>
+                  {a.currentValue != null ? fmtUSD(a.currentValue) : "—"}
+                </b>{" "}
+                — {a.direction === "below" ? "under" : "over"} your{" "}
+                {fmtUSD(a.threshold)} target
+              </span>
+            </button>
+          );
+        }
+        return (
+          <button
+            key={a.id}
+            type="button"
+            role="alert"
+            onClick={openAlert}
+            className="mb-3 block w-full rounded-full border border-red-800/60 bg-red-900/30 px-6 py-2.5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+          >
+            <p className="flex items-center justify-center gap-2 text-sm font-bold uppercase tracking-wide text-red-100">
+              Price alert
+              <span aria-hidden="true" className="text-red-100">
+                ›
+              </span>
+            </p>
+            <p className="mt-0.5 text-sm leading-snug text-red-100/90">
+              {a.label} is now{" "}
+              {a.currentValue != null ? fmtUSD(a.currentValue) : "—"} — your
+              alert was {a.direction === "below" ? "at or below" : "at or above"}{" "}
+              {fmtUSD(a.threshold)}. Tap to open it.
+            </p>
+          </button>
+        );
+      })}
+      {showExampleAlert && jarvisVision ? (
+        // The example alert in the UAT pill's form (Nov 6,
+        // 2026): same yellow-bordered one-liner as a real
+        // triggered alert under this theme, still labeled an
+        // example, still opening the same explainer.
+        <button
+          type="button"
+          onClick={() => exampleSheet.openSheet()}
+          aria-label="Example price alert — tap to learn how price alerts work"
+          className="mb-3 flex w-full items-center gap-2 rounded-full border px-4 py-2.5 text-left text-sm font-semibold text-[var(--text)]"
+          style={{ borderColor: "#facc15", background: "#101736" }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#facc15"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4 shrink-0"
+            aria-hidden="true"
+          >
+            <path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z" />
+            <path d="M10 20a2.2 2.2 0 0 0 4 0" />
+          </svg>
+          <span>
+            Price alert · Example — tap to see how price alerts work
+          </span>
+        </button>
+      ) : showExampleAlert ? (
         <button
           type="button"
           onClick={() => exampleSheet.openSheet()}
@@ -7386,13 +8122,21 @@ function HomePanel({
           </div>
         </div>
       ) : null}
-      <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
-        Home
-      </h1>
-      <p className="mt-1.5 text-sm leading-relaxed text-[var(--dim)]">
-        This is your home area — a clean slate for now. We&rsquo;ll build
-        it out together once you decide what you want here.
-      </p>
+      {/* Under New Vision 2.0 Beta the UAT greeting header at
+          the top IS Home's heading (Nov 6, 2026 — UAT-match
+          rebuild): the "Home / clean slate" title block does
+          not render in that theme. Other themes keep it. */}
+      {!jarvisVision ? (
+        <>
+          <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
+            Home
+          </h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-[var(--dim)]">
+            This is your home area — a clean slate for now. We&rsquo;ll build
+            it out together once you decide what you want here.
+          </p>
+        </>
+      ) : null}
       {/* Your collections — just the rich collection artworks,
           centered three across, wrapping to a new centered row of
           three as collections are added (his standing layout rule).
@@ -7432,7 +8176,11 @@ function HomePanel({
               totalValue ?? homeFinance.data.value + comicsValue;
             const histGrand = hist.map((h) => ({
               ...h,
-              value: h.value + comicsValue,
+              value:
+                h.value +
+                comicsValue +
+                (homeFinance.data.legoValue ?? 0) +
+                (homeFinance.data.funkoValue ?? 0),
             }));
             const first = histGrand[0];
             const last = histGrand[histGrand.length - 1];
@@ -7483,6 +8231,196 @@ function HomePanel({
               }
               return d;
             })();
+            // New Vision 2.0 Beta (exact-match correction,
+            // Nov 5, 2026): Home's snapshot IS the UAT hero —
+            // the rounded-28 gradient card holding the
+            // PORTFOLIO label, the big total, the bare cyan
+            // Spark at the UAT Home height (44), the
+            // Paid / Net / Cards strip, and Top Movers folded
+            // in as a ticker along the card's foot. The pill
+            // below (and the separate Movers list under it)
+            // render in every other theme only. All figures
+            // are the pill's own real ones; the ticker rows
+            // open the same cards the Movers list opens.
+            if (jarvisVision) {
+              const fin = homeFinance.data;
+              const heroNet = fin.value - fin.paid;
+              // The UAT chip reads "▲ 4.2% this week" — so the
+              // live chip is the REAL 7-day range change (the
+              // finance payload's own ranges), taken against
+              // the grand total the hero shows, at the UAT's
+              // one-decimal precision (Nov 6, 2026 — UAT-match
+              // rebuild; the previous build's "over tracked
+              // history" wording was one of the tells Anthony
+              // spotted).
+              const weekRange = fin.ranges.find((r) => r.key === "7d");
+              const weekDelta = weekRange?.delta ?? pillDelta;
+              const weekBase = pillTotal - weekDelta;
+              const weekPct =
+                weekBase > 0 ? (weekDelta / weekBase) * 100 : 0;
+              return (
+                <section
+                  aria-label="Portfolio summary"
+                  className="relative overflow-hidden rounded-[28px] border p-5"
+                  style={{
+                    background:
+                      "linear-gradient(150deg, #182250, #101736)",
+                    borderColor: "#2a3570",
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={onOpenPortfolio}
+                      aria-label={`Open Portfolio — collection value ${fmtUSD(pillTotal)}, ${weekDelta >= 0 ? "up" : "down"} ${fmtUSD(Math.abs(weekDelta))} this week`}
+                      className="block text-left"
+                    >
+                      <span
+                        className="block text-xs font-bold tracking-widest"
+                        style={{ color: "#9aa5d6" }}
+                      >
+                        PORTFOLIO
+                      </span>
+                      <span className="font-album mt-1 block text-4xl font-black tabular-nums text-[var(--text)]">
+                        {heroHide ? "••••" : fmtUSD(pillTotal)}
+                      </span>
+                      <span
+                        className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-xs font-bold"
+                        style={{
+                          background: `color-mix(in srgb, ${weekDelta >= 0 ? "#34d399" : "#fb7185"} 20%, transparent)`,
+                          color: weekDelta >= 0 ? "#34d399" : "#fb7185",
+                        }}
+                      >
+                        {weekDelta >= 0 ? "▲" : "▼"}{" "}
+                        {Math.abs(weekPct).toFixed(1)}% this week
+                      </span>
+                    </button>
+                    {/* The UAT hero's hide-values eye, top
+                        right (Nov 6, 2026): masks the hero's
+                        figures while it's on. */}
+                    <button
+                      type="button"
+                      onClick={() => setHeroHide((v) => !v)}
+                      aria-label={heroHide ? "Show values" : "Hide values"}
+                      aria-pressed={heroHide}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[var(--text)]"
+                      style={{
+                        borderColor: "#2a3570",
+                        background: "#101736",
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-[18px] w-[18px]"
+                        aria-hidden="true"
+                      >
+                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" />
+                        <circle cx="12" cy="12" r="3" />
+                        {heroHide ? <path d="M3 3l18 18" /> : null}
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="mt-2">
+                    <UatSpark
+                      points={histGrand.map((h) => h.value)}
+                      h={44}
+                    />
+                  </div>
+                  <div
+                    className="mt-2 grid grid-cols-3 border-t pt-3 text-center"
+                    style={{ borderColor: "#2a3570" }}
+                  >
+                    {/* UAT labels, plain (Nov 6, 2026 — UAT-match
+                        rebuild): the UAT strip reads Paid / Net /
+                        Cards with no qualifiers, and Anthony
+                        directed the theme to match the UAT
+                        exactly. Paid and Net remain the Lorcana
+                        figures (no paid amount was ever recorded
+                        for the graded comics in the grand total);
+                        the Portfolio page carries the full scope
+                        breakdown. The eye above masks all three
+                        figures. */}
+                    <div>
+                      <p
+                        className="text-[11px]"
+                        style={{ color: "#9aa5d6" }}
+                      >
+                        Paid
+                      </p>
+                      <p className="text-sm font-bold tabular-nums">
+                        {heroHide ? "••••" : fmtUSD(fin.paid)}
+                      </p>
+                    </div>
+                    <div>
+                      <p
+                        className="text-[11px]"
+                        style={{ color: "#9aa5d6" }}
+                      >
+                        Net
+                      </p>
+                      <p
+                        className="text-sm font-bold tabular-nums"
+                        style={{
+                          color: heroNet >= 0 ? "#34d399" : "#fb7185",
+                        }}
+                      >
+                        {heroHide ? "••••" : fmtUSD(heroNet)}
+                      </p>
+                    </div>
+                    <div>
+                      <p
+                        className="text-[11px]"
+                        style={{ color: "#9aa5d6" }}
+                      >
+                        Cards
+                      </p>
+                      <p className="text-sm font-bold tabular-nums">
+                        {heroHide ? "••" : fin.cards.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                  {fin.movers24h.length > 0 ? (
+                    <div
+                      className="no-scrollbar mt-3 flex gap-4 overflow-x-auto border-t pt-3"
+                      style={{ borderColor: "#2a3570" }}
+                      aria-label="Top movers in your collection, last 24 hours"
+                    >
+                      <span
+                        className="shrink-0 text-[11px] font-black tracking-wider"
+                        style={{ color: "#9aa5d6" }}
+                      >
+                        TOP MOVERS
+                      </span>
+                      {fin.movers24h.map((m) => (
+                        <button
+                          key={m.cardId}
+                          type="button"
+                          onClick={() => onOpenCard(m.cardId)}
+                          aria-label={`Open ${m.name} — ${m.deltaTotal >= 0 ? "gained" : "lost"} ${fmtUSD(Math.abs(m.deltaTotal))} in the last 24 hours`}
+                          className="shrink-0 whitespace-nowrap text-xs font-semibold text-[var(--text)]"
+                        >
+                          {m.name.split(" - ")[0]}{" "}
+                          <span
+                            style={{
+                              color:
+                                m.pct >= 0 ? "#34d399" : "#fb7185",
+                            }}
+                          >
+                            {m.pct >= 0 ? "+" : "−"}
+                            {Math.abs(m.pct).toFixed(1)}%
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            }
             return (
               <button
                 type="button"
@@ -7570,7 +8508,11 @@ function HomePanel({
               </button>
             );
           })()}
-          {homeFinance.data.movers24h.length > 0 ? (
+          {/* Under New Vision 2.0 Beta the movers live in the
+              hero's ticker (above), exactly as the UAT folds
+              them in — this stacked list renders in the other
+              themes only. */}
+          {!jarvisVision && homeFinance.data.movers24h.length > 0 ? (
             <section
               aria-label="Top movers in your collection, last 24 hours"
               className="mt-3.5"
@@ -7635,15 +8577,102 @@ function HomePanel({
           stack (pill, movers, collections), so as the movers
           block shrinks, this section rides up with it and no
           gap opens. */}
+      {/* Quick Actions (Nov 6, 2026 — UAT-match rebuild): the
+          UAT Home's four-across row between the hero and Your
+          Collections — Add item, My Decks, Library, Trade —
+          which the first theme build never carried over at
+          all. Renders only under New Vision 2.0 Beta. Every
+          action is the live one: Add item opens the scanner;
+          My Decks and Library open those pages above the
+          profile (stored-nav request + profile open, see
+          CollectorIdCard's vaultx:open-profile listener);
+          Trade goes to the Social tab. */}
+      {jarvisVision ? (
+        <div
+          className="mt-3.5 grid grid-cols-4 gap-2"
+          aria-label="Quick actions"
+        >
+          {[
+            {
+              label: "Add item",
+              path: "M12 5v14 M5 12h14",
+              onClick: () => onScanVision?.(),
+            },
+            {
+              label: "My Decks",
+              path: "M12 3l9 5-9 5-9-5 9-5z M3 13l9 5 9-5",
+              onClick: () => {
+                writeStoredProfileNav({ decksOpen: true });
+                window.dispatchEvent(
+                  new Event("vaultx:open-profile"),
+                );
+              },
+            },
+            {
+              label: "Library",
+              path: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4z M5 17a3 3 0 0 1 3-3h11",
+              onClick: () => {
+                writeStoredProfileNav({ libraryOpen: true });
+                window.dispatchEvent(
+                  new Event("vaultx:open-profile"),
+                );
+              },
+            },
+            {
+              label: "Trade",
+              path: "M7 4L3 8l4 4 M3 8h14 M17 20l4-4-4-4 M21 16H7",
+              onClick: () => onOpenTrade?.(),
+            },
+          ].map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              onClick={a.onClick}
+              aria-label={a.label}
+              className="flex flex-col items-center gap-1.5 rounded-[20px] border py-3"
+              style={{ background: "#101736", borderColor: "#2a3570" }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#22d3ee"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d={a.path} />
+              </svg>
+              <span className="text-[11px] font-bold text-[var(--text)]">
+                {a.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <section
         aria-label="Your Collections"
         className={homeFinance.data ? "mt-3.5" : "mt-[56px]"}
       >
         <div className="flex items-end justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <h2 className="font-album text-lg text-[var(--text)]">
+            <h2
+              className={
+                jarvisVision
+                  ? "font-album text-xl font-extrabold text-[var(--text)]"
+                  : "font-album text-lg text-[var(--text)]"
+              }
+            >
               {t("home.yourCollections")}
             </h2>
+            {/* Under New Vision 2.0 Beta the eye does not ride
+                the heading (Nov 6, 2026 — UAT-match rebuild):
+                the UAT heading stands alone, and the same
+                show/hide window opens from the Add collection
+                tile at the grid's end. */}
+            {!jarvisVision ? (
             <button
               type="button"
               onClick={() => {
@@ -7668,6 +8697,7 @@ function HomePanel({
                 <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
+            ) : null}
           </div>
           {/* The Collection value label + total that used to
               ride beside this heading is REMOVED (Anthony,
@@ -7676,10 +8706,16 @@ function HomePanel({
               shows the total once, in the pill. The heading
               and its show/hide eye stay. */}
         </div>
-        <p className="mt-1 text-xs text-[var(--dim)]">
-          Hold a tile until it lifts, then drag it over another
-          tile to swap places.
-        </p>
+        {/* The drag hint does not render under New Vision
+            2.0 Beta (Nov 6, 2026): the UAT heading stands
+            alone over the grid. Drag-to-reorder still works
+            exactly as in the other themes. */}
+        {!jarvisVision ? (
+          <p className="mt-1 text-xs text-[var(--dim)]">
+            Hold a tile until it lifts, then drag it over another
+            tile to swap places.
+          </p>
+        ) : null}
         <div
           ref={tileGridRef}
           className={`mt-3 flex flex-wrap justify-center gap-3 ${
@@ -7711,7 +8747,135 @@ function HomePanel({
                       : ""
                 }`}
               >
-                {key === "tcg" ? (
+                {jarvisVision ? (
+                  /* The UAT tiles (Nov 6, 2026 — UAT-match
+                     rebuild): TCG Universe is the featured
+                     full-width tile — its real artwork at
+                     21/9 with the title and the four games
+                     listed INSIDE it, bottom left, and the
+                     FEATURED badge top right, exactly the
+                     UAT's tile. The other collections are
+                     the UAT's two-across cards: a short art
+                     band across the top and the name under
+                     it on the surface. Same live artwork,
+                     same destinations, same drag-to-reorder
+                     wrapper — only the tile form is the
+                     UAT's, and only in this theme. */
+                  (() => {
+                    const meta = {
+                      tcg: {
+                        label: "TCG Universe",
+                        img: collectionTcgUniverse,
+                        alt: "TCG Universe artwork: a glowing vault portal with a wizard, an electric mouse, a space soldier, and a hooded mage from the four trading-card game realms around it",
+                        open: onOpenTcgUniverse,
+                        aria: "Open the TCG Universe — your four trading-card games",
+                      },
+                      lego: {
+                        label: "Legos",
+                        img: collectionLego,
+                        alt: "Legos collection artwork: colorful building bricks spilling out of an open dark vault chest with blue-purple glow",
+                        open: onOpenLego,
+                        aria: "Open your Legos section",
+                      },
+                      comics: {
+                        label: "Comics",
+                        img: collectionComics,
+                        alt: "Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art",
+                        open: onOpenComics,
+                        aria: "Open your Comics collection",
+                      },
+                      sports: {
+                        label: "Sports Cards",
+                        img: collectionSportsCards,
+                        alt: "Sports Cards artwork: two graded card slabs standing on a shelf — a baseball batter silhouette and a basketball player silhouette, their label plates blank",
+                        open: onOpenSportsCards,
+                        aria: "Open your Sports Cards",
+                      },
+                      toppsau: {
+                        label: "Topps Alternate Universe",
+                        img: collectionToppsAu,
+                        alt: "Topps Alternate Universe artwork: a single elegant dark trading card standing upright in blue-purple glow, its face carrying only small icons, no lettering",
+                        open: onOpenToppsAlternateUniverse,
+                        aria: "Open your Topps Alternate Universe",
+                      },
+                      funko: {
+                        label: "Funko",
+                        img: collectionFunko,
+                        alt: "Funko collection artwork: a minimal glowing gold crown floating over a dark vinyl figure inside a gunmetal ring, on a deep blue and violet smoky background",
+                        open: onOpenFunko,
+                        aria: "Open your Funko Pop! collection",
+                      },
+                    }[key];
+                    if (!meta) return null;
+                    if (key === "tcg") {
+                      return (
+                        <button
+                          type="button"
+                          onClick={tileClickGuarded(meta.open)}
+                          aria-label={meta.aria}
+                          className="relative block w-full overflow-hidden rounded-[28px] border text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                          style={{ borderColor: "#2a3570" }}
+                        >
+                          <img
+                            src={meta.img}
+                            alt={meta.alt}
+                            loading="lazy"
+                            draggable={false}
+                            className="block aspect-[21/9] w-full object-cover"
+                          />
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-0"
+                            style={{
+                              background:
+                                "linear-gradient(180deg, rgba(4,6,18,0) 32%, rgba(4,6,18,0.85))",
+                            }}
+                          />
+                          <span className="absolute right-3 top-3 rounded-full bg-black/40 px-2 py-1 text-[10px] font-black text-white">
+                            FEATURED
+                          </span>
+                          <span className="absolute inset-x-0 bottom-0 block p-4">
+                            <span className="font-album block text-2xl font-black leading-tight text-white">
+                              TCG Universe
+                            </span>
+                            <span className="block text-xs text-white/80">
+                              Lorcana · Pokémon · Star Wars Unlimited ·
+                              Magic: The Gathering
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        onClick={tileClickGuarded(meta.open)}
+                        aria-label={meta.aria}
+                        className="block w-full overflow-hidden rounded-[24px] border text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                        style={{
+                          borderColor: "#2a3570",
+                          background: "#101736",
+                        }}
+                      >
+                        <img
+                          src={meta.img}
+                          alt={meta.alt}
+                          loading="lazy"
+                          draggable={false}
+                          className="block h-20 w-full object-cover"
+                        />
+                        <span className="font-album block p-3 font-bold leading-tight text-[var(--text)]">
+                          {meta.label}
+                          {key === "funko" && !funkoReady ? (
+                            <span className="ml-1.5 align-middle text-[9px] font-semibold uppercase tracking-wide text-[#ffb020]">
+                              {t("common.comingSoon")}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })()
+                ) : key === "tcg" ? (
                   <button
                     type="button"
                     onClick={tileClickGuarded(onOpenTcgUniverse)}
@@ -7774,7 +8938,7 @@ function HomePanel({
                   >
                     <img
                       src={collectionSportsCards}
-                      alt="Sports Cards artwork: two graded card slabs standing on a shelf — a baseball batter silhouette and a basketball player silhouette — under the words Sports Cards"
+                      alt="Sports Cards artwork: two graded card slabs standing on a shelf — a baseball batter silhouette and a basketball player silhouette, their label plates blank"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
@@ -7810,7 +8974,7 @@ function HomePanel({
                         identical in dimensions. */}
                     <img
                       src={collectionToppsAu}
-                      alt="Topps Alternate Universe artwork: a single elegant dark Topps card standing upright in blue-purple glow, with Topps Alternate Universe and Disney, Star Wars, Garbage Pail Kids, WWE underneath"
+                      alt="Topps Alternate Universe artwork: a single elegant dark trading card standing upright in blue-purple glow, its face carrying only small icons, no lettering"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
@@ -7847,8 +9011,84 @@ function HomePanel({
                 ) : null}
               </div>
             ))}
+          {/* The UAT's Add collection slot (Nov 6, 2026 —
+              UAT-match rebuild): the dashed tile at the grid's
+              end, only under New Vision 2.0 Beta. It opens the
+              same Your Collections show/hide window the heading
+              eye opens in the other themes — the live way a
+              collection comes back onto Home. Not a drag tile:
+              it carries no data-tile-key and never reorders. */}
+          {jarvisVision ? (
+            <div className="relative w-[calc((100%-0.75rem)/2)]">
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  collectionsPanelSheet.openSheet();
+                }}
+                aria-label="Add collection — choose which collections show on Home"
+                className="flex min-h-[128px] w-full flex-col items-center justify-center gap-1 rounded-[24px] border-2 border-dashed text-sm font-bold transition active:scale-[0.98]"
+                style={{ borderColor: "#2a3570", color: "#9aa5d6" }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  className="h-6 w-6"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14 M5 12h14" />
+                </svg>
+                Add collection
+              </button>
+            </div>
+          ) : null}
         </div>
       </section>
+
+      {/* Recently Added rail (Nov 6, 2026 — UAT-match rebuild):
+          the UAT Home's bottom rail, which the first theme
+          build left out entirely. Its data is the additions
+          log: cards actually added through the app (steppers,
+          pockets, scans) since the log began — real add dates,
+          recorded as they happen. The Nov 1 export's cards
+          have no recorded add date and are NOT backfilled;
+          until the first in-app addition lands, the rail
+          carries its honest empty note in the UAT's card form
+          instead of invented recency. New Vision only. */}
+      {jarvisVision ? (
+        <section aria-label="Recently added" className="mt-5">
+          <h2 className="font-album text-xl font-extrabold text-[var(--text)]">
+            Recently Added
+          </h2>
+          {recentlyAdded.data && recentlyAdded.data.items.length > 0 ? (
+            <div className="no-scrollbar mt-3 flex gap-3 overflow-x-auto pb-1">
+              {recentlyAdded.data.items.map((item) => (
+                <RecentRailCard
+                  key={item.cardId}
+                  item={item}
+                  onOpen={() => onOpenCard(item.cardId)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p
+              className="mt-3 rounded-[20px] border px-4 py-3.5 text-sm leading-relaxed"
+              style={{
+                borderColor: "#2a3570",
+                background: "#101736",
+                color: "#9aa5d6",
+              }}
+            >
+              Nothing here yet — cards you add from a card page, the
+              binder pockets, or a scan will show up here as you add
+              them.
+            </p>
+          )}
+        </section>
+      ) : null}
 
       {/* Collection Distribution used to sit here on Home; it
           moved to the Portfolio (Anthony, Nov 3, 2026, late) —
@@ -10053,6 +11293,7 @@ function SealedSheet({
   name: string;
   onClose: () => void;
 }) {
+  const jarvisVision = useJarvisVision();
   const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["sealedItem", name],
@@ -10334,7 +11575,38 @@ function SealedSheet({
               ) : (
                 <BestOfferFallback name={item.name} />
               )}
-              {hist.length > 0 ? (
+              {hist.length > 0 && jarvisVision ? (
+                /* New Vision 2.0 Beta (exact-match correction,
+                   Nov 5, 2026): the UAT Price history block, same
+                   as the card detail's — bare cyan Spark at 56
+                   with the Low/High footer, on this item's real
+                   tracked points. */
+                <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    Price history
+                  </p>
+                  <div
+                    role="img"
+                    aria-label={`Line chart of this item's value per unit from ${hist[0]?.label} to ${hist[hist.length - 1]?.label}. Latest value ${fmtUSD(hist[hist.length - 1]?.value ?? 0)} per unit.`}
+                  >
+                    <UatSpark
+                      points={hist.map((p) => p.value)}
+                      h={56}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[11px] text-[var(--dim)]">
+                    <span>
+                      {hist.length} point{hist.length === 1 ? "" : "s"}{" "}
+                      · tracked series
+                    </span>
+                    <span>
+                      Low {fmtUSD(Math.min(...hist.map((p) => p.value)))}{" "}
+                      · High{" "}
+                      {fmtUSD(Math.max(...hist.map((p) => p.value)))}
+                    </span>
+                  </div>
+                </div>
+              ) : hist.length > 0 ? (
                 <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
                   <p className="text-sm font-semibold text-[var(--text)]">
                     Value per unit over time
@@ -13004,6 +14276,50 @@ function SettingsPanel({
     queryFn: () => api.getCatalogAuditStatus({}),
     retry: 1,
   });
+  // Price audit status (Anthony, Nov 6, 2026): the nightly
+  // price audit's last completed run plus its recent
+  // quarantine / repair events, shown as a block under the
+  // catalog audit block below. The "Run price audit now"
+  // button runs the same auditPrices action the nightly
+  // schedule runs.
+  const priceAudit = useQuery({
+    queryKey: ["priceAuditStatus"],
+    queryFn: () => api.getPriceAuditStatus({}),
+    retry: 1,
+  });
+  // Artwork coverage (Anthony, Nov 6, 2026 — the app-wide
+  // missing-artwork audit): live per-area counts of set art
+  // and card art, shown as a block under the price audit
+  // block below, so what has artwork and what is honestly
+  // placeholder-only is always visible in one place.
+  const artworkCoverage = useQuery({
+    queryKey: ["artworkCoverage"],
+    queryFn: () => api.getArtworkCoverage({}),
+    retry: 1,
+  });
+  const [priceAuditing, setPriceAuditing] = useState(false);
+  const [priceAuditNote, setPriceAuditNote] = useState<string | null>(null);
+  const runPriceAuditNow = async () => {
+    if (priceAuditing) return;
+    setPriceAuditing(true);
+    setPriceAuditNote(null);
+    try {
+      const res = await api.auditPrices({ source: "manual" });
+      setPriceAuditNote(
+        res.repaired > 0
+          ? `Audit complete — scanned ${res.scanned.toLocaleString()} card histories and repaired ${res.repaired} mispriced ${res.repaired === 1 ? "card" : "cards"}.`
+          : `Audit complete — scanned ${res.scanned.toLocaleString()} card histories, no mispricing found.`,
+      );
+      hapticConfirm();
+      await priceAudit.refetch();
+    } catch {
+      setPriceAuditNote(
+        "The price audit couldn't run just now — the nightly run will still check everything.",
+      );
+    } finally {
+      setPriceAuditing(false);
+    }
+  };
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const runSyncNow = async () => {
@@ -13789,6 +15105,167 @@ function SettingsPanel({
             or Chinese are left out on purpose.
           </p>
         </div>
+        <div className="mt-3 rounded-xl bg-[var(--bg)] px-3 py-2.5">
+          <p className="text-sm leading-relaxed text-[var(--text)]">
+            Price audit
+          </p>
+          {priceAudit.data ? (
+            priceAudit.data.lastRunAt ? (
+              <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+                Last run{" "}
+                {new Date(
+                  priceAudit.data.lastRunAt,
+                ).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                  timeZone: "America/Chicago",
+                })}{" "}
+                — scanned{" "}
+                {(priceAudit.data.lastScanned ?? 0).toLocaleString()}{" "}
+                card histories, repaired{" "}
+                {priceAudit.data.lastRepaired ?? 0}{" "}
+                {priceAudit.data.lastRepaired === 1
+                  ? "mispriced card"
+                  : "mispriced cards"}
+                .
+              </p>
+            ) : (
+              <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+                No completed run recorded yet — the audit runs
+                every night at 7:45 AM (Chicago time), right
+                after the morning re-pricing, and its first
+                recorded run will appear here.
+              </p>
+            )
+          ) : (
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+              Checking the price audit log&hellip;
+            </p>
+          )}
+          {priceAudit.data && priceAudit.data.events.length > 0 ? (
+            <ul className="mt-1.5 space-y-1">
+              {priceAudit.data.events.map((ev, i) => (
+                <li
+                  key={`${ev.ranAt}-${i}`}
+                  className="text-xs leading-relaxed text-[var(--dim)]"
+                >
+                  {ev.kind === "repair" ? "Repaired" : "Blocked"}:{" "}
+                  {ev.fullName ?? "Unknown card"}
+                  {ev.printed ? ` · #${ev.printed}` : ""} —{" "}
+                  {ev.oldValue != null
+                    ? `$${ev.oldValue.toFixed(2)}`
+                    : "?"}{" "}
+                  →{" "}
+                  {ev.newValue != null
+                    ? `$${ev.newValue.toFixed(2)}`
+                    : "?"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+            Every night this checks each card&rsquo;s tracked
+            price history for an impossible one-day jump (4× or
+            more, and at least $5 — the signature of a price
+            pulled from the wrong printing, like the Promo Set 3
+            cards on Nov 6, 2026). A card that trips it is
+            restored to its last good value and the bad point
+            is removed. The daily re-pricing also refuses to
+            save a jump like that in the first place; those
+            show above as &ldquo;Blocked&rdquo;.
+          </p>
+          <button
+            type="button"
+            onClick={() => void runPriceAuditNow()}
+            disabled={priceAuditing}
+            className="mt-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium text-[var(--gold-soft)] disabled:opacity-60"
+          >
+            {priceAuditing ? "Auditing…" : "Run price audit now"}
+          </button>
+          {priceAuditNote ? (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              {priceAuditNote}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-3 rounded-xl bg-[var(--bg)] px-3 py-2.5">
+          <p className="text-sm leading-relaxed text-[var(--text)]">
+            Artwork coverage
+          </p>
+          {artworkCoverage.data ? (
+            <ul className="mt-1 space-y-1">
+              {artworkCoverage.data.areas.map((a) => (
+                <li
+                  key={a.key}
+                  className="text-xs leading-relaxed text-[var(--dim)]"
+                >
+                  {a.label} —{" "}
+                  {a.sectionsWithArt != null
+                    ? `set art ${a.sectionsWithArt.toLocaleString()} of ${a.sections.toLocaleString()} · `
+                    : ""}
+                  card art {a.cardsWithArt.toLocaleString()} of{" "}
+                  {a.cards.toLocaleString()}
+                  {a.sets ? (
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {a.sets.map((s) => (
+                        <span
+                          key={s.name}
+                          className={
+                            s.hasArt
+                              ? "rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[10px] leading-tight text-[var(--text)]"
+                              : "rounded-md border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] leading-tight text-[var(--dim)] opacity-70"
+                          }
+                        >
+                          {s.hasArt ? "✓ " : ""}
+                          {s.name}
+                          {s.hasArt ? "" : " · no set art"}
+                          {" · fronts "}
+                          {s.cardsWithArt.toLocaleString()} of{" "}
+                          {s.cards.toLocaleString()}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+              Counting artwork&hellip;
+            </p>
+          )}
+          <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+            The set chips above break the Alternate Universe
+            areas down set by set — set art, and how many of
+            each set&rsquo;s card fronts are in so far. A set
+            page carries the same count for its own set, with
+            a button to send the hunt after that set alone.
+            Topps publishes its checklists as text only, so
+            Topps-family card fronts come from collector
+            sources instead: a hunt runs every morning for
+            cards still missing a front — COMC&rsquo;s
+            photographed card fronts are the pull source,
+            the Trading Card Database confirms which cards
+            have fronts (its terms bar taking its images, so
+            it is a reference only), and Collectr joins via
+            its API once your Collectr API access is
+            approved — Disney Topps first, and a card only
+            fills when a photo of that exact card (same set,
+            number, and parallel) turns up. Cards no
+            permitted source carries keep the clean
+            placeholder, and Topps sets also carry the
+            publisher&rsquo;s product photo on their tiles; a
+            separate morning pass keeps hunting that photo
+            for Alternate Universe sets still missing it. The
+            Lorcana cards without a scan are puzzle and lore
+            inserts, which the binder assembles from their
+            piece scans. Pokémon, Magic, and Star Wars
+            Unlimited show artwork for every card downloaded
+            so far; those catalogs are still filling in set by
+            set, and new cards bring their artwork with them.
+          </p>
+        </div>
         <ArtworkCacheLine />
         <p className="mt-3 text-sm leading-relaxed text-[var(--text)]">
           Export your collection
@@ -13837,6 +15314,29 @@ function SettingsPanel({
             connection and tap again.
           </p>
         )}
+        {/* Insurance & Estate report (Anthony, Nov 5, 2026):
+            the same one-tap PDF as in Portfolio's Money
+            Tracker, here next to the other exports where a
+            user looks for it. */}
+        <div className="mt-4 border-t border-[var(--border)] pt-3">
+          <p className="text-sm leading-relaxed text-[var(--text)]">
+            Insurance &amp; Estate report
+          </p>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+            A print-ready PDF of the whole vault — photos,
+            grading certs, values, what you paid, and where
+            everything lives — for your insurer or your family.
+          </p>
+          <div className="mt-2.5">
+            <InsuranceReportButton
+              sealedPhotoFor={(name) => SEALED_PHOTOS[name]}
+              comicPhotoFor={(id) => {
+                const comic = COMICS.find((c) => c.id === id);
+                return comic?.slab ?? comic?.cover;
+              }}
+            />
+          </div>
+        </div>
       </section>
 
       {/* No Admin section in Settings (Anthony, Nov 3, 2026,
@@ -20635,8 +22135,10 @@ function LibrarySpine({
     // shelf board — the tile is frameless, the figure is
     // bottom-aligned so its base lands exactly on the shelf
     // row's bottom edge where the board begins, with a soft
-    // drop shadow grounding it. The name rides at the base
-    // like a little display plaque in front of the figure.
+    // drop shadow grounding it. NO name text rides with the
+    // figure — standing rule, Anthony, Nov 5, 2026: nothing
+    // is ever captioned under a displayed Library item (see
+    // the STANDING RULE comment at the tile's base below).
     // Same tap-to-peek / hold-to-open model as the spines.
     // Sized up 30 percent (Anthony, Nov 5, 2026): after the
     // Millennium Falcon and TIE Fighter cutout fixes landed,
@@ -20666,7 +22168,7 @@ function LibrarySpine({
           hapticTick();
           onPeek(entry, e.currentTarget.getBoundingClientRect());
         }}
-        className={`relative flex shrink-0 flex-col rounded-md transition active:scale-[0.97] ${
+        className={`relative flex shrink-0 select-none flex-col rounded-md transition active:scale-[0.97] ${
           entry.section === "funko" || entry.section === "lego"
             ? // Photo shelves (Funko, Lego) share one level
               // evenly: up to three figures/sets split the
@@ -20678,8 +22180,17 @@ function LibrarySpine({
               "aspect-[135/187] h-auto w-[calc(33.333%-4px)] max-w-[135px] grow-0"
             : "h-[187px] w-[135px]"
         } ${selected ? "ring-2 ring-[var(--accent)]" : ""}`}
+        style={{ WebkitTouchCallout: "none" }}
       >
-        <span className="absolute inset-0 flex items-end justify-center">
+        {/* The artwork is pointer-transparent on purpose
+            (drag-conflict fix, Anthony, Nov 5, 2026): the
+            shelf's hold model lives on this button, and a
+            live image under the thumb can claim the gesture
+            for itself — native drag on desktop, the
+            long-press callout on touch — and cancel the
+            hold before it lifts. Holds and taps belong to
+            the button; the picture is decoration inside it. */}
+        <span className="pointer-events-none absolute inset-0 flex items-end justify-center">
           <CutoutImg
             src={entry.imageUrl}
             alt={entry.title}
@@ -20688,26 +22199,26 @@ function LibrarySpine({
             className="max-h-full max-w-full object-contain drop-shadow-[0_10px_10px_rgba(0,0,0,0.45)]"
           />
         </span>
-        {/* Name plaque REMOVED for the two display pieces
-            Anthony named (Nov 5, 2026): the Millennium
-            Falcon and the TIE Fighter sit on the shelf with
-            NO name text under them — he confirmed both look
-            perfect as they sit, and the label goes. The
-            pieces keep their names in their detail pages and
-            catalog listings, and the tile's aria-label still
-            names them for accessibility; other shelf pieces
-            keep their plaques. */}
-        {/millennium falcon|tie fighter/i.test(entry.title) ? null : (
-          <>
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-black/55 to-transparent"
-            />
-            <span className="absolute inset-x-0 bottom-0 truncate px-1 pb-0.5 text-center text-[9px] font-semibold leading-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
-              {entry.title}
-            </span>
-          </>
-        )}
+        {/* STANDING RULE — NO NAME LABELS ON THE SHELF
+            (Anthony, Nov 5, 2026, his second report of this):
+            NO displayed item in the Library ever shows a name
+            label or caption underneath it — for every item
+            type (Lego sets, Funko figures, comics, sealed,
+            and every future type). This tile used to carry a
+            name plaque at the figure's base; a first fix
+            (Nov 5) removed it only for the Millennium Falcon
+            and TIE Fighter he had named, which left it on the
+            A-Wing, the Batmobile Tumbler, and Dr. Peter
+            Venkman with Firehouse — the exact pieces he then
+            reported again. The plaque is now gone from this
+            shared renderer entirely, so no entry of any type
+            can grow one back: pieces keep their names in
+            their detail pages, catalog listings, and this
+            tile's aria-label (accessibility), and the tap-to-
+            peek window still names the piece on demand — but
+            nothing is printed under a displayed item. Any
+            FUTURE Library display component must follow the
+            same rule: render the item, never a caption. */}
       </button>
     );
   }
@@ -20734,7 +22245,7 @@ function LibrarySpine({
         hapticTick();
         onPeek(entry, e.currentTarget.getBoundingClientRect());
       }}
-      className={`flex h-28 min-w-0 flex-1 basis-0 flex-col items-center justify-between rounded-t-md pb-1.5 pt-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_-2px_0_3px_rgba(0,0,0,0.35),0_0_10px_rgba(108,124,255,0.15)] transition active:scale-[0.97] ${
+      className={`flex h-28 min-w-0 flex-1 basis-0 select-none flex-col items-center justify-between rounded-t-md pb-1.5 pt-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_-2px_0_3px_rgba(0,0,0,0.35),0_0_10px_rgba(108,124,255,0.15)] transition active:scale-[0.97] ${
         entry.owned > 0 ? "" : "opacity-40 saturate-50"
       } ${selected ? "ring-2 ring-[var(--accent)]" : ""}`}
       style={{
@@ -21804,9 +23315,12 @@ function LibraryComicWall() {
                 }`}
               >
                 <ScaledSlabFront comic={comic} />
-                <span className="mt-1.5 block truncate text-center text-[11px] font-semibold text-[var(--text)]">
-                  {comic.title}
-                </span>
+                {/* No title under the slab — STANDING RULE
+                    (Anthony, Nov 5, 2026): no displayed item
+                    in the Library ever shows a name label or
+                    caption underneath it, comics included. The
+                    slab keeps its name in its aria-label above
+                    and in its own detail sheet. */}
               </button>
             ))}
           </div>
@@ -21818,7 +23332,7 @@ function LibraryComicWall() {
           ) : null}
           <div
             aria-hidden="true"
-            className="mt-3 h-[6px] rounded bg-gradient-to-b from-[#3d5086] to-[#141f3d] shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
+            className="library-board library-grain mt-3"
           />
         </div>
       ) : (
@@ -21828,6 +23342,31 @@ function LibraryComicWall() {
           section.
         </p>
       )}
+      {display.isError ? (
+        /* The wall's chosen-slabs lookup failed (Anthony,
+            Nov 7, 2026 — the Library loading report): the
+            wall above is showing the default slabs because
+            his saved choice couldn't be read. Say so, and
+            let him retry the read right here, instead of
+            the failure passing silently. */
+        <div className="mt-2 text-center">
+          <p role="alert" className="text-xs leading-relaxed text-[var(--dim)]">
+            Your saved wall choice couldn&rsquo;t load — showing
+            the default slabs for now.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              hapticTick();
+              void display.refetch();
+            }}
+            aria-label="Try loading your saved comics wall choice again"
+            className="mt-1.5 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--text)] transition active:scale-[0.97]"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
       {openComic ? (
         /* The Library overlay sits at z-70 and ComicSheet's own
             root is z-50 — this wrapper's stacking context lifts
@@ -21850,16 +23389,32 @@ function LibraryPage({
   onOpenEntry,
   comicsWall,
   arrangeable = false,
+  shelfStatus,
 }: {
   ownerName: string;
   entries: LibraryEntry[];
   onClose: () => void;
   onOpenEntry: (entry: LibraryEntry) => void;
-  /** The owner's OWN Library (Anthony, Nov 4, 2026): shelves
-      and everything on them can be long-press dragged into a
-      new order, saved per user (getLibraryOrder /
-      saveLibraryOrder). Friends' libraries render the natural
-      order and never offer the drag. */
+  /** Per-family load state for the query-built shelves
+      (Funko, Legos — Anthony, Nov 7, 2026): while one of
+      those lookups is still in flight, or after it failed,
+      its signed shelf still stands with a loading note or
+      a couldn't-load note and a Try again button, instead
+      of the shelf silently not existing. Absent for a
+      family once its items are in hand. */
+  shelfStatus?: Partial<
+    Record<
+      "funko" | "lego",
+      { state: "loading" | "error"; onRetry: () => void }
+    >
+  >;
+  /** The owner's OWN Library (Anthony, Nov 4, 2026): the
+      non-card items on the shelves can be long-press dragged
+      into a new order, saved per user (getLibraryOrder /
+      saveLibraryOrder). Shelves themselves never move —
+      shelf moving was scratched by Anthony on Nov 5, 2026.
+      Friends' libraries render the natural order and never
+      offer the drag. */
   arrangeable?: boolean;
   /** The Comics slab display wall (Anthony, Nov 4, 2026):
       on the owner's own Library, the Comics binder spine is
@@ -21983,20 +23538,41 @@ function LibraryPage({
     section: LibraryEntry["section"];
     list: LibraryEntry[];
     start: number;
+    /** Load state for a query-built shelf with nothing to
+        show yet (Anthony, Nov 7, 2026): the shelf still
+        stands — sign, board, and a note — while its lookup
+        is in flight or after it failed, with Try again
+        wired to that shelf's own refetch. */
+    status?: { state: "loading" | "error"; onRetry: () => void };
   }[] = [];
   let shelfRunning = 0;
   for (const section of orderedSections) {
     // With the slab wall in place, Comics has no spines.
     if (section === "comics" && comicsWall) continue;
     const list = sectionLists.get(section) ?? [];
+    if (
+      list.length === 0 &&
+      (section === "funko" || section === "lego") &&
+      shelfStatus?.[section]
+    ) {
+      shelves.push({
+        section,
+        list: [],
+        start: shelfRunning,
+        status: shelfStatus[section],
+      });
+      continue;
+    }
     for (let i = 0; i < list.length; i += shelfCapacity) {
       const slice = list.slice(i, i + shelfCapacity);
       shelves.push({ section, list: slice, start: shelfRunning });
       shelfRunning += slice.length;
     }
   }
-  // Section blocks group a family's boards under ONE sign, so
-  // a shelf drag moves the whole family at once.
+  // Section blocks group a family's boards under ONE sign.
+  // (They used to exist so a shelf drag could move the whole
+  // family at once; shelf moving was scratched by Anthony on
+  // Nov 5, 2026 — the grouping stays for the signs.)
   const sectionBlocks: {
     section: LibraryEntry["section"];
     boards: typeof shelves;
@@ -22017,11 +23593,25 @@ function LibraryPage({
   sectionListsRef.current = sectionLists;
 
   // ---- Long-press drag-to-reorder (Anthony, Nov 4, 2026) ----
-  // Same contract as the Home tile drag: hold ~400ms to lift,
-  // drag with the finger, swaps happen live, the drop commits
-  // once and saves. Sessions run on window listeners with the
-  // dragged element following by direct transform, so no
-  // re-render happens per pointer move — only per swap.
+  // The Home tile drag's contract, exactly: hold ~400ms to
+  // lift; at the lift the scroll locks in full and every slot's
+  // geometry is cached; during the drag only transforms move
+  // (the dragged piece follows the finger, the rest glide
+  // between cached slots); the drop commits the new order ONCE
+  // and saves it. No React state is written mid-drag and no
+  // live rect is read while anything is transformed — the
+  // v1.98.6 root-cause fix for drags that started but never
+  // completed on a real phone (see beginEntryDrag).
+  // SCOPE (Anthony, Nov 5, 2026): only NON-CARD items drag —
+  // Lego sets, Funko figures, comics. Card binders (chapters,
+  // promos, quests) are never draggable; their hold keeps its
+  // tap-peek / hold-to-open behavior. Whole shelves do NOT
+  // drag at all: Anthony scratched shelf moving on Nov 5,
+  // 2026 ("I'm just going to scratch moving the shelves") —
+  // the shelf-drag session and every hold handler that fed
+  // it are removed, and shelves render in their fixed order
+  // (the saved section order still applies; it just can no
+  // longer be changed by dragging).
   const entryElsRef = useRef(new Map<string, HTMLElement>());
   const sectionElsRef = useRef(new Map<string, HTMLElement>());
   const registerEntryEl = (id: string, el: HTMLElement | null) => {
@@ -22042,172 +23632,200 @@ function LibraryPage({
   ): { moved: boolean } => {
     const session = { moved: false };
     const section = entry.section;
-    // Scroll lock for the drag's duration (Nov 5, 2026):
-    // the shared drag hook's contract — the page must not
-    // scroll under an item drag on any surface where the
-    // button's own touch-action lock does not hold.
+    // ---- ROOT-CAUSE REWRITE (Anthony, Nov 5, 2026, v1.98.6):
+    // on his phone the v1.98.4 drag "wanted to try to move but
+    // didn't" — neither items nor shelves ever completed a
+    // move. The old sessions broke the Home tile drag's proven
+    // contract in three ways: they hit-tested LIVE rects while
+    // transforms were shifting those very rects, they wrote
+    // React state on every swap (re-rendering the shelf under
+    // the finger mid-drag), and the shelf session had no
+    // scroll lock at all, so the page scroll stole the gesture
+    // and the browser cancelled the pointer. Both sessions now
+    // run the Home contract exactly: at lift, cache every
+    // slot's geometry ONCE; lock the scroll completely
+    // (touch-action none on the touched elements, the real
+    // scroller's overflow hidden, and a non-passive touchmove
+    // block); during the drag move ONLY transforms — the
+    // dragged item follows the finger, the others GLIDE
+    // between their cached slots; commit the new order ONCE
+    // at the drop and save it. No state writes, no live-rect
+    // reads while anything is transformed.
+    // (1) The full scroll lock, synchronously at lift.
     let scroller: HTMLElement | null = el.parentElement;
     while (scroller) {
-      const oy = window.getComputedStyle(scroller).overflowY;
-      if (oy === "auto" || oy === "scroll") break;
+      const cs = window.getComputedStyle(scroller);
+      if (
+        (cs.overflowY === "auto" || cs.overflowY === "scroll") &&
+        scroller.scrollHeight > scroller.clientHeight
+      )
+        break;
       scroller = scroller.parentElement;
     }
     const prevScrollerOverflow = scroller?.style.overflow ?? "";
     if (scroller) scroller.style.overflow = "hidden";
+    const row = el.parentElement;
+    const prevRowTouch = row?.style.touchAction ?? "";
+    if (row) row.style.touchAction = "none";
     const blockTouchScroll = (ev: TouchEvent) =>
       ev.preventDefault();
     document.addEventListener("touchmove", blockTouchScroll, {
       passive: false,
     });
+    // (2) Geometry cached once, here at the lift: the slots
+    // are the section's items in their order at drag start.
+    const ids = (sectionListsRef.current.get(section) ?? []).map(
+      (e) => e.id,
+    );
+    const slots = new Map<
+      string,
+      { left: number; top: number; width: number; height: number }
+    >();
+    for (const id of ids) {
+      const node = entryElsRef.current.get(id);
+      if (!node) continue;
+      const r = node.getBoundingClientRect();
+      slots.set(id, {
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      });
+    }
+    const home = slots.get(entry.id);
+    let logical = [...ids];
+    const prevZ = el.style.zIndex;
+    const prevPos = el.style.position;
+    const prevShadow = el.style.boxShadow;
+    const prevTransition = el.style.transition;
+    const prevTouch = el.style.touchAction;
     el.style.zIndex = "30";
     el.style.position = "relative";
     el.style.boxShadow = "0 14px 34px rgba(0,0,0,0.6)";
-    const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (Math.abs(dx) + Math.abs(dy) > 10) session.moved = true;
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(1.06)`;
-      if (!session.moved) return;
-      // Hit-test the other spines of the SAME family: crossing
-      // one swaps the two in the saved order, live.
-      for (const [otherId, otherEl] of entryElsRef.current) {
-        if (otherId === entry.id) continue;
-        const r = otherEl.getBoundingClientRect();
-        if (
-          ev.clientX >= r.left &&
-          ev.clientX <= r.right &&
-          ev.clientY >= r.top &&
-          ev.clientY <= r.bottom
-        ) {
-          const lists = new Map(sectionListsRef.current);
-          const list = [...(lists.get(section) ?? [])];
-          const a = list.findIndex((e) => e.id === entry.id);
-          const b = list.findIndex((e) => e.id === otherId);
-          if (a >= 0 && b >= 0 && a !== b) {
-            const tmp = list[a]!;
-            list[a] = list[b]!;
-            list[b] = tmp;
-            lists.set(section, list);
-            sectionListsRef.current = lists;
-            const flat = flattenEntryOrder(lists);
-            ordEntriesRef.current = flat;
-            setOrdEntries(flat);
-          }
-          break;
+    // Drag-session hardening (Anthony, Nov 5, 2026 — the
+    // inverted on-device pattern: the Funko SHELF moved but
+    // its figures would not, and Lego figures moved but
+    // their SHELF would not; the shared drag hook the Comics
+    // wall uses — the one family that passed both ways —
+    // does two things these hand-rolled sessions missed).
+    // (a) The tile's own CSS transition (the photo tile and
+    // spine both carry Tailwind's `transition`) must go OFF
+    // for the drag: left on, every transform the session
+    // writes animates ~150ms behind the finger, so the piece
+    // trails, judders, and reads as "won't move" even while
+    // the session's math runs. The shared hook kills the
+    // transition at lift; do the same here.
+    el.style.transition = "none";
+    // (b) The DRAGGED element itself locks its touch action
+    // for the whole session (the hook locks the tile, not
+    // just its row): the browser picks scroll-vs-drag from
+    // the touched element's own chain, and a chain that
+    // still allows panning can hand the gesture to the
+    // scroller mid-drag and cancel the pointer.
+    el.style.touchAction = "none";
+    const glideOthers = () => {
+      logical.forEach((id, i) => {
+        if (id === entry.id) return;
+        const node = entryElsRef.current.get(id);
+        const from = slots.get(id);
+        const to = ids[i] ? slots.get(ids[i]) : undefined;
+        if (!node || !from || !to) return;
+        node.style.transition = "transform 180ms ease";
+        node.style.transform = `translate(${to.left - from.left}px, ${to.top - from.top}px)`;
+      });
+    };
+    let raf = 0;
+    let lastX = startX;
+    let lastY = startY;
+    const frame = () => {
+      raf = 0;
+      const dx = lastX - startX;
+      const dy = lastY - startY;
+      if (Math.hypot(dx, dy) > 10) session.moved = true;
+      el.style.transform = `translate(${dx}px, ${dy}px) scale(1.05)`;
+      if (!session.moved || !home) return;
+      // The slot whose cached center is nearest the dragged
+      // item's center is its new home; crossing into one
+      // splices the logical order and glides the others.
+      const cx = home.left + home.width / 2 + dx;
+      const cy = home.top + home.height / 2 + dy;
+      let best = -1;
+      let bestD = Number.POSITIVE_INFINITY;
+      ids.forEach((id, i) => {
+        const s = slots.get(id);
+        if (!s) return;
+        const d = Math.hypot(
+          s.left + s.width / 2 - cx,
+          s.top + s.height / 2 - cy,
+        );
+        if (d < bestD) {
+          bestD = d;
+          best = i;
         }
+      });
+      const cur = logical.indexOf(entry.id);
+      if (best >= 0 && best !== cur) {
+        logical.splice(cur, 1);
+        logical.splice(best, 0, entry.id);
+        glideOthers();
       }
     };
-    const onUp = () => {
+    const onMove = (ev: PointerEvent) => {
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (!raf) raf = requestAnimationFrame(frame);
+    };
+    const finish = (commitIt: boolean) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      el.style.transform = "";
-      el.style.zIndex = "";
-      el.style.boxShadow = "";
-      if (scroller) scroller.style.overflow = prevScrollerOverflow;
+      window.removeEventListener("pointercancel", onCancel);
+      if (raf) cancelAnimationFrame(raf);
       document.removeEventListener("touchmove", blockTouchScroll);
-      if (session.moved) {
+      if (scroller) scroller.style.overflow = prevScrollerOverflow;
+      if (row) row.style.touchAction = prevRowTouch;
+      const changed = logical.some((id, i) => id !== ids[i]);
+      if (commitIt && session.moved && changed) {
+        // (3) ONE commit at the drop: state, refs, and the
+        // saved order all move together, then the transforms
+        // clear as the committed render lands.
+        const lists = new Map(sectionListsRef.current);
+        const byId = new Map(
+          (lists.get(section) ?? []).map((e) => [e.id, e] as const),
+        );
+        lists.set(
+          section,
+          logical
+            .map((id) => byId.get(id))
+            .filter((e): e is LibraryEntry => e != null),
+        );
+        sectionListsRef.current = lists;
+        const flat = flattenEntryOrder(lists);
+        ordEntriesRef.current = flat;
+        setOrdEntries(flat);
         saveOrder.mutate({
           sections: ordSectionsRef.current,
-          entries: ordEntriesRef.current,
+          entries: flat,
         });
       }
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return session;
-  };
-  const beginShelfDrag = (
-    section: LibraryEntry["section"],
-    blockEl: HTMLElement,
-    startY: number,
-  ): { moved: boolean } => {
-    const session = { moved: false };
-    blockEl.style.zIndex = "30";
-    blockEl.style.position = "relative";
-    blockEl.style.boxShadow = "0 14px 34px rgba(0,0,0,0.55)";
-    const onMove = (ev: PointerEvent) => {
-      const dy = ev.clientY - startY;
-      if (Math.abs(dy) > 10) session.moved = true;
-      blockEl.style.transform = `translateY(${dy}px)`;
-      if (!session.moved) return;
-      for (const [other, otherEl] of sectionElsRef.current) {
-        if (other === section) continue;
-        const r = otherEl.getBoundingClientRect();
-        if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
-          const cur = [...ordSectionsRef.current];
-          const full = applyOrder(
-            SECTION_ORDER as string[],
-            cur,
-          );
-          const a = full.indexOf(section);
-          const b = full.indexOf(other);
-          if (a >= 0 && b >= 0 && a !== b) {
-            const tmp = full[a]!;
-            full[a] = full[b]!;
-            full[b] = tmp;
-            ordSectionsRef.current = full;
-            setOrdSections(full);
-          }
-          break;
+      window.setTimeout(() => {
+        for (const id of ids) {
+          const node = entryElsRef.current.get(id);
+          if (!node) continue;
+          node.style.transition = "";
+          node.style.transform = "";
         }
-      }
+        el.style.zIndex = prevZ;
+        el.style.position = prevPos;
+        el.style.boxShadow = prevShadow;
+        el.style.touchAction = prevTouch;
+      }, 60);
     };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      blockEl.style.transform = "";
-      blockEl.style.zIndex = "";
-      blockEl.style.boxShadow = "";
-      if (session.moved) {
-        saveOrder.mutate({
-          sections: ordSectionsRef.current,
-          entries: ordEntriesRef.current,
-        });
-      }
-    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("pointercancel", onCancel);
     return session;
-  };
-  const signHoldRef = useRef<number | null>(null);
-  const onSignPointerDown = (
-    section: LibraryEntry["section"],
-    blockEl: HTMLElement | null,
-    e: { clientX: number; clientY: number },
-  ) => {
-    if (!arrangeable || !blockEl) return;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    blockEl.style.touchAction = "none";
-    signHoldRef.current = window.setTimeout(() => {
-      window.removeEventListener("pointermove", onMoveWatch);
-      hapticTick();
-      beginShelfDrag(section, blockEl, startY);
-    }, 400);
-    const cancel = () => {
-      if (signHoldRef.current != null) {
-        window.clearTimeout(signHoldRef.current);
-        signHoldRef.current = null;
-      }
-      blockEl.style.touchAction = "";
-      window.removeEventListener("pointerup", cancel);
-      window.removeEventListener("pointercancel", cancel);
-      window.removeEventListener("pointermove", onMoveWatch);
-    };
-    // A press that drifts past the shared 14px budget before
-    // the lift is a scroll, not a shelf grab — cancel the
-    // pending lift and hand the gesture back.
-    const onMoveWatch = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 14)
-        cancel();
-    };
-    window.addEventListener("pointermove", onMoveWatch);
-    window.addEventListener("pointerup", cancel);
-    window.addEventListener("pointercancel", cancel);
   };
   const peekWidth = Math.min(300, window.innerWidth - 24);
   const peekLeft = peek
@@ -22251,7 +23869,27 @@ function LibraryPage({
           </div>
         </div>
 
-        <div className="mt-5 space-y-5">
+        {/* The Classic Mahogany bookcase (Anthony, Nov 7,
+            2026 — Mockup 1 from the Library Shelf Mockups —
+            Traditional page, his pick): the whole shelf
+            stack stands inside one traditional real-wood
+            unit — rounded crown cornice with a dentil strip
+            under it, fluted side posts, a dark planked back,
+            thick wood boards (the .library-board under each
+            shelf's items), and a base plinth with a brass
+            LIBRARY nameplate. The shelves, signs, items,
+            and every Library rule inside are unchanged;
+            only the furniture changed. Styles live in
+            theme.css (.library-*). */}
+        <div className="library-case mt-5">
+          <div aria-hidden="true" className="library-cornice">
+            <div className="library-cornice-cap library-grain" />
+            <div className="library-cornice-band" />
+            <div className="library-cornice-step library-grain" />
+          </div>
+          <div className="flex items-stretch">
+            <div aria-hidden="true" className="library-pilaster" />
+            <div className="library-back min-w-0 flex-1 space-y-5 px-2 py-3">
           {sectionBlocks.map((block) => (
             <div
               key={block.section}
@@ -22261,44 +23899,18 @@ function LibraryPage({
               }}
             >
               {block.boards.map((shelf, si) => (
-                <div
-                  key={si}
-                  className={si > 0 ? "mt-5" : ""}
-                  onPointerDown={
-                    arrangeable
-                      ? (e) => {
-                          // Whole-shelf grab (Nov 5, 2026):
-                          // the shelf drag used to start ONLY
-                          // from the tiny sign — a thumb on the
-                          // shelf itself (the natural grab)
-                          // found no handler at all and the
-                          // shelf never moved. The whole board
-                          // (sign, items row, board bar) is
-                          // the handle now; presses that land
-                          // on an item keep the item's own
-                          // tap / hold / drag behavior.
-                          if (
-                            (e.target as HTMLElement).closest(
-                              "[data-library-entry]",
-                            )
-                          )
-                            return;
-                          onSignPointerDown(
-                            shelf.section,
-                            sectionElsRef.current.get(
-                              shelf.section,
-                            ) ?? null,
-                            e,
-                          );
-                        }
-                      : undefined
-                  }
-                >
+                <div key={si} className={si > 0 ? "mt-5" : ""}>
               {/* The shelf's sign: the family this shelf
                   holds (Anthony, Nov 3, 2026, ~11:36 AM,
-                  refined ~11:54 AM). The shelf-hold handler
-                  lives on the board wrapper above (the whole
-                  shelf is the handle), not on the sign alone. */}
+                  refined ~11:54 AM). Shelves themselves are
+                  FIXED — shelf moving was scratched by
+                  Anthony on Nov 5, 2026 after repeated failed
+                  attempts: no hold on a shelf or its sign
+                  starts any drag, and presses on the board
+                  simply scroll. Only the items ON the shelves
+                  (Lego sets, Funko figures, comics) still
+                  long-hold drag, exactly as confirmed working
+                  on-device. */}
               <div className="mb-1.5 flex justify-center">
                 {shelf.section === "promos" ? (
                   <span className="flex items-center gap-1.5 rounded-md border border-[var(--gold)]/35 bg-[var(--surface)] py-[3px] pl-2.5 pr-1.5 shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
@@ -22470,7 +24082,12 @@ function LibraryPage({
                     selected={peek?.entry.id === entry.id}
                     onPeek={(e, rect) => openPeek(e, rect)}
                     onOpen={onOpenEntry}
-                    arrangeable={arrangeable}
+                    arrangeable={
+                      arrangeable &&
+                      (entry.section === "funko" ||
+                        entry.section === "lego" ||
+                        entry.section === "comics")
+                    }
                     registerEl={registerEntryEl}
                     onDragLift={beginEntryDrag}
                   />
@@ -22478,28 +24095,62 @@ function LibraryPage({
               </div>
               <div
                 aria-hidden="true"
-                className="h-[6px] rounded bg-gradient-to-b from-[#3d5086] to-[#141f3d] shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
+                className="library-board library-grain"
               />
+              {shelf.status ? (
+                /* The shelf's load state (Anthony, Nov 7,
+                    2026): the lookup behind this shelf is
+                    still running, or it failed — either way
+                    the shelf says so right under its board
+                    instead of the family vanishing from the
+                    Library. Try again refetches that shelf's
+                    own lookup. */
+                <div className="px-1 pb-1 pt-3 text-center">
+                  {shelf.status.state === "loading" ? (
+                    <p
+                      role="status"
+                      className="animate-pulse text-sm text-[#ecd9b0]"
+                    >
+                      {shelf.section === "funko"
+                        ? "Loading your Funko figures…"
+                        : "Loading your Lego sets…"}
+                    </p>
+                  ) : (
+                    <>
+                      <p
+                        role="alert"
+                        className="text-sm text-[#ecd9b0]"
+                      >
+                        {shelf.section === "funko"
+                          ? "Your Funko figures couldn't load."
+                          : "Your Lego sets couldn't load."}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          hapticTick();
+                          shelf.status?.onRetry();
+                        }}
+                        aria-label={
+                          shelf.section === "funko"
+                            ? "Try loading your Funko figures again"
+                            : "Try loading your Lego sets again"
+                        }
+                        className="mt-2 rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-bold text-[var(--on-accent)] transition active:scale-[0.97]"
+                      >
+                        Try again
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : null}
                 </div>
               ))}
               {block.section === "comics" && comicsWall ? (
                 <div>
                   {/* The Comics sign over the slab display wall —
                       same masthead as the old Comics shelf sign. */}
-                  <div
-                    className="mb-1.5 flex justify-center"
-                    onPointerDown={
-                      arrangeable
-                        ? (e) =>
-                            onSignPointerDown(
-                              "comics",
-                              sectionElsRef.current.get("comics") ??
-                                null,
-                              e,
-                            )
-                        : undefined
-                    }
-                  >
+                  <div className="mb-1.5 flex justify-center">
                     <span className="comics-sign" aria-label="Comics">
                       <span aria-hidden="true" className="comics-masthead">
                         Comics
@@ -22511,6 +24162,14 @@ function LibraryPage({
               ) : null}
             </div>
           ))}
+            </div>
+            <div aria-hidden="true" className="library-pilaster" />
+          </div>
+          <div className="library-plinth library-grain">
+            <span aria-hidden="true" className="library-nameplate">
+              LIBRARY
+            </span>
+          </div>
         </div>
 
         {entries.length === 0 ? (
@@ -22522,7 +24181,7 @@ function LibraryPage({
             Light-tap a spine to peek at whose binder it is and which
             chapter — press and hold a spine to open that binder.
             {arrangeable
-              ? " Hold a spine or a shelf sign a moment longer, then drag to rearrange — your order is saved as your own."
+              ? " Hold a Lego set, a Funko figure, or a comic a moment longer, then drag to rearrange it — card binders stay put. Your order is saved as your own."
               : ""}
           </p>
         )}
@@ -32311,7 +33970,16 @@ export function App() {
           (st as Record<string, unknown>).lorcanaHomeAdmin ===
             true ||
           (st as Record<string, unknown>)
-            .lorcanaAdminCollectors === true)
+            .lorcanaAdminCollectors === true ||
+          // A game catalog item's detail sheet entry likewise
+          // (Anthony, Nov 5, 2026 — the Tumbler report: a
+          // refresh on a Lego set's page bounced him back to
+          // the Lego catalog). The entry normally carries
+          // mcView too, but naming the sheet's key keeps a
+          // refresh from ever being normalized away before
+          // GamePanel's seed (gameCardId) reads it.
+          (st as Record<string, unknown>).lorcanaGameCard ===
+            true)
       )
         return;
       // Three-back rule (Anthony, Nov 4, 2026): the app sits in
@@ -32700,6 +34368,14 @@ export function App() {
     const st = readHistoryState();
     return typeof st?.lorcanaCard === "number" ? st.lorcanaCard : null;
   });
+  // Mirror of the open card's id, readable from the stable
+  // openCard callback below (speed pass, Nov 5, 2026): the
+  // memoized binder pockets take openCard as a prop, so it
+  // must keep one identity across renders — it reads the
+  // current selection through this ref instead of closing
+  // over the state.
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   const [searchText, setSearchText] = useState("");
   // Set selection starts on the year-grouped tile grid (Shiny-style);
   // tapping a tile drills into that section, "All sets" returns here.
@@ -33354,8 +35030,8 @@ export function App() {
     typeof readHistoryState()?.lorcanaCard === "number",
   );
   const sheetHeldRef = useRef(sheetPushedRef.current);
-  const openCard = (id: number) => {
-    if (selectedId === id) return;
+  const openCard = useCallback((id: number) => {
+    if (selectedIdRef.current === id) return;
     hapticTick();
     setSelectedId(id);
     // Window (three-back rule, Anthony, Nov 4, 2026): one entry;
@@ -33375,7 +35051,7 @@ export function App() {
       sheetPushedRef.current = pushWindowState(next, "lorcanaCard");
       sheetHeldRef.current = true;
     }
-  };
+  }, []);
   const closeCard = () => {
     if (sheetPushedRef.current) {
       window.history.back();
@@ -33504,11 +35180,14 @@ export function App() {
               openSealedSectionFromProfile
             }
             onOpenPortfolio={() => navigate("finances")}
+            onOpenTrade={() => navigate("social")}
             updateAvailable={availableUpdate != null}
             onOpenUpdate={() => openUpdateView("real")}
             onOpenUpdateTest={() => openUpdateView("test")}
             onOpenChangeRequests={openTicketsWindow}
             onOpenOrderMail={openInbox}
+            jarvisVision={theme === "jarvis"}
+            onScanVision={() => openScan()}
           />
         ) : view === "tcg" ? (
           <TcgUniversePage

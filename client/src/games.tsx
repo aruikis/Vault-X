@@ -17,11 +17,13 @@
 // so its cards honestly show no price.
 
 import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
+memo,
+useCallback,
+useEffect,
+useRef,
+useState,
+useSyncExternalStore,
+type ReactNode,
 } from "react";
 import {
 useMutation,
@@ -33,16 +35,16 @@ import { api, type ApiResponse } from "./api";
 import { fmtMoneyUSD, useT } from "./i18n";
 import { SearchScanRow } from "./searchScanRow";
 import {
-  GradedSlabsBox,
-  SlabCapturePanel,
-  SlabDetailView,
-  type GradedCardPick,
-  type GradedSlab,
+GradedSlabsBox,
+SlabCapturePanel,
+SlabDetailView,
+type GradedCardPick,
+type GradedSlab,
 } from "./gradedScan";
 import {
-  CutoutImg,
-  getProxiedUrl,
-  useCutoutState,
+CutoutImg,
+getProxiedUrl,
+useCutoutState,
 } from "./cutoutImg";
 import { Turntable } from "./turntable";
 import { OwnedLocationBar } from "./whereItLives";
@@ -54,17 +56,17 @@ useGridCols,
 type GridCols,
 } from "./gridCols";
 import {
-  ONLY_MINE_ALWAYS,
-  ONLY_MINE_THRESHOLD,
-  OnlyMineToggle,
-  useOnlyMine,
+ONLY_MINE_ALWAYS,
+ONLY_MINE_THRESHOLD,
+OnlyMineToggle,
+useOnlyMine,
 } from "./onlyMine";
 import {
-  pushWindowState,
-  readNavState,
-  replaceNavState,
-  scrubWindowKeys,
-  useWindowHistory,
+pushWindowState,
+readNavState,
+replaceNavState,
+scrubWindowKeys,
+useWindowHistory,
 } from "./historyNav";
 
 export type GameKey =
@@ -96,10 +98,16 @@ export const GAME_TITLES: Record<GameKey, string> = {
   "wwe-topps": "WWE Topps",
 };
 
-/** The Topps sports catalogs are data-only (Anthony, Nov 4,
+/** The Topps-family catalogs import data-only (Anthony, Nov 4,
     2026): rows carry number, player, team, and subset from
-    Topps' official checklists — no artwork exists for them
-    anywhere in the app, by his direction. */
+    Topps' official checklists, which publish no images. Since
+    Nov 6, 2026, card fronts for these games are filled in one
+    card at a time by the daily card-art hunt — COMC's
+    photographed fronts as the pull source, the Trading Card
+    Database as existence reference, Collectr via its API
+    once Anthony's access is approved;
+    this flag now only picks the placeholder wording for a
+    card whose front has not been sourced yet. */
 export function gameIsDataOnly(game: GameKey): boolean {
   return (
     game === "topps" ||
@@ -124,19 +132,19 @@ const GAME_SOURCE_LINES: Record<GameKey, string> = {
   lego:
     "Catalog: Rebrickable's official bulk Lego data (sets and themes) — every set with its number, theme, year, piece count, and set image. That source publishes no prices and no per-set minifigure counts; open a set for its researched facts, minifigures, and market data, each labeled with its source.",
   topps:
-    "Catalog: Topps' own official baseball checklists (topps.com) — every Topps-branded baseball product, 2018–2026, card by card: number, player, team, and subset. (Bowman baseball lives in its own tab.) Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official baseball checklists (topps.com) — every Topps-branded baseball product, 2018–2026, card by card: number, player, team, and subset. (Bowman baseball lives in its own tab.) The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   bowman:
-    "Catalog: Topps' own official baseball checklists (topps.com) — every Bowman-branded baseball product, card by card: number, player, team, and subset. Bowman is a Topps brand; it gets its own tab because collectors sort by the name on the card. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official baseball checklists (topps.com) — every Bowman-branded baseball product, card by card: number, player, team, and subset. Bowman is a Topps brand; it gets its own tab because collectors sort by the name on the card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "topps-basketball":
-    "Catalog: Topps' own official basketball checklists (topps.com) — every Topps and Bowman basketball product, card by card: number, player, team, and subset. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official basketball checklists (topps.com) — every Topps and Bowman basketball product, card by card: number, player, team, and subset. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "disney-topps":
-    "Catalog: Topps' own official Disney checklists (topps.com) — Topps Chrome Disney, Disney Sapphire, Disney Neon, Mint Disney, and the rest of Topps' Disney card releases, card by card. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official Disney checklists (topps.com) — Topps Chrome Disney, Disney Sapphire, Disney Neon, Mint Disney, and the rest of Topps' Disney card releases, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "starwars-topps":
-    "Catalog: Topps' own official Star Wars checklists (topps.com) — Masterwork, Chrome, Galaxy, and the rest of Topps' Star Wars card releases, card by card. These are Topps collectible cards, separate from Star Wars Unlimited. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official Star Wars checklists (topps.com) — Masterwork, Chrome, Galaxy, and the rest of Topps' Star Wars card releases, card by card. These are Topps collectible cards, separate from Star Wars Unlimited. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   gpk:
-    "Catalog: Topps' own official Garbage Pail Kids checklists (topps.com) — every Garbage Pail Kids release Topps publishes a checklist for, card by card. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official Garbage Pail Kids checklists (topps.com) — every Garbage Pail Kids release Topps publishes a checklist for, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "wwe-topps":
-    "Catalog: Topps' own official WWE checklists (topps.com) — Chrome WWE, Finest WWE, Royalty, and the rest of Topps' WWE card releases, card by card. Data only: no artwork is downloaded, and the checklists publish no prices, so none are shown.",
+    "Catalog: Topps' own official WWE checklists (topps.com) — Chrome WWE, Finest WWE, Royalty, and the rest of Topps' WWE card releases, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
 };
 
 /** The item noun for a catalog: cards are "printings";
@@ -295,7 +303,15 @@ function GridArtImg({
   );
 }
 
-function GameGridTile({
+// Speed pass (Nov 5, 2026): memoized like the binder's
+// Pocket — a set grid reveals tiles in batches inside a panel
+// that re-renders on every keystroke and query update, and
+// unchanged tiles (stable onOpen + structurally shared card
+// objects) now skip re-rendering. The roots also carry the
+// shared content-visibility classes, so the browser skips
+// layout and paint for tiles far off screen, same as binder
+// pockets already did.
+const GameGridTile = memo(function GameGridTile({
   game,
   c,
   cols,
@@ -373,7 +389,7 @@ function GameGridTile({
         shownQty === 0 ? "opacity-60" : ""
       }`}
     >
-      {gameIsDataOnly(game) ? "Data only · no artwork" : "No artwork link"}
+      {gameIsDataOnly(game) ? "Artwork not sourced yet" : "No artwork link"}
     </span>
   );
   const aria = `${c.name}, number ${c.printed}${shownQty > 0 ? `, owned ${shownQty}` : ", missing"}`;
@@ -383,7 +399,7 @@ function GameGridTile({
         type="button"
         onClick={() => onOpen(c)}
         aria-label={aria}
-        className="text-left"
+        className="cv-auto text-left"
       >
         {art}
         <span className="mt-1 block truncate text-[11px] font-medium leading-tight text-[var(--text)]">
@@ -397,7 +413,7 @@ function GameGridTile({
     );
   }
   return (
-    <div>
+    <div className="cv-auto-lg">
       <button
         type="button"
         onClick={() => onOpen(c)}
@@ -443,7 +459,7 @@ function GameGridTile({
       </div>
     </div>
   );
-}
+});
 
 /** Price alerts for one game-catalog item (Anthony, Nov 4,
     2026): creation lives on the item's detail view like every
@@ -647,18 +663,20 @@ function FunkoFigureDetail({
           </dl>
 
           <LegoSectionTitle title="Figure facts" />
-          <dl className="mt-2 space-y-1.5">
-            <LegoFactRow label="Number" value={card.printed || null} />
-            <LegoFactRow label="Series" value={card.sectionName || null} />
-            <LegoFactRow label="Rarity" value={card.rarity || null} />
-            <LegoFactRow label="Finish" value={card.finish || null} />
-          </dl>
+          <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
+            <dl className="space-y-1.5">
+              <LegoFactRow label="Number" value={card.printed || null} />
+              <LegoFactRow label="Series" value={card.sectionName || null} />
+              <LegoFactRow label="Rarity" value={card.rarity || null} />
+              <LegoFactRow label="Finish" value={card.finish || null} />
+            </dl>
+          </div>
 
           {/* Your copy, in the same arrangement as the Lego
               and card pages: the album heading with the owned
               count in gold beside it, then the Where it lives
               bar carrying the copies stepper inside it. */}
-          <div className="mt-5 border-t border-white/12 pt-3">
+          <div className="mt-5 border-t border-[var(--border)] pt-3">
             <div className="flex items-baseline justify-between">
               <h3 className="font-album text-base text-[var(--text)]">
                 Your copy
@@ -683,7 +701,7 @@ function FunkoFigureDetail({
                 ownedQty={owned}
                 copiesQty={owned}
                 copiesItemName={card.name}
-                barClassName="bg-[var(--surface)]"
+                barClassName="border border-[var(--border)] bg-[var(--surface)]"
               >
                 <div className="space-y-1.5">
                   <LegoStepperRow
@@ -973,9 +991,22 @@ function LegoStepperRow({
   );
 }
 
+/** The bordered card box every Lego item-page section sits
+    in (Anthony, Nov 5, 2026, v1.98.6): his on-device report
+    was "borders missing everywhere" on the Lego pages — the
+    sections were borderless dark slabs while the rest of the
+    app uses bordered cards. This is the Lorcana card detail
+    pages' exact box: rounded-2xl, the theme border, the
+    theme surface. Every section box on a Lego item page
+    (stat tiles, fact lists, every Financial box, Your copy)
+    uses it, so no Lego page can drift back to plain,
+    borderless sections. */
+const LEGO_BOX =
+  "rounded-2xl border border-[var(--border)] bg-[var(--surface)]";
+
 /** A headline stat tile, mirroring the card detail's
     three-across stat grid: small uppercase label over the
-    value, on a dark inset tile. */
+    value, on a bordered card tile (see LEGO_BOX above). */
 function LegoStatTile({
   label,
   value,
@@ -984,7 +1015,7 @@ function LegoStatTile({
   value: string | null;
 }) {
   return (
-    <div className="rounded-lg bg-black/30 px-2 py-2">
+    <div className={`${LEGO_BOX} px-2 py-2`}>
       <dt className="text-[11px] uppercase tracking-wide text-[var(--dim)]">
         {label}
       </dt>
@@ -1074,7 +1105,7 @@ function LegoNotesEditor({
     },
   });
   return (
-    <div className="mt-3 rounded-xl bg-black/30 p-3">
+    <div className={`mt-3 ${LEGO_BOX} p-3`}>
       <p className="text-xs font-semibold text-[var(--text)]">
         Your record for this set
       </p>
@@ -1172,6 +1203,41 @@ function LegoSetDetail({
 }) {
   const [tab, setTab] = useState<"details" | "financial">("details");
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  // Set facts collapses behind an up/down toggle (Anthony,
+  // Nov 5, 2026): its long line-item list pushed "add to
+  // your collection" far down the page. Open by default —
+  // he said Set details looked okay as-is — and the choice
+  // is remembered on this device, so once collapsed it
+  // stays collapsed on every set page.
+  const [factsOpen, setFactsOpen] = useState<boolean>(() => {
+    try {
+      return (
+        window.localStorage.getItem(
+          "vaultx-lego-set-facts-open",
+        ) !== "0"
+      );
+    } catch {
+      return true;
+    }
+  });
+  const toggleFacts = () =>
+    setFactsOpen((v) => {
+      try {
+        window.localStorage.setItem(
+          "vaultx-lego-set-facts-open",
+          v ? "0" : "1",
+        );
+      } catch {
+        // Storage unavailable: the toggle still works for
+        // this page view.
+      }
+      return !v;
+    });
+  // Recent sold listings collapse too (Anthony, Nov 5,
+  // 2026): the expanded list took over the Financial tab.
+  // Collapsed by default, the sale count showing in its
+  // header.
+  const [soldOpen, setSoldOpen] = useState(false);
   const [researchStarted, setResearchStarted] = useState(false);
   const detail = useQuery({
     queryKey: ["legoSetDetail", card.id],
@@ -1208,16 +1274,51 @@ function LegoSetDetail({
     notes?.paidPriceUsd != null
       ? notes.paidPriceUsd * totalOwned
       : null;
-  const histValues = history.map((p) => p.unitValue);
+  // The chart's points (Anthony, Nov 5, 2026, v1.98.6): the
+  // raw history can carry the same month's value twice —
+  // a research run's monthly point plus the same value
+  // stamped with the research day — which drew a doubled
+  // step at the line's end. The chart plots each month's
+  // value once, sorted by date, and spaces points by their
+  // real dates, not by their index in the list.
+  const chartPts = (() => {
+    const seen = new Set<string>();
+    return [...history]
+      .filter((p) => {
+        const key = `${p.date.slice(0, 7)}|${p.unitValue}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  })();
+  const histValues = chartPts.map((p) => p.unitValue);
   const histMin = histValues.length ? Math.min(...histValues) : 0;
   const histMax = histValues.length ? Math.max(...histValues) : 0;
-  const histSpan = histMax - histMin;
   const soldSealed = (d?.soldListings ?? []).filter(
     (s) => s.condition === "sealed",
   );
   const soldUsed = (d?.soldListings ?? []).filter(
     (s) => s.condition !== "sealed",
   );
+  // The sold-data disclosure (the standing "last sold at"
+  // rule): the most recent actual sale per condition, and
+  // the average across the recorded recent sales — computed
+  // from the sold listings themselves, never from asking
+  // prices.
+  const byDateDesc = (
+    a: { date: string },
+    b: { date: string },
+  ) => b.date.localeCompare(a.date);
+  const latestSealedSale = [...soldSealed].sort(byDateDesc)[0];
+  const latestUsedSale = [...soldUsed].sort(byDateDesc)[0];
+  const avgSale = (list: typeof soldSealed) =>
+    list.length
+      ? list.reduce((a, s) => a + s.priceUsd, 0) / list.length
+      : null;
+  const latestAnySale = [...(d?.soldListings ?? [])].sort(
+    byDateDesc,
+  )[0];
   const soldRangeLine = (list: typeof soldSealed) =>
     list.length === 0
       ? null
@@ -1245,7 +1346,7 @@ function LegoSetDetail({
           details carries the set itself and Your copy;
           Financial carries every number. */}
       <div
-        className="flex rounded-full border border-white/12 bg-black/35 p-1"
+        className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
         role="group"
         aria-label="Lego set detail views"
       >
@@ -1272,7 +1373,7 @@ function LegoSetDetail({
       </div>
 
       {detail.isError ? (
-        <div className="mt-4 rounded-2xl border border-white/12 bg-black/30 px-4 py-4 text-center">
+        <div className={`mt-4 ${LEGO_BOX} px-4 py-4 text-center`}>
           <p className="text-sm text-[var(--text)]">
             This set&rsquo;s details didn&rsquo;t load.
           </p>
@@ -1317,8 +1418,128 @@ function LegoSetDetail({
             />
           </dl>
 
-          <LegoSectionTitle title="Set facts" />
-          <dl className="mt-2 space-y-1.5">
+          {/* Your copy, in the card pages' "In your
+              collection" arrangement (Anthony, Nov 4, 2026,
+              late): the album heading with the owned count in
+              gold beside it, then the Where it lives bar
+              carrying the opened/sealed steppers, the copy's
+              recorded facts, and the record editor inside it
+              — the same block the card detail uses. */}
+          <div className="mt-5 border-t border-[var(--border)] pt-3">
+            <div className="flex items-baseline justify-between">
+              <h3 className="font-album text-base text-[var(--text)]">
+                Your copy
+              </h3>
+              <span
+                className={`text-sm font-semibold ${
+                  totalOwned > 0
+                    ? "text-[var(--gold-soft)]"
+                    : "text-red-400"
+                }`}
+              >
+                {totalOwned > 0
+                  ? `${totalOwned} cop${totalOwned === 1 ? "y" : "ies"}`
+                  : "Don’t own"}
+              </span>
+            </div>
+            <div className="mt-3">
+              <OwnedLocationBar
+                targetKind="game"
+                cardId={null}
+                sealedName={null}
+                comicId={null}
+                gameCardId={card.id}
+                ownedQty={totalOwned}
+                copiesQty={totalOwned}
+                copiesItemName={card.name}
+                barClassName="border border-[var(--border)] bg-[var(--surface)]"
+              >
+                <div className="space-y-1.5">
+                  <LegoStepperRow
+                    label="Opened copies"
+                    qty={opened}
+                    onStep={onStepOpened}
+                    savePending={savePending}
+                    itemName={card.name}
+                  />
+                  <LegoStepperRow
+                    label="Sealed copies"
+                    qty={sealed}
+                    onStep={onStepSealed}
+                    savePending={savePending}
+                    itemName={card.name}
+                  />
+                </div>
+                <dl className="mt-3 space-y-1.5">
+                  <LegoFactRow
+                    label="Condition"
+                    value={
+                      notes?.condition
+                        ? (LEGO_CONDITION_LABELS[notes.condition] ??
+                          notes.condition)
+                        : null
+                    }
+                  />
+                  <LegoFactRow
+                    label="Completeness"
+                    value={
+                      notes?.completeness
+                        ? `${LEGO_COMPLETENESS_LABELS[notes.completeness] ?? notes.completeness}${
+                            notes.completeness === "missing_pieces" &&
+                            notes.missingPieces != null
+                              ? ` — ${notes.missingPieces} missing`
+                              : ""
+                          }`
+                        : null
+                    }
+                  />
+                  <LegoFactRow
+                    label="Paid (per copy)"
+                    value={
+                      notes?.paidPriceUsd != null
+                        ? fmtPrice(notes.paidPriceUsd)
+                        : null
+                    }
+                  />
+                  <LegoFactRow
+                    label="Date added"
+                    value={fmtLegoDate(notes?.dateAdded ?? null)}
+                  />
+                </dl>
+                <LegoNotesEditor
+                  key={`${card.id}:${notes?.paidPriceUsd ?? ""}:${notes?.condition ?? ""}:${notes?.completeness ?? ""}:${notes?.missingPieces ?? ""}`}
+                  cardId={card.id}
+                  cardName={card.name}
+                  notes={notes}
+                />
+              </OwnedLocationBar>
+            </div>
+          </div>
+
+          {/* Set facts behind its up/down toggle (see the
+              state note at the top of this component): the
+              heading row is the toggle, the facts sit in the
+              bordered box under it. */}
+          <button
+            type="button"
+            aria-expanded={factsOpen}
+            aria-label={`Set facts, ${factsOpen ? "shown" : "hidden"} — tap to ${factsOpen ? "collapse" : "expand"}`}
+            onClick={toggleFacts}
+            className="mt-5 flex w-full items-center justify-between"
+          >
+            <span className="font-album text-base text-[var(--text)]">
+              Set facts
+            </span>
+            <span
+              aria-hidden="true"
+              className={`text-xs text-[var(--dim)] transition-transform ${factsOpen ? "rotate-180" : ""}`}
+            >
+              ▾
+            </span>
+          </button>
+          {factsOpen ? (
+          <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
+          <dl className="space-y-1.5">
             <LegoFactRow label="Set number" value={card.printed} />
             <LegoFactRow label="Theme" value={card.sectionName} />
             <LegoFactRow
@@ -1365,13 +1586,15 @@ function LegoSetDetail({
             <LegoFactRow label="UPC" value={d?.upc ?? null} />
             <LegoFactRow label="EAN" value={d?.ean ?? null} />
           </dl>
+          </div>
+          ) : null}
 
           <LegoSectionTitle title="Minifigures & parts" />
           <button
             type="button"
             aria-expanded={breakdownOpen}
             onClick={() => setBreakdownOpen((v) => !v)}
-            className="mt-2 flex w-full items-center justify-between rounded-xl bg-black/30 px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
+            className={`mt-2 flex w-full items-center justify-between ${LEGO_BOX} px-3 py-2.5 text-sm font-semibold text-[var(--text)]`}
           >
             {breakdownOpen ? "Hide the breakdown" : "Show the breakdown"}
             <span
@@ -1382,7 +1605,7 @@ function LegoSetDetail({
             </span>
           </button>
           {breakdownOpen ? (
-            <div className="mt-2 rounded-xl bg-black/30 px-3 py-3">
+            <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
               <h4 className="text-xs font-bold uppercase tracking-wide text-[var(--dim)]">
                 Minifigures
               </h4>
@@ -1474,7 +1697,7 @@ function LegoSetDetail({
                   notes?.missingPieces != null
                     ? ` — ${notes.missingPieces} ${notes.missingPieces === 1 ? "piece" : "pieces"} missing`
                     : ""}
-                  . Track it under Your copy below.
+                  . Track it under Your copy, at the top of this tab.
                 </p>
               ) : null}
             </div>
@@ -1483,7 +1706,7 @@ function LegoSetDetail({
           {d?.description ? (
             <>
               <LegoSectionTitle title="About this set" />
-              <p className="mt-2 whitespace-pre-line rounded-lg bg-black/30 px-3 py-2.5 text-sm leading-relaxed text-[var(--text)]">
+              <p className={`mt-2 whitespace-pre-line ${LEGO_BOX} px-3 py-2.5 text-sm leading-relaxed text-[var(--text)]`}>
                 {d.description}
               </p>
               <p className="mt-1.5 text-[11px] text-[var(--dim)]">
@@ -1492,105 +1715,7 @@ function LegoSetDetail({
             </>
           ) : null}
 
-          {/* Your copy, in the card pages' "In your
-              collection" arrangement (Anthony, Nov 4, 2026,
-              late): the album heading with the owned count in
-              gold beside it, then the Where it lives bar
-              carrying the opened/sealed steppers, the copy's
-              recorded facts, and the record editor inside it
-              — the same block the card detail uses. */}
-          <div className="mt-5 border-t border-white/12 pt-3">
-            <div className="flex items-baseline justify-between">
-              <h3 className="font-album text-base text-[var(--text)]">
-                Your copy
-              </h3>
-              <span
-                className={`text-sm font-semibold ${
-                  totalOwned > 0
-                    ? "text-[var(--gold-soft)]"
-                    : "text-red-400"
-                }`}
-              >
-                {totalOwned > 0
-                  ? `${totalOwned} cop${totalOwned === 1 ? "y" : "ies"}`
-                  : "Don’t own"}
-              </span>
-            </div>
-            <div className="mt-3">
-              <OwnedLocationBar
-                targetKind="game"
-                cardId={null}
-                sealedName={null}
-                comicId={null}
-                gameCardId={card.id}
-                ownedQty={totalOwned}
-                copiesQty={totalOwned}
-                copiesItemName={card.name}
-                barClassName="bg-[var(--surface)]"
-              >
-                <div className="space-y-1.5">
-                  <LegoStepperRow
-                    label="Opened copies"
-                    qty={opened}
-                    onStep={onStepOpened}
-                    savePending={savePending}
-                    itemName={card.name}
-                  />
-                  <LegoStepperRow
-                    label="Sealed copies"
-                    qty={sealed}
-                    onStep={onStepSealed}
-                    savePending={savePending}
-                    itemName={card.name}
-                  />
-                </div>
-                <dl className="mt-3 space-y-1.5">
-                  <LegoFactRow
-                    label="Condition"
-                    value={
-                      notes?.condition
-                        ? (LEGO_CONDITION_LABELS[notes.condition] ??
-                          notes.condition)
-                        : null
-                    }
-                  />
-                  <LegoFactRow
-                    label="Completeness"
-                    value={
-                      notes?.completeness
-                        ? `${LEGO_COMPLETENESS_LABELS[notes.completeness] ?? notes.completeness}${
-                            notes.completeness === "missing_pieces" &&
-                            notes.missingPieces != null
-                              ? ` — ${notes.missingPieces} missing`
-                              : ""
-                          }`
-                        : null
-                    }
-                  />
-                  <LegoFactRow
-                    label="Paid (per copy)"
-                    value={
-                      notes?.paidPriceUsd != null
-                        ? fmtPrice(notes.paidPriceUsd)
-                        : null
-                    }
-                  />
-                  <LegoFactRow
-                    label="Date added"
-                    value={fmtLegoDate(notes?.dateAdded ?? null)}
-                  />
-                </dl>
-                <LegoNotesEditor
-                  key={`${card.id}:${notes?.paidPriceUsd ?? ""}:${notes?.condition ?? ""}:${notes?.completeness ?? ""}:${notes?.missingPieces ?? ""}`}
-                  cardId={card.id}
-                  cardName={card.name}
-                  notes={notes}
-                />
-              </OwnedLocationBar>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-xl bg-black/30 px-3 py-3 text-center">
+          <div className={`mt-5 ${LEGO_BOX} px-3 py-3 text-center`}>
             {d ? (
               <p className="text-xs leading-relaxed text-[var(--dim)]">
                 Set data researched {fmtLegoDate(d.researchedAt)}.
@@ -1670,7 +1795,8 @@ function LegoSetDetail({
               </dl>
 
               <LegoSectionTitle title="The numbers" />
-              <dl className="mt-2 space-y-1.5">
+              <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
+              <dl className="space-y-1.5">
                 {d.usedRange ? (
                   <LegoFactRow
                     label="Used range"
@@ -1719,53 +1845,194 @@ function LegoSetDetail({
                   />
                 ) : null}
               </dl>
+              </div>
               <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--dim)]">
                 Market values as of {fmtLegoDate(d.researchedAt)},
                 from BrickEconomy. Your copies are valued sealed
                 copies at the sealed value and opened copies at
                 the used value.
               </p>
+              {/* What actual SALES say (Anthony, Nov 5, 2026):
+                  the market values above are a tracker's
+                  published figures, so the page also states
+                  the most recent real sale per condition and
+                  the recent-sales average, computed from the
+                  recorded sold listings — the "last sold at"
+                  disclosure, with the sale's source and date. */}
+              {latestSealedSale ? (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--dim)]">
+                  Sealed, from actual sales: last sold at{" "}
+                  <span className="font-semibold text-[var(--text)]">
+                    {fmtPrice(latestSealedSale.priceUsd)}
+                  </span>{" "}
+                  on {fmtLegoDate(latestSealedSale.date) ?? latestSealedSale.date} (
+                  {latestSealedSale.source}
+                  {latestSealedSale.sourceUrl?.includes(
+                    "pricecharting.com",
+                  )
+                    ? " via PriceCharting"
+                    : ""}
+                  )
+                  {avgSale(soldSealed) != null
+                    ? ` · average ${fmtPrice(avgSale(soldSealed) ?? 0)} across ${soldSealed.length} recent sales`
+                    : ""}
+                  .
+                </p>
+              ) : null}
+              {latestUsedSale ? (
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--dim)]">
+                  Used, from actual sales: last sold at{" "}
+                  <span className="font-semibold text-[var(--text)]">
+                    {fmtPrice(latestUsedSale.priceUsd)}
+                  </span>{" "}
+                  on {fmtLegoDate(latestUsedSale.date) ?? latestUsedSale.date} (
+                  {latestUsedSale.source}
+                  {latestUsedSale.sourceUrl?.includes(
+                    "pricecharting.com",
+                  )
+                    ? " via PriceCharting"
+                    : ""}
+                  )
+                  {avgSale(soldUsed) != null
+                    ? ` · average ${fmtPrice(avgSale(soldUsed) ?? 0)} across ${soldUsed.length} recent sales`
+                    : ""}
+                  .
+                </p>
+              ) : null}
 
               <LegoSectionTitle title="Value history — sealed" />
-              <div className="mt-2 rounded-xl bg-black/30 px-3 py-3">
-                {history.length > 0 ? (
+              <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
+                {chartPts.length > 0 ? (
                   <>
-                    {history.length > 1 ? (
-                      <svg
-                        viewBox="0 0 100 28"
-                        className="mt-2 h-10 w-full"
-                        role="img"
-                        aria-label={`Value history: ${history.length} recorded points from ${fmtPrice(histValues[0] ?? 0)} to ${fmtPrice(histValues[histValues.length - 1] ?? 0)}`}
-                      >
-                        <polyline
-                          fill="none"
-                          stroke="var(--accent)"
-                          strokeWidth="1.6"
-                          points={history
-                            .map((p, i) => {
-                              const x =
-                                history.length > 1
-                                  ? (i / (history.length - 1)) *
-                                      98 +
-                                    1
-                                  : 50;
-                              const y =
-                                histSpan > 0
-                                  ? 25 -
-                                    ((p.unitValue - histMin) /
-                                      histSpan) *
-                                      22
-                                  : 14;
-                              return `${x.toFixed(1)},${y.toFixed(1)}`;
-                            })
-                            .join(" ")}
-                        />
-                      </svg>
+                    {/* The refined chart (Anthony, Nov 5, 2026):
+                        points spaced by their REAL dates on the
+                        time axis (the old line spaced them by
+                        list index, so five quiet years and one
+                        busy month took the same width), a
+                        marker on every point, and the scale
+                        labeled — highest, middle, and lowest
+                        values on the left, the first and last
+                        dates under the axis. Every point is a
+                        sourced, dated value (see the list under
+                        the chart); nothing is interpolated or
+                        modeled, and a stretch with no sourced
+                        point simply has no line detail to
+                        invent. */}
+                    {chartPts.length > 1
+                      ? (() => {
+                          const parsePt = (s: string) => {
+                            const m = /^(\d{4})-(\d{2})/.exec(s);
+                            return m
+                              ? Date.UTC(
+                                  Number(m[1]),
+                                  Number(m[2]) - 1,
+                                  1,
+                                )
+                              : 0;
+                          };
+                          const first = chartPts[0];
+                          const last =
+                            chartPts[chartPts.length - 1];
+                          if (!first || !last) return null;
+                          const t0 = parsePt(first.date);
+                          const t1 = parsePt(last.date);
+                          const pad =
+                            (histMax - histMin) * 0.1 || 1;
+                          const lo = histMin - pad;
+                          const hi = histMax + pad;
+                          const X = (s: string) =>
+                            t1 > t0
+                              ? 36 +
+                                ((parsePt(s) - t0) / (t1 - t0)) *
+                                  160
+                              : 116;
+                          const Y = (v: number) =>
+                            8 +
+                            (1 - (v - lo) / (hi - lo)) * 60;
+                          const mid = (histMin + histMax) / 2;
+                          return (
+                            <svg
+                              viewBox="0 0 200 92"
+                              className="h-28 w-full"
+                              role="img"
+                              aria-label={`Value history: ${chartPts.length} dated points from ${first.label} at ${fmtPrice(first.unitValue)} to ${last.label} at ${fmtPrice(last.unitValue)}`}
+                            >
+                              {[histMax, mid, histMin].map(
+                                (v) => (
+                                  <g key={v}>
+                                    <line
+                                      x1={36}
+                                      x2={196}
+                                      y1={Y(v)}
+                                      y2={Y(v)}
+                                      stroke="var(--border)"
+                                      strokeWidth="0.5"
+                                    />
+                                    <text
+                                      x={33}
+                                      y={Y(v) + 2}
+                                      textAnchor="end"
+                                      fontSize="6.5"
+                                      fill="var(--dim)"
+                                    >
+                                      {fmtPrice(v)}
+                                    </text>
+                                  </g>
+                                ),
+                              )}
+                              <polyline
+                                fill="none"
+                                stroke="var(--accent)"
+                                strokeWidth="1.6"
+                                points={chartPts
+                                  .map(
+                                    (p) =>
+                                      `${X(p.date).toFixed(1)},${Y(p.unitValue).toFixed(1)}`,
+                                  )
+                                  .join(" ")}
+                              />
+                              {chartPts.map((p) => (
+                                <circle
+                                  key={`${p.date}-${p.source}-${p.unitValue}`}
+                                  cx={X(p.date)}
+                                  cy={Y(p.unitValue)}
+                                  r="2.1"
+                                  fill="var(--surface)"
+                                  stroke="var(--accent)"
+                                  strokeWidth="1.2"
+                                />
+                              ))}
+                              <text
+                                x={36}
+                                y={84}
+                                fontSize="6.5"
+                                fill="var(--dim)"
+                              >
+                                {first.label}
+                              </text>
+                              <text
+                                x={196}
+                                y={84}
+                                textAnchor="end"
+                                fontSize="6.5"
+                                fill="var(--dim)"
+                              >
+                                {last.label}
+                              </text>
+                            </svg>
+                          );
+                        })()
+                      : null}
+                    {chartPts.length === 1 ? (
+                      <p className="text-xs leading-relaxed text-[var(--dim)]">
+                        One dated point recorded so far — a line
+                        needs at least two, so no line is drawn.
+                      </p>
                     ) : null}
                     <ul className="mt-2 space-y-0.5">
-                      {[...history]
+                      {[...chartPts]
                         .reverse()
-                        .slice(0, 8)
+                        .slice(0, 10)
                         .map((p) => (
                           <li
                             key={`${p.date}-${p.source}`}
@@ -1793,8 +2060,41 @@ function LegoSetDetail({
                 )}
               </div>
 
-              <LegoSectionTitle title="Recent sold listings" />
-              <div className="mt-2 rounded-xl bg-black/30 px-3 py-3">
+              {/* Recent sold listings, collapsed (Anthony,
+                  Nov 5, 2026): the open list sprawled down
+                  the whole Financial tab. It sits behind this
+                  bordered header now — the sale count in a
+                  chip beside the title, the chevron turning
+                  with the open state — collapsed by default,
+                  expanding in place to the same dated list. */}
+              <div className="mt-5">
+                <button
+                  type="button"
+                  aria-expanded={soldOpen}
+                  aria-label={`Recent sold listings, ${d.soldListings.length} sales recorded, ${soldOpen ? "shown" : "hidden"} — tap to ${soldOpen ? "collapse" : "expand"}`}
+                  onClick={() => setSoldOpen((v) => !v)}
+                  className={`flex w-full items-center justify-between ${LEGO_BOX} px-3 py-2.5`}
+                >
+                  <span className="font-album text-base text-[var(--text)]">
+                    Recent sold listings
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--dim)]">
+                      {d.soldListings.length}{" "}
+                      {d.soldListings.length === 1
+                        ? "sale"
+                        : "sales"}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className={`text-xs text-[var(--dim)] transition-transform ${soldOpen ? "rotate-180" : ""}`}
+                    >
+                      ▾
+                    </span>
+                  </span>
+                </button>
+                {soldOpen ? (
+              <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
                 {d.soldListings.length > 0 ? (
                   <>
                     <ul className="mt-2 space-y-2">
@@ -1845,18 +2145,18 @@ function LegoSetDetail({
                     ) : null}
                     <p className="mt-1.5 text-[11px] text-[var(--dim)]">
                       Completed sales only —{" "}
-                      {d.soldListings[0]?.sourceUrl ? (
+                      {latestAnySale?.sourceUrl ? (
                         <a
-                          href={d.soldListings[0].sourceUrl}
+                          href={latestAnySale.sourceUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="underline"
                         >
-                          {d.soldListings[0].source} via
+                          {latestAnySale.source} via
                           PriceCharting
                         </a>
                       ) : (
-                        (d.soldListings[0]?.source ?? "eBay sold")
+                        (latestAnySale?.source ?? "eBay sold")
                       )}
                       . Asking prices never count as sales.
                     </p>
@@ -1868,9 +2168,11 @@ function LegoSetDetail({
                   </p>
                 )}
               </div>
+                ) : null}
+              </div>
 
               <LegoSectionTitle title="Part-out value" />
-              <div className="mt-2 rounded-xl bg-black/30 px-3 py-3">
+              <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
                 {d.partOutValueUsd != null ? (
                   <>
                     <p className="mt-1 text-lg font-bold text-[var(--text)]">
@@ -1891,7 +2193,7 @@ function LegoSetDetail({
               </div>
 
               <LegoSectionTitle title="Cheapest now — sealed" />
-              <div className="mt-2 rounded-xl bg-black/30 px-3 py-3">
+              <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
                 {d.retailers.length > 0 ? (
                   <>
                     <ul className="mt-2 space-y-1.5">
@@ -1939,7 +2241,7 @@ function LegoSetDetail({
               {d.forecast1yrUsd != null || d.forecast5yrUsd != null ? (
                 <>
                   <LegoSectionTitle title="Forecast — estimate" />
-                  <div className="mt-2 rounded-xl border border-dashed border-white/20 bg-black/30 px-3 py-3">
+                  <div className="mt-2 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-3 py-3">
                   <p className="text-xs leading-relaxed text-[var(--dim)]">
                     BrickEconomy&rsquo;s forecast for the sealed
                     value — an estimate, not a price:{" "}
@@ -1960,7 +2262,7 @@ function LegoSetDetail({
               ) : null}
             </>
           ) : (
-            <div className="rounded-xl bg-black/30 px-3 py-4 text-center">
+            <div className={`${LEGO_BOX} px-3 py-4 text-center`}>
               <p className="text-sm font-medium text-[var(--text)]">
                 No market data recorded for this set yet
               </p>
@@ -2021,7 +2323,18 @@ function LegoHeroImg({
   card: DetailCard;
   ghost: boolean;
 }) {
-  const { url, isCutout } = useCutoutState(card.imageUrl, card.id);
+  const { url, isCutout, pending } = useCutoutState(card.imageUrl, card.id);
+  if (pending) {
+    // A pre-made stored cutout is being checked first
+    // (Nov 5, 2026): hold the stage's shape with a quiet
+    // loading box instead of flashing the raw photo or a
+    // wrong "no artwork" message for a beat.
+    return (
+      <div className="flex aspect-[4/3] w-72 max-w-full items-center justify-center rounded-2xl border border-white/10 bg-black/30 text-sm text-[var(--dim)]">
+        Preparing the photo…
+      </div>
+    );
+  }
   if (!card.imageUrl || !url) {
     return (
       <div className="flex aspect-[4/3] w-72 max-w-full items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/40 px-4 text-center text-sm text-[var(--dim)]">
@@ -2074,6 +2387,135 @@ function LegoHeroImg({
   );
 }
 
+/** Money Tracker cost basis for one game-catalog item
+    (Anthony, Nov 5, 2026): what he paid per copy, recorded
+    on the item's own page next to its current value, feeding
+    the Portfolio Money Tracker. No recorded cost shows
+    honestly as not recorded — never estimated — and the
+    figure is editable here (the mockup's per-copy rule:
+    price paid, editable on the item page). */
+function GameCostRow({
+  cardId,
+  price,
+}: {
+  cardId: number;
+  price: number | null;
+}) {
+  const queryClient = useQueryClient();
+  const cost = useQuery({
+    queryKey: ["gameCardCost", cardId],
+    queryFn: () => api.getGameCardCost({ id: cardId }),
+  });
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const save = useMutation({
+    mutationFn: (v: number | null) =>
+      api.setGameCardCost({ id: cardId, paidValue: v }),
+    onSuccess: () => {
+      setEditing(false);
+      void queryClient.invalidateQueries({
+        queryKey: ["gameCardCost", cardId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["moneyTracker"] });
+    },
+  });
+  const paid = cost.data?.paidValue ?? null;
+  const gain = paid != null && price != null ? price - paid : null;
+  const gainPct =
+    gain != null && paid != null && paid > 0 ? (gain / paid) * 100 : null;
+  return (
+    <div className="mt-4 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-left">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-[var(--dim)]">
+          You paid
+        </span>
+        {editing ? null : paid != null ? (
+          <span className="text-sm font-semibold text-[var(--text)]">
+            {fmtPrice(paid)} each
+            {gain != null ? (
+              <span
+                className={`ml-2 tabular-nums ${
+                  gain >= 0 ? "text-emerald-400" : "text-red-400"
+                }`}
+              >
+                {gain >= 0 ? "+" : "−"}
+                {fmtPrice(Math.abs(gain))}
+                {gainPct != null
+                  ? ` (${gainPct >= 0 ? "+" : "−"}${Math.abs(gainPct).toFixed(1)}%)`
+                  : ""}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-sm text-[var(--dim)]">Not recorded</span>
+        )}
+        {editing ? null : (
+          <button
+            type="button"
+            onClick={() => {
+              setText(paid != null ? String(paid) : "");
+              setEditing(true);
+            }}
+            className="shrink-0 rounded-full border border-[var(--accent)]/50 px-3 py-1 text-xs font-semibold text-[var(--gold-soft)]"
+          >
+            {paid != null ? "Edit" : "Record"}
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <label className="sr-only" htmlFor={`cost-input-${cardId}`}>
+            What you paid per copy, in dollars
+          </label>
+          <span className="text-sm text-[var(--dim)]">$</span>
+          <input
+            id={`cost-input-${cardId}`}
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="0.00"
+            className="w-28 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-sm tabular-nums text-[var(--text)]"
+          />
+          <button
+            type="button"
+            disabled={save.isPending || text.trim() === "" || Number(text) < 0}
+            onClick={() => save.mutate(Math.round(Number(text) * 100) / 100)}
+            className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--on-accent)] disabled:opacity-50"
+          >
+            Save
+          </button>
+          {paid != null ? (
+            <button
+              type="button"
+              disabled={save.isPending}
+              onClick={() => save.mutate(null)}
+              className="rounded-full px-3 py-1.5 text-xs font-semibold text-red-400"
+            >
+              Clear
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-[var(--dim)]"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : paid == null ? (
+        <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+          Record what you paid and Portfolio&rsquo;s Money Tracker
+          can show your real profit on this item — until then its
+          cost stays honestly unknown.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function CardDetailSheet({
   game,
   card,
@@ -2115,7 +2557,18 @@ function CardDetailSheet({
   const heldRef = useRef(false);
   useEffect(() => {
     pushedRef.current = pushWindowState(
-      { ...(readNavState() ?? {}), lorcanaGameCard: true },
+      {
+        ...(readNavState() ?? {}),
+        lorcanaGameCard: true,
+        // Refresh-in-place (Anthony, Nov 5, 2026 — the Tumbler
+        // report): the entry NAMES the open item, the way the
+        // Lorcana card sheet's entry carries lorcanaCard, so a
+        // reload on this page can reopen THIS item (GamePanel
+        // seeds from these keys and re-fetches by id) instead
+        // of bouncing back to the catalog.
+        gameCardId: card.id,
+        gameCardGame: game,
+      },
       "lorcanaGameCard",
     );
     heldRef.current = true;
@@ -2143,7 +2596,7 @@ function CardDetailSheet({
           window.history.back();
       } else if (heldRef.current) {
         heldRef.current = false;
-        scrubWindowKeys(["lorcanaGameCard"]);
+        scrubWindowKeys(["lorcanaGameCard", "gameCardId", "gameCardGame"]);
       }
     };
     // Mount-only: one entry per sheet opening.
@@ -2154,7 +2607,7 @@ function CardDetailSheet({
       window.history.back();
     } else {
       heldRef.current = false;
-      scrubWindowKeys(["lorcanaGameCard"]);
+      scrubWindowKeys(["lorcanaGameCard", "gameCardId", "gameCardGame"]);
       onClose();
     }
   };
@@ -2218,6 +2671,13 @@ function CardDetailSheet({
             src={card.imageUrl}
             alt=""
             className="h-full w-full scale-125 object-cover opacity-45 blur-2xl"
+            onError={(e) => {
+              // Decorative backdrop (standing artwork rule,
+              // Nov 5, 2026): a dead source photo hides the
+              // backdrop layer entirely — never a broken
+              // image painted behind the sheet.
+              e.currentTarget.style.display = "none";
+            }}
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-[#05070d]/40 to-[#05070d]" />
         </div>
@@ -2314,7 +2774,7 @@ function CardDetailSheet({
           ) : (
             <div className="flex aspect-[3/4] w-64 max-w-full items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 text-center text-sm text-[var(--dim)]">
               {gameIsDataOnly(game)
-                ? "No artwork — this catalog is data only"
+                ? "No artwork sourced for this card yet"
                 : "No artwork link from the source for this printing"}
             </div>
           )}
@@ -2333,6 +2793,17 @@ function CardDetailSheet({
             <p className="mt-2 text-base font-semibold text-[var(--gold-soft)]">
               {fmtPrice(card.price)}
             </p>
+          ) : null}
+          {/* Money Tracker (Nov 5, 2026): per-copy cost basis
+              on the game item pages, beside the value — shown
+              only for items he actually owns. Lego is the one
+              exception: a set's page already carries what he
+              paid in its Your copy record (Paid (per copy) +
+              the record editor), so no second cost field is
+              added there; the Money Tracker reads that record
+              for Lego instead. */}
+          {totalOwned > 0 && !isLego ? (
+            <GameCostRow cardId={card.id} price={card.price} />
           ) : null}
           {game === "funko" && pendingUpc && onLinkUpc ? (
             <div className="mt-4 w-full rounded-2xl border border-[var(--accent)] bg-[var(--surface)] p-3.5 text-center">
@@ -2747,13 +3218,102 @@ const IDLE_IMPORT: GameImportState = {
 };
 const importStates = new Map<GameKey, GameImportState>();
 const importListeners = new Map<GameKey, Set<() => void>>();
+/* ---------- Persistence + auto-resume (Anthony, Nov 5,
+   2026, v1.98.6 — the on-device failure of the fix above) --
+   On his phone the download still STOPPED when he backed
+   out of the section: he returned to "Continue download"
+   instead of a live, advancing progress. The module-level
+   loop alone cannot survive everything the phone throws at
+   it — the WebView can be torn down or reloaded while he is
+   elsewhere in the app (tab switches, the update flow), and
+   a loop parked in the retry backoff can be frozen past its
+   failure cap while the app is backgrounded. So the state
+   itself is now durable and the loop self-healing:
+   1. Every state change is persisted to localStorage, so a
+      panel that mounts after ANY teardown shows the true
+      last state immediately — running, with its counts —
+      never a reset "Continue download".
+   2. A loop is tracked in liveImportLoops, separately from
+      the persisted "running" flag: a state that says running
+      with no live loop behind it is a dead loop, and
+      resumeGameImport restarts it — on panel mount and
+      whenever the app returns to the foreground.
+   3. startGameImport's duplicate guard reads the LIVE set,
+      not the persisted flag, so a restart is never blocked
+      by the very flag that records the download should be
+      running. A genuinely stopped download (finished, or
+      stopped after the sustained-failure cap with its note)
+      persists running:false and never auto-resumes. */
+const liveImportLoops = new Set<GameKey>();
+let lastImportQueryClient: QueryClient | null = null;
+const importStorageKey = (game: GameKey) =>
+  `vaultx-game-import:${game}`;
+function persistImportState(game: GameKey, state: GameImportState) {
+  try {
+    window.localStorage.setItem(
+      importStorageKey(game),
+      JSON.stringify(state),
+    );
+  } catch {
+    // Storage unavailable (private mode, quota): the
+    // in-memory manager still carries this session.
+  }
+}
+function hydrateImportState(game: GameKey): GameImportState {
+  try {
+    const raw = window.localStorage.getItem(importStorageKey(game));
+    if (!raw) return IDLE_IMPORT;
+    const p = JSON.parse(raw) as Partial<GameImportState>;
+    return {
+      running: p.running === true,
+      cards: typeof p.cards === "number" ? p.cards : 0,
+      setsDone: typeof p.setsDone === "number" ? p.setsDone : 0,
+      setsTotal: typeof p.setsTotal === "number" ? p.setsTotal : 0,
+      note: typeof p.note === "string" ? p.note : null,
+      complete: p.complete === true,
+    };
+  } catch {
+    return IDLE_IMPORT;
+  }
+}
 function getImportState(game: GameKey): GameImportState {
-  return importStates.get(game) ?? IDLE_IMPORT;
+  const cur = importStates.get(game);
+  if (cur) return cur;
+  const hydrated = hydrateImportState(game);
+  importStates.set(game, hydrated);
+  return hydrated;
 }
 function setImportState(game: GameKey, next: GameImportState) {
   importStates.set(game, next);
+  persistImportState(game, next);
   const subs = importListeners.get(game);
   if (subs) for (const cb of [...subs]) cb();
+}
+/** Restart a download whose persisted state says it should
+    be running but whose loop is gone (page teardown, app
+    backgrounded past its backoff). A no-op when a loop is
+    live, when the download finished, or when it stopped
+    with a note. Called by every panel on mount and whenever
+    the app returns to the foreground. */
+export function resumeGameImport(
+  game: GameKey,
+  queryClient?: QueryClient,
+): void {
+  if (queryClient) lastImportQueryClient = queryClient;
+  if (liveImportLoops.has(game)) return;
+  const qc = lastImportQueryClient;
+  if (!qc) return;
+  const state = getImportState(game);
+  if (state.running && !state.complete) {
+    startGameImport(game, qc);
+  }
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    for (const g of Object.keys(GAME_TITLES) as GameKey[])
+      resumeGameImport(g);
+  });
 }
 function subscribeImport(game: GameKey, cb: () => void): () => void {
   let subs = importListeners.get(game);
@@ -2770,7 +3330,14 @@ export function startGameImport(
   game: GameKey,
   queryClient: QueryClient,
 ): void {
-  if (getImportState(game).running) return;
+  lastImportQueryClient = queryClient;
+  // The duplicate guard reads the LIVE loop set, not the
+  // persisted running flag (v1.98.6): the flag records that
+  // the download SHOULD be running — after a teardown it can
+  // say "running" with no loop alive, and that state must be
+  // restartable, never blocked by its own flag.
+  if (liveImportLoops.has(game)) return;
+  liveImportLoops.add(game);
   setImportState(game, {
     ...getImportState(game),
     running: true,
@@ -2864,6 +3431,7 @@ export function startGameImport(
         note: "Still downloading — progress is saved; tap Continue to keep going.",
       });
     } finally {
+      liveImportLoops.delete(game);
       void queryClient.invalidateQueries({
         queryKey: ["gameCatalog", game],
       });
@@ -2880,38 +3448,137 @@ function useGameImport(game: GameKey): GameImportState {
   );
 }
 
+/** The Topps Alternate Universe areas (Anthony, Nov 5,
+    2026 — the AU artwork pull and the standing
+    missing-artwork rule): every set row in these four areas
+    carries the artwork box — the set's real product photo
+    where one was sourced, the clean placeholder where none
+    exists anywhere — so rows never differ blank vs pictured
+    and a box never renders broken. */
+const SECTION_ART_BOX_GAMES = new Set<string>([
+  "disney-topps",
+  "starwars-topps",
+  "gpk",
+  "wwe-topps",
+]);
+
 /** A set row's official product artwork (Anthony, Nov 5,
-    2026): sections whose catalog source is text-only
-    (Disney Topps, Garbage Pail Kids) carry a publisher
-    product photo, ingested into the app's own blob storage
-    by the getSectionArt action — this renders that owned
-    copy, never a hotlink. Sections without artwork render
-    nothing and the row keeps its text-only layout. */
+    2026): sections whose catalog source is text-only carry a
+    publisher product photo, ingested into the app's own blob
+    storage by the getSectionArt action — this renders that
+    owned copy, never a hotlink. The Disney Topps thumbnail
+    bug (Anthony, Nov 5, 2026, on-device: some rows showed
+    the box, others came up blank or broken, inconsistently)
+    had three causes in this component: rows with no art row
+    rendered no box at all beside rows that had one; a thumb
+    rendered nothing while its ingestion was still in flight
+    or after a transient failure (which then stuck for the
+    old one-hour cache); and a failed image load had no
+    fallback. Now: in the AU areas every row renders the same
+    fixed box — real photo when the owned copy loads,
+    placeholder while it loads, after any failure, and when
+    no artwork exists for the set. Other sections keep the
+    text-only layout when they have no artwork. */
 function SectionArtThumb({
   game,
   sectionKey,
   name,
+  hasArt,
+  box,
 }: {
   game: string;
   sectionKey: string;
   name: string;
+  /** The catalog says an artwork row exists for this
+      section; only then is the owned copy fetched. */
+  hasArt: boolean;
+  /** Always render the fixed box (placeholder included). */
+  box: boolean;
 }) {
   const art = useQuery({
     queryKey: ["sectionArt", game, sectionKey],
     queryFn: () => api.getSectionArt({ game, sectionKey }),
-    staleTime: 1000 * 60 * 60,
+    staleTime: 1000 * 60 * 5,
     retry: 1,
+    enabled: hasArt,
   });
-  const url = art.data?.ok ? art.data.url : null;
-  if (!url) return null;
+  const [broken, setBroken] = useState(false);
+  const url = hasArt && art.data?.ok ? art.data.url : null;
+  if (url && !broken) {
+    return (
+      <img
+        src={url}
+        alt={`${name} product artwork`}
+        loading="lazy"
+        onError={() => setBroken(true)}
+        className="h-12 w-12 shrink-0 rounded-lg object-cover"
+      />
+    );
+  }
+  if (!box) return null;
   return (
-    <img
-      src={url}
-      alt={`${name} product artwork`}
-      loading="lazy"
-      className="h-12 w-12 shrink-0 rounded-lg object-cover"
-    />
+    <span
+      aria-hidden="true"
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[var(--dim)]"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5 opacity-50"
+      >
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <circle cx="8.5" cy="10" r="1.4" />
+        <path d="m5 17 4.5-4.5 3 3L17 11l2 2.5" />
+      </svg>
+    </span>
   );
+}
+
+/** The stored snapshot of the item page that was open when a
+    refresh hit (see GamePanel's restore seed below): enough of
+    the item to paint its page on the very first frame of the
+    reload, before the fresh copy re-fetches. Returns null
+    unless the snapshot is readable AND names the very item the
+    restore seed picked — a stale snapshot for another item
+    must never stand in for it. */
+function readGameDetailSnapshot(
+  game: GameKey,
+  id: number | null,
+): DetailCard | null {
+  if (id == null) return null;
+  try {
+    const raw = window.sessionStorage.getItem(
+      `vaultx-game-open-detail-card:${game}`,
+    );
+    if (!raw) return null;
+    const c = JSON.parse(raw) as Partial<DetailCard>;
+    if (
+      c.id !== id ||
+      typeof c.name !== "string" ||
+      typeof c.printed !== "string" ||
+      typeof c.sectionName !== "string"
+    )
+      return null;
+    return {
+      id,
+      name: c.name,
+      printed: c.printed,
+      sectionName: c.sectionName,
+      rarity: typeof c.rarity === "string" ? c.rarity : null,
+      finish: typeof c.finish === "string" ? c.finish : null,
+      imageUrl: typeof c.imageUrl === "string" ? c.imageUrl : null,
+      price: typeof c.price === "number" ? c.price : null,
+      ownedQty: typeof c.ownedQty === "number" ? c.ownedQty : 0,
+      ownedSealedQty:
+        typeof c.ownedSealedQty === "number" ? c.ownedSealedQty : 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function GamePanel({
@@ -2969,6 +3636,70 @@ export function GamePanel({
   useEffect(() => {
     setGridReveal(GRID_REVEAL_START);
   }, [sectionKey, offset]);
+  // Per-set artwork hunt (Anthony, Nov 7, 2026 — the 2025
+  // Topps Chrome Disney fronts had only partly loaded):
+  // a Topps-family set view shows how many of its cards
+  // carry a front and offers a hunt dedicated to THIS set,
+  // which works it in collector-number order until every
+  // card has a verified front or no permitted source
+  // carries one. Fronts land server-side as the hunt
+  // verifies them; this button only starts the run.
+  const [artHunt, setArtHunt] = useState<
+    "idle" | "working" | "started" | "blocked"
+  >("idle");
+  useEffect(() => {
+    setArtHunt("idle");
+  }, [sectionKey]);
+  const runArtHunt = async () => {
+    if (!sectionKey || !gameIsDataOnly(game)) return;
+    setArtHunt("working");
+    try {
+      const r = await api.refreshCardArt({
+        force: true,
+        game: game as
+          | "topps"
+          | "bowman"
+          | "topps-basketball"
+          | "disney-topps"
+          | "starwars-topps"
+          | "gpk"
+          | "wwe-topps",
+        sectionKey,
+      });
+      setArtHunt(r.started ? "started" : "blocked");
+    } catch {
+      setArtHunt("blocked");
+    }
+  };
+  // Whole-collection artwork hunt (Anthony, Nov 7, 2026 —
+  // the expanded ask: ALL Disney Topps cards in every set,
+  // and ALL Garbage Pail Kids cards the same way). The
+  // collection page carries the same progress + start
+  // control at collection level; the run works the whole
+  // game set by set in catalog order.
+  const [gameArtHunt, setGameArtHunt] = useState<
+    "idle" | "working" | "started" | "blocked"
+  >("idle");
+  const runGameArtHunt = async () => {
+    if (!gameIsDataOnly(game)) return;
+    setGameArtHunt("working");
+    try {
+      const r = await api.refreshCardArt({
+        force: true,
+        game: game as
+          | "topps"
+          | "bowman"
+          | "topps-basketball"
+          | "disney-topps"
+          | "starwars-topps"
+          | "gpk"
+          | "wwe-topps",
+      });
+      setGameArtHunt(r.started ? "started" : "blocked");
+    } catch {
+      setGameArtHunt("blocked");
+    }
+  };
   // SECTION DRILL-IN entry (Anthony, Nov 5, 2026 — the
   // app-wide back re-audit's root fix): one set/section
   // opened from the section list is a drill-in over that
@@ -3082,7 +3813,52 @@ export function GamePanel({
       setOffset(0);
     }
   };
-  const [detail, setDetail] = useState<DetailCard | null>(null);
+  // Refresh-in-place seed for an open item page (Anthony,
+  // Nov 5, 2026 — the Tumbler report): the id of the item whose
+  // page was open when a refresh hit, read synchronously
+  // BEFORE first paint from the surviving history entry (the
+  // detail sheet's entry names the item: lorcanaGameCard /
+  // gameCardId / gameCardGame — the same pattern as the
+  // Lorcana card sheet's lorcanaCard) OR the sessionStorage
+  // copy, for webviews whose reload returns an empty history
+  // state (the same dual seed as Search / Admin / Profile).
+  const [restoreDetailId] = useState<number | null>(() => {
+    const st = readNavState();
+    const idFromHistory =
+      st?.lorcanaGameCard === true && st?.gameCardGame === game
+        ? st.gameCardId
+        : null;
+    if (typeof idFromHistory === "number") return idFromHistory;
+    try {
+      const raw = window.sessionStorage.getItem(
+        `vaultx-game-open-detail:${game}`,
+      );
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  });
+  // The detail sheet itself, seeded from the stored SNAPSHOT
+  // of that item when one is on device (kept in step below
+  // while a sheet is open), so a refresh on an item's page
+  // paints THAT page from the very first frame — the restore
+  // fetch below then refreshes it with the item's current
+  // counts and price. Second Tumbler pass (Nov 5, 2026, his
+  // re-check): the id-only seed DID land back on the Tumbler,
+  // but only after the re-fetch — while it waited, the Lego
+  // catalog underneath showed through ("it backs out to
+  // another screen I can't recognize, then it ends up going
+  // back to the Tumbler"). Painting the sheet from frame one
+  // (and covering the wait when no snapshot exists — see the
+  // cover at the bottom of this panel) closes that gap.
+  const [detail, setDetail] = useState<DetailCard | null>(() =>
+    readGameDetailSnapshot(game, restoreDetailId),
+  );
+  /** True when the sheet above was seeded from the stored
+      snapshot: the restore fetch still refreshes it when it
+      lands. Cleared when anything else opens a sheet. */
+  const snapshotSeededRef = useRef(detail != null);
   // Universal Search handoff (Nov 4, 2026): the Search tab can
   // send one specific item — open its detail sheet on arrival
   // (its section is already the open one via the section key).
@@ -3094,13 +3870,90 @@ export function GamePanel({
       if (!raw) return;
       window.sessionStorage.removeItem(`vaultx-game-open-card:${game}`);
       const c = JSON.parse(raw) as DetailCard;
-      if (typeof c?.id === "number") setDetail(c);
+      if (typeof c?.id === "number") {
+        snapshotSeededRef.current = false;
+        setDetail(c);
+      }
     } catch {
       // Unreadable handoff: the section still opened.
     }
     // Mount-only: the handoff is consumed once, on arrival.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // The restore re-fetch (see the seed above): the item is
+  // re-fetched by id, so the restored page ends up showing its
+  // current counts and price, never a stale snapshot — the
+  // snapshot only covers the first frames.
+  const restoreDetailQ = useQuery({
+    queryKey: ["gameCard", game, restoreDetailId],
+    queryFn: () => api.getGameCard({ game, id: restoreDetailId ?? 0 }),
+    enabled: restoreDetailId != null,
+  });
+  const restoreDetailAppliedRef = useRef(false);
+  /** Set when the user closes a restored sheet before its
+      refresh fetch lands: the late response must not reopen
+      a page he already backed out of. */
+  const restoreDismissedRef = useRef(false);
+  useEffect(() => {
+    if (
+      restoreDetailAppliedRef.current ||
+      restoreDismissedRef.current ||
+      restoreDetailId == null
+    )
+      return;
+    const card = restoreDetailQ.data?.card;
+    if (!card) return;
+    restoreDetailAppliedRef.current = true;
+    // A Search handoff that already opened a sheet wins; the
+    // restore only fills a still-closed panel — or, when the
+    // sheet was seeded from the stored snapshot, refreshes it
+    // with the item's current server copy.
+    setDetail((cur) =>
+      cur == null || snapshotSeededRef.current ? card : cur,
+    );
+  }, [restoreDetailId, restoreDetailQ.data]);
+  // Keep the stored copies in step: the id AND a snapshot of
+  // the item are written while a sheet is open, cleared the
+  // moment it closes, so a later plain entry into the section
+  // never resurrects a closed page. While a refresh restore
+  // is still in flight the copies are left untouched — the
+  // first version of this effect cleared the id on mount
+  // (the sheet starts closed until the restore lands), so a
+  // second refresh during that wait lost the seed for good.
+  useEffect(() => {
+    try {
+      if (detail) {
+        window.sessionStorage.setItem(
+          `vaultx-game-open-detail:${game}`,
+          String(detail.id),
+        );
+        window.sessionStorage.setItem(
+          `vaultx-game-open-detail-card:${game}`,
+          JSON.stringify(detail),
+        );
+      } else if (
+        restoreDetailId == null ||
+        restoreDetailQ.data !== undefined ||
+        restoreDetailQ.isError
+      ) {
+        window.sessionStorage.removeItem(
+          `vaultx-game-open-detail:${game}`,
+        );
+        window.sessionStorage.removeItem(
+          `vaultx-game-open-detail-card:${game}`,
+        );
+      }
+    } catch {
+      // Storage unavailable: the history seed still covers
+      // the plain refresh case.
+    }
+  }, [
+    game,
+    detail,
+    restoreDetailId,
+    restoreDetailQ.data,
+    restoreDetailQ.isError,
+  ]);
   const [query, setQuery] = useState("");
   // Download state comes from the module-level manager
   // (see startGameImport above): it survives this panel
@@ -3109,6 +3962,18 @@ export function GamePanel({
   const importState = useGameImport(game);
   const importing = importState.running;
   const importNote = importState.note;
+  // Return-to-section resume (Anthony, Nov 5, 2026, v1.98.6):
+  // he backed out mid-download, came back, and got "Continue
+  // download" — the download had died while he was away. The
+  // manager now persists its state; if this game's download
+  // was left running, its loop restarts the moment this panel
+  // mounts, and the panel above already shows the persisted
+  // running state with its true counts from the first frame.
+  useEffect(() => {
+    resumeGameImport(game, queryClient);
+    // Mount-only: the manager owns the loop from here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Funko barcode scan (Anthony, Nov 4, 2026): the scanner
   // overlay, and a scanned-but-unlinked barcode waiting to
   // be linked from the right figure's page.
@@ -3177,6 +4042,27 @@ export function GamePanel({
       }),
     enabled: sectionKey != null,
   });
+  // Stable opener for the memoized grid tiles (speed pass,
+  // Nov 5, 2026): one identity per section, so revealing the
+  // next batch of tiles doesn't re-render the ones already on
+  // screen. Reads the section name through a ref so the
+  // callback itself never has to change.
+  const sectionNameRef = useRef("");
+  sectionNameRef.current = section.data?.sectionName ?? "";
+  const openGridCard = useCallback((card: SectionCard) => {
+    setDetail({
+      id: card.id,
+      name: card.name,
+      printed: card.printed,
+      sectionName: sectionNameRef.current,
+      rarity: card.rarity,
+      finish: card.finish,
+      imageUrl: card.imageUrl,
+      price: card.price,
+      ownedQty: card.ownedQty,
+      ownedSealedQty: card.ownedSealedQty,
+    });
+  }, []);
   // Keep the deep-link key in step with the section actually
   // open, so it restores the current section on refresh and
   // never reopens a stale one.
@@ -3245,6 +4131,13 @@ export function GamePanel({
   // short lists (named exceptions).
   const onlyMine = useOnlyMine(game);
   const allSections = data?.sections ?? [];
+  // Collection-wide card-front progress for the Topps
+  // (data-only) games — the sum of the per-set withArt
+  // counts getGameCatalog now returns.
+  const gameFronts = allSections.reduce(
+    (sum, s) => sum + s.withArt,
+    0,
+  );
   const shownSections = onlyMine
     ? allSections.filter((s) => s.owned > 0)
     : allSections;
@@ -3378,6 +4271,54 @@ export function GamePanel({
           {importNote ? (
             <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]" role="status">
               {importNote}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {/* Whole-collection artwork progress + hunt (Anthony,
+          Nov 7, 2026 — expanded ask: every Disney Topps set
+          and every Garbage Pail Kids set filled wherever a
+          lawful source carries the card). Shown on the
+          collection's set-list page while any front in the
+          collection is still missing. */}
+      {!searching &&
+      sectionKey == null &&
+      gameIsDataOnly(game) &&
+      data &&
+      gameFronts < data.cardsTotal ? (
+        <div className="mt-3 rounded-xl bg-[var(--surface)] px-3 py-2.5 ring-1 ring-[var(--border)]">
+          <p className="text-xs leading-relaxed text-[var(--dim)]">
+            Card fronts loaded for {gameFronts.toLocaleString()}{" "}
+            of {data.cardsTotal.toLocaleString()} cards in this
+            collection — each set&rsquo;s own count is on its
+            row below, and in Settings under Artwork coverage.
+          </p>
+          <button
+            type="button"
+            onClick={() => void runGameArtHunt()}
+            disabled={
+              gameArtHunt === "working" || gameArtHunt === "started"
+            }
+            className="mt-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium text-[var(--gold-soft)] disabled:opacity-60"
+          >
+            {gameArtHunt === "working"
+              ? "Starting…"
+              : gameArtHunt === "started"
+                ? "Artwork hunt running"
+                : "Load artwork for the whole collection"}
+          </button>
+          {gameArtHunt === "started" ? (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              The hunt is working through this collection set
+              by set — fronts appear as each exact card is
+              verified.
+            </p>
+          ) : null}
+          {gameArtHunt === "blocked" ? (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              The hunt could not start from here — it also
+              runs on its own every morning, and this
+              collection is in its line.
             </p>
           ) : null}
         </div>
@@ -3634,7 +4575,7 @@ export function GamePanel({
                   ) : (
                     <span className="flex aspect-[3/4] w-full items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-1 text-center text-[10px] text-[var(--dim)]">
                       {gameIsDataOnly(game)
-                        ? "Data only · no artwork"
+                        ? "Artwork not sourced yet"
                         : "No artwork link"}
                     </span>
                   )}
@@ -3707,11 +4648,13 @@ export function GamePanel({
                   aria-label={`Open ${s.name}`}
                   className="flex w-full items-center gap-2 py-3 text-left"
                 >
-                  {s.hasArt ? (
+                  {s.hasArt || SECTION_ART_BOX_GAMES.has(game) ? (
                     <SectionArtThumb
                       game={game}
                       sectionKey={s.key}
                       name={s.name}
+                      hasArt={s.hasArt}
+                      box={SECTION_ART_BOX_GAMES.has(game)}
                     />
                   ) : null}
                   <span className="min-w-0 flex-1">
@@ -3722,6 +4665,9 @@ export function GamePanel({
                       {s.total.toLocaleString()} {noun}
                       {s.owned > 0
                         ? ` · ${s.owned.toLocaleString()} owned`
+                        : ""}
+                      {gameIsDataOnly(game) && s.withArt < s.total
+                        ? ` · fronts ${s.withArt.toLocaleString()} of ${s.total.toLocaleString()}`
                         : ""}
                     </span>
                   </span>
@@ -3765,6 +4711,47 @@ export function GamePanel({
             </h2>
             <GridColsToggle />
           </div>
+          {gameIsDataOnly(game) &&
+          section.data &&
+          section.data.withArt < section.data.total ? (
+            <div className="mt-3 rounded-xl bg-[var(--surface)] px-3 py-2.5 ring-1 ring-[var(--border)]">
+              <p className="text-xs leading-relaxed text-[var(--dim)]">
+                Card fronts loaded for{" "}
+                {section.data.withArt.toLocaleString()} of{" "}
+                {section.data.total.toLocaleString()} cards in
+                this set — the rest still show the placeholder
+                until a photo of that exact card is sourced.
+              </p>
+              <button
+                type="button"
+                onClick={() => void runArtHunt()}
+                disabled={
+                  artHunt === "working" || artHunt === "started"
+                }
+                className="mt-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium text-[var(--gold-soft)] disabled:opacity-60"
+              >
+                {artHunt === "working"
+                  ? "Starting…"
+                  : artHunt === "started"
+                    ? "Artwork hunt running"
+                    : "Load the rest of this set's artwork"}
+              </button>
+              {artHunt === "started" ? (
+                <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+                  The hunt is working through this set in
+                  collector-number order — fronts appear here
+                  as each exact card is verified.
+                </p>
+              ) : null}
+              {artHunt === "blocked" ? (
+                <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+                  The hunt could not start from here — it also
+                  runs on its own every morning, and this set
+                  is first in its line.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {section.isPending ? (
             <p className="mt-3 text-sm text-[var(--dim)]">
               {t("game.loadingCards")}
@@ -3784,21 +4771,7 @@ export function GamePanel({
                     game={game}
                     c={c}
                     cols={gridCols}
-                    onOpen={(card) =>
-                      setDetail({
-                        id: card.id,
-                        name: card.name,
-                        printed: card.printed,
-                        sectionName:
-                          section.data?.sectionName ?? "",
-                        rarity: card.rarity,
-                        finish: card.finish,
-                        imageUrl: card.imageUrl,
-                        price: card.price,
-                        ownedQty: card.ownedQty,
-                        ownedSealedQty: card.ownedSealedQty,
-                      })
-                    }
+                    onOpen={openGridCard}
                   />
                 ))}
               </div>
@@ -3852,7 +4825,11 @@ export function GamePanel({
           key={detail.id}
           game={game}
           card={detail}
-          onClose={() => setDetail(null)}
+          onClose={() => {
+            restoreDismissedRef.current = true;
+            snapshotSeededRef.current = false;
+            setDetail(null);
+          }}
           pendingUpc={game === "funko" ? pendingUpc : null}
           onLinkUpc={
             game === "funko" && pendingUpc
@@ -3874,6 +4851,36 @@ export function GamePanel({
               : undefined
           }
         />
+      ) : null}
+
+      {detail == null &&
+      restoreDetailId != null &&
+      restoreDetailQ.data === undefined &&
+      !restoreDetailQ.isError ? (
+        // Refresh-in-place cover (Anthony, Nov 5, 2026 — the
+        // Tumbler re-check: the earlier fix DID land back on
+        // the Tumbler, but the Lego catalog showed through
+        // while the item re-fetched — "it backs out to another
+        // screen I can't recognize, then it ends up going back
+        // to the Tumbler"). When no stored snapshot could seed
+        // the sheet (above), this plain full-screen cover in
+        // the app background stands exactly where the sheet
+        // will be, from the very first frame — the same pattern
+        // as the profile stack's restore cover in App.tsx — so
+        // the catalog never shows at any point during the
+        // refresh. It lifts the moment the restore lands and
+        // the sheet opens; if the fetch fails or the item is
+        // gone, the cover lifts too and the catalog returns as
+        // the fallback.
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg)]"
+          role="status"
+          aria-label="Reopening the item you were viewing"
+        >
+          <p className="text-sm font-medium text-[var(--dim)]">
+            Reopening this item…
+          </p>
+        </div>
       ) : null}
 
       {gradedOpen && gradedEligible ? (
@@ -3912,7 +4919,10 @@ export function GamePanel({
             // the small delay lets the pop land so the two
             // windows never share one entry.
             barcodeWin.close();
-            window.setTimeout(() => setDetail(card), 60);
+            window.setTimeout(() => {
+              snapshotSeededRef.current = false;
+              setDetail(card);
+            }, 60);
           }}
           onNoMatch={(upc) => {
             setPendingUpc(upc);

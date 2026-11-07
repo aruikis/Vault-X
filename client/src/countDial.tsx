@@ -57,9 +57,9 @@ useState,
 import { createPortal } from "react-dom";
 import { hapticConfirm } from "./haptics";
 import {
-  pushWindowState,
-  readNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+scrubWindowKeys,
 } from "./historyNav";
 
 export function SidewaysCountDial({

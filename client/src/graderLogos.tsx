@@ -1,89 +1,35 @@
 // The official logos of the five grading companies Vault X slab
 // scanning supports (Anthony, Nov 5, 2026: the Search tab's "We
 // support:" row). These are the companies' real logos, used as
-// served by their own sites — never redrawn, and presented in
-// their native official colors (see GraderSupportRow below for
-// the light backing plate each one now sits on):
+// served by their own sites — never redrawn. Presentation is
+// Anthony's approved mockup Option 3 (Nov 5, 2026): the marks
+// stand directly on the app's dark background in bright,
+// readable editions with a soft colored spotlight glow pooled
+// under each one — see GraderSupportRow below:
 //   PSA     — official SVG from psacard.com brand assets
 //             (psacard.com/psa/images/brand/favicons/psa-favicon.svg)
 //   SGC     — official SVG from gosgc.com (gosgc.com/assets/img/logo.svg)
 //   CGC     — official CGC Cards SVG served as the cgccards.uk site
 //             header logo
-//   Beckett — Beckett Media's official logo (beckett.com itself
-//             rate-limits automated access, so the copy comes from
-//             the Wikipedia-hosted official logo file), cropped to
-//             its artwork and stored as a small PNG data URI
+//   Beckett — Beckett's current official wordmark, taken from
+//             beckett.com's own site header asset
+//             (beckett.com/_next/static/media/beckett.eed9cbf2.png,
+//             512x134) and keyed to its light edition (white on
+//             transparent) for the dark background, the same
+//             treatment the other dark marks get. It replaces
+//             the old 103px Beckett Media emblem (Nov 5, 2026:
+//             Anthony reported it BLURRY — it was a tiny raster
+//             stretched into the row; this wordmark is five
+//             times its width and renders tack sharp).
 //   TAG     — official logo PNG from TAG's own store CDN
 //             (taggrading.com/cdn/shop/files/TAG_Logo_Official__NoText_Black_Outlined_260x.png)
-// The SVGs ship as bundled asset files; the two PNGs ride as data
-// URIs so their bytes stay owned by the app either way.
+// The SVGs and the Beckett PNG ship as bundled asset files; the
+// TAG PNG rides as a data URI so its bytes stay owned either way.
 
 import psaLogo from "./assets/graders/psa.svg";
 import sgcLogo from "./assets/graders/sgc.svg";
 import cgcLogo from "./assets/graders/cgc.svg";
-
-const beckettLogo =
-  "data:image/png;base64," +
-  "iVBORw0KGgoAAAANSUhEUgAAAGcAAABwCAMAAAA0TJ7oAAAB/lBMVEXV2d+cm52SmJzV1Nhbj67T1NlhXl+gpaxwbm/e3uGhnqCPtMkgh8Zpps" +
-  "ujy9wWXo0jHBplmbajxtYshLdBPD1/f/+ds8FvnLt///9ubqtVqqpypsWDfHunrPObt8rDwL4AAP+BfoCq//96enpIe5qxydjsruw/f38/f79G" +
-  "QD5lZGX/f///qqo/Pz8AAH8/fz9DPkJ/f4J/v/9ZmcJ//395weaJgX+q/6rAvr7Av8LExL0AAADq5uX+/v7Z1tbMyMkDdbcNWYoIa6b49fQLY5" +
-  "jh3Nu5tbfl4d76+/yuqKr8+/wCe8K+vr6qqanBvL1/f3/59/np5+ro5ujCvsBJRkfY1tnh3uH49vjp6OsMUXv49/k7Nzc1mNPo5unK4+6LhoeZ" +
-  "lJVTmsZ/v79Zk7lrZmdYVVb49vh4dXWjnJrKyMrNy86RsMDr6ewqeaq/v/9VVVXX1dfp5ukuKCiGhoaHhoempqbX2NjZ1tgFTHlmZWYA//8maJ" +
-  "FUoc64uLnl5ecAf38AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
-  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACamQiOAAAAgHRSTlNgXpqh5xvX7aDkJJH+2Z" +
-  "n9/6dt/fkC6HwCCgOo/whz/wHYAzf/7AgEBP9mAgMEAgT/qgRpAv//A3beIwD+Bf39/v7+/f7+/f5R/i7+BAT+Am+uz/760fywc/6O/f+PWvv8" +
-  "/AT9+vfO+f5K0edN/AQDriz+rM42M4r9zQH//1EPA3yQ2bUAABBsSURBVHjanVqJYttGkgUpUZct2YmdTDKb2Mlkkp2dmd2ZvY++SLYAAhDvO6" +
-  "Rp0o7ulceSLUs+YufX51UDJAGQlOR0YlIEgX6o6levqhq02DVDlCrmjYn0+XC4wY729t5vHJwfsaPztXRqg9G3JXHdLMxi1w/xqoSXN29SX/5r" +
-  "irGVPbHyEhOL3X56eM7Ydxs3mOJqnFKlwn54lXp5kGZsrXlGxjGxsvdtmj2HGfffsEyKpQ7O11IZxiqlX4kjggtTu81U6QhmNEWJjoiV5l9XBN" +
-  "tgmeZeGvjv31t7e+dkoHHhr7LnuxSWZa3/6n2apj9jG88Z+S3VBxBLNddefmvu5H4qNRSv4NLnlY/GAQD81V8T7KK/e75SYqn+Gg6/ei6aTUCf" +
-  "C5ZuFtlRhj3HHQiRYenhy41fY49YbQ71wRvjKHH0YANvb9bWVj+kVlZSbG0lJQ720t+lMfVZ8w2d/l68aQJJfLTfLt405S7mAwNelUbwXGrtZT" +
-  "ojiGn0dXEj9fLbc1Fhf+ynWAnkP2uupMH70kfilNj7/q46wCSp5u75y/fzbpRA3+/tXQC5SOvI0q8WkWEujjDsgae0bv6RbaylyPOi8s+VSgSN" +
-  "bMCZmVfpFBHg4j7WUnzM+oiieXvOUi88uft/LNSDRfdjxl+O1vpHxmdCFIW4AY5ZgGAVBCKEhOX5lbpSeU4XpJtvxBR3FimJ82fG/O5+D7dGiv" +
-  "aKMcFuNlLpDF3CRNe6ELOXWTNhU5O8zUW4npUKu/EwXmM93ZatwcxSWQkYv865UvtCVEKX3HQ8DydwtSM5ryWBrDhMlUuuPO5HzhLFp0+fFukl" +
-  "Noq/m7fc7GtMscq5rIn4okZxSsLnivOR7N1wVf4g5lBQdByPF+QgHrExHFaTNne8VuReBPvaevz4sUUvsWFZZM83YlYYfTlSXNrVGJAVPcOF16" +
-  "TnWKw4OVhkW/95+9Hc8WRzy2czOkM4ngfP8dgSWdPvK6IOc5SnrIjnRUVsPcru5OeMnZ3bP28J9ts4zmdMSMfD/Up3Hg6BY3UKvOzJbvQE/Ll1" +
-  "eyefy/1IIxeM4K98duf2psX+LWlRveEpbsvLIN5jOOZzVUpul512nAa4g82d7PYYIjJ+zMGmJ5+yLxNhVJOOAhNaIqJX1tip+y4bwG1SOdqN0+" +
-  "13bOlRNj8Hh0Y2C6BSfIFc7ii7YCtf+Gdj/bbGa6f3xbos2FIpnYgxXLiZzeYWjOzOk8fsv+PMritFU2Vg2VEIZAXftJTkvpQFgukkogew3y/G" +
-  "AdCmSDi6ypW0bXkkuHTOgnrGMtytSofLnpS2Ulx3koH+W7Z0O7u9CGc7e3sLLIvhaAmDuNXj3FliEZwBzIDgwFzwvpZUgyJ7/GgxDi2RYP8Rdb" +
-  "OWNJlc51I7KjA2gqNkQ0pEcjcSpiGO+ySbz11h0INIFGFezKIwHQYY4U5wBKvBX7aDEJVafT6j6X9j7s8xnO24cfkdGPQ2SmyoJCZTDt7C2w54" +
-  "TTjcVo6tbTg0mXNgz8/5fNSAuHUw6DHYH3EclpuTQZhTVic4sAcU4LyALz3pzoj132ZwjEBEVuh2LFhB7HKZ00AQrUdwhEvQdqGAQK4LcR1OLn" +
-  "trM2ZRfucf2D/Gie2AcAWb5LTKMgEOZXPZht+kKquWmK3AIjhYGazNvQdiMzteKjoEnF9iodprO0RewvHDOIU7BRtwDcIpgpnNXROc7WDknt1i" +
-  "n97bnnwEzicxHJCiR7NJzTlEGfMzi6KqBt3hOoCZU7eGONshzba3s7dE5lmEdDM4cD0BAQczWhplAOxpKd4NcHiHzUv6wHmSz29PB+whnOnIJn" +
-  "BIyjS4xpXFMhI5/GuL+aqxLo0acK677GY44iKKk8/GeGBiqIu1KXN5IRCrxzCKuQgnil2njRy4aH1m7HlwJ4pzb4v9ISG9NOVDyS9POadYsaA5" +
-  "CCoHODDTac0ra2ZxUmJ5O4bjJ1MJvKQhCZgYmo3MabEuZI3bBRzUco4YzMN5t/VJDCa7KX6ZLUZw94rqNNkwOCdGwwuIVBwfzONbMYmTW56Qmm" +
-  "Dy9yzUhwm/caeBkCxQCCnEqiXcNoUuHUAhWk1q9XycXC7OAvFlsokQHSoSIDwQGcVd4jXSNSGjMmho9wZ8y0eNIXOW/RlvU/HUKCvbtklnUMpZ" +
-  "7okvba0pyTlcz23Jikmc2Ft+OSrWU6AeL5P0aC7bvZ5r1fhJlz4ZmejMLawJZzvqt4gt+eyyxb6YB7NPmVPCAtnhum4dczmoK1I3HGuJj8Khqv" +
-  "SnkzkbIcQDRD3NKVUdcXlqKeIeZVOJBklai/yWyy8a926JGYMErTq81KCp23hZso4puTrc5Fi+mNeLcfLPNmfUN6wRuCrTeiBSl6wW1aj46FAJ" +
-  "ohbyOoaDvB0by0mLgFOnG2+UKVYRSl2rpqjPQ+yAbY7yF/jtpytxtpeTPEW3RSWUV25TTnVk1eoZYaO/8a8lxI1wHsUbFUpI8fYkUwlrEYKBJb" +
-  "7ltxUVqaQHjlpiN7NnazMOlFvOvP0i5jekNaMHpmKXNaOjoLlN9T1g3Xmt6QzO7X/3nyQ8F0t0yNEu6yqH9MBG7Sl9qkNOpW2sU+rS1/MyXYAT" +
-  "WROkz1v3pp/MCkW0x0TPmcCEcBv0TQ5ExnI7bssUJjjq77fbtStxsjQgnG/FT8GHMc6zT9nTaTL129A0OIqWB/Su7rsWEOoUUsjmSx1E7uVCnM" +
-  "nIZ3/D2K2soV02BNu+Jf4lmn0Ur+NFkaCBYNAdChvSh4KCDpnCoXgTnG8+fRY5ko1Rm1phlAa1DpUclL9JDxBPyKMPQ0GQTveG9jxensF5O12f" +
-  "NpEac9oUNVo1qlYH2Q3GmPqeT9qIK3GywBFX49QdanQcxzRutqd8y207DZNdHboFb54izNiThz0Jv+WikiBYh9xjMiq9NerIp9SF2zwYaq4izO" +
-  "J88gsKnuxCnOJnLu44nBNmof60aHcC/CvQAGKN3cBv279h6Xf5OE68PYMalG0qOqizVtoXqK87xAnogU1C5PqzjpuxZ/tW+l3MnOz2dlp8NhXR" +
-  "M1SFVB1QkFIZgvqaNrLQ0FObBeRjwVsfZvvghD2537/LxWCyuTsPJnGKooOf+CroSyBnpnMzCZQ2XGh1lLRcLo9FRczixGaNs88gZ8a5TogP/8" +
-  "u5OJUqmFRW/R7hsG5tqYbcqkkSBLTBOWHX4GDsxN1GNJiojgUKuCg/zZRc1zTKKKvETimkOElCuUX7lt5SQhII504CJI6Te3dr3NlTCe9oWXeR" +
-  "s0lzoHSyDpwis1CgSmKfDOphb1XMw9nJLhxkzjeVsdtcxyMERUFKiqbUPvEApb1H1RxAyh6yattzRPyJG4qx5Tv5OTg7ZoDUdyb9toDbgoiH4H" +
-  "hUJwYtvIVSeKnhUD2HCrVBGdxr1PxYFJVY7dlcHIMEGJA6pA685l82HEMqCn5NElNDarJMr1IuSz4eVJHIWjSKvhHH72hLb649tPHzyThG8X7a" +
-  "hoJFZsPUvuE1XigjRbSnAd+uT8ktPhPLtP01b8CY1+/SEZgl9PMOlWqh5kBHB/StZXrWJdrzoS0R6ES5ge9Wp6R7+5RZd8icGQwiwOvXy1sRmN" +
-  "aqw1WgY9QoUGarGcW0QmupFDFFD50F2g3VOIoqrLp8JzdbXKMJev36x99/34vA1JxhMINxnClCBtN9MTpjIEOf2gbHHnm2ec7y9gvRXX2d+xFT" +
-  "xgc+v1teXUfHFG7yCZbptEdeoJzjuWQ3ZJQ12a03OqERwmU6zRupfUwhvmDu+urnq/+P/6MDhz7/fl3rjs+KIgwy0dHOyEFB4JASaNMwdsZpZm" +
-  "zPvkl/ZgtDeQ3NnVVcsUQ2fxCLx4cJ/79mZy3NPQ8i4FF6k6rsoFuYPBGxJt2XJHY4ngrSoIOQlWrVv+6JhpiImiNt6VF2o5bAwz1L2pRP4rjc" +
-  "CYzlZh/OSAOkDmk8I64aY7QuRMB4hJbFzEBL4EweMoz340VNRqKrUCiXCUeNlHuDZzQldqJGtK/mlBWfDhhWHV9tTUsUpULOgftwYZkC6nC1fT" +
-  "0QzDoGAeBnhF4h2CMwtJODyb6UFWnECShsHUxbjC5WgajXAv3AlrwRFqMdBA6A7CBEI3uTVuzpD3Uo9rhMaVDFurp67dMteM1ZpVTgPFShQ0yE" +
-  "yv1IaWJFTvepvjYnYg3Bc0/ygudB6q4EIq85xGdFpWdIJdtut6rR62LPs4RbN80QDzIsSWsZVPXF1TgfHMNnCnRpSk6MVjf+ENWKb5b0tMmtYI" +
-  "GnCrTtQ1Ttmh3bRY+DkZA/NwoNV1GkB3TqVN1YNROzx9fcrF/wv2Ee4SC9ZxaYRBm+yp2yo4xA03XKTNHW+7HKNobT05MsFPIbrTmioCMYY7MF" +
-  "cfAYvMrLZZw15vO42pXaX+A3IUAEBEAUxhDcWedVXwRPWKfD/CrFr9blJA9MgWgL1hVi8fNtIgLIPY4iYl4Bighf1HvujD1uLYhN2ocKby1ofC" +
-  "HU/hXPt3EHcAN5uc3HMBp60nCMlLdOTy8vLevIDMv6n2PQBUojC3IijYbSUtWrVz7fZgJJwO+ZeA3uDxRCBJXxguGYNTaDfBUcdaCEgXyG66KO" +
-  "L/3ZH0ZYM2vrVzuUqzDKKmBp6EOdHGHsEzsJK7hEDnwx54cOyd8fiGo9KBHCeDU1mAEJ/9JB5hhD6fAr8xgkvI7q3Ktxgv0524yxuwMpOhxK7a" +
-  "0MR19xPWqODnfxzg8PnDjNgtNx/tnVOOIHIVqYYAxEbLB375YRvndXwLy7nkbqVy9sbfd3tfbu0gMRvTLUE/U012l5ITKlytzfH4g/iaL54YW0" +
-  "dcwgzLaHl/uYl/c9W2ld7ttaj15wvdrHPQF2L4ZDJfVFKBbFRF4IPwr/ZECVSMxxzuGLQ334VZNwDkYjrZ0XBa0PgTMiHJSUL2TCHtUadMfim8" +
-  "xzwrKWEBDSsZM45WHfKx/ex5z3PY1Zyphe7+5pPfwnmOP9l7p7qBM4hv+tpYHrR+35E3M7LXpCR3HR4Amch57u97mH++f9oXYcWhbuNZFqDsjG" +
-  "oeM0d3XCb2pSA4xVLqh7Ozrkyhwc50Af7uLeYcvB8HCotPPV4eEhPWfb3ZN6+BXsuivn4JiAk2PZDp83cpIos/f3cAbn0Ob0XyJSQ0mj2vXwwE" +
-  "vgNIw5gOE6lNPx7wL26YuCDLaybDvGuDlSEFMFHVse29iDICeY/WSdSJsIgefGOFNdtE3TEs1M0RwVidLAnoKWZYOj+LQSmdZv9FC6EOCEgqgi" +
-  "s69zXq/XaoOBZXUHg1ptab1eb7VCVW2Hrc7YAQGOVPsfEr/bQPtqhIBEijrH0be7e83+gcTMvV616vq+P2d/yaQ7fOV2B7X6utpt7u0eDKmKp/" +
-  "UhuPWZ+k2w0yCHAMgb7q40m/1+3+skHx4hnxYpyEslkfyFlzjZfdG/T1AjZ0w33p35HcqJDBfVNl2D560OD1arQaIuxmr2hD2Tgt4fjZCNzGiY" +
-  "kgyzHYtY3SuMfBqcQqjuS0uWuPmP38wUbveSFCVIDraZj1sxHlD7E2wg0L96revHtOljBiSye3l6fKxMLtetRD9HgtBu83qvOpakUuljUUrF0n" +
-  "Sr/OwCcklhyhJ9Y71WHRc0ovjnX2HJxH/F4hguk6mOG6C/A14kHz5W0ZRiAAAAAElFTkSuQmCC";
+import beckettLogo from "./assets/graders/beckett.png";
 
 const tagLogo =
   "data:image/png;base64," +
@@ -198,48 +144,98 @@ export const GRADER_LOGOS: { name: string; src: string }[] = [
   { name: "TAG", src: tagLogo },
 ];
 
+/** The spotlight pool under each logo in the support row:
+    a soft ellipse of the brand's own color(s) lying on the
+    dark background beneath the mark, like a little stage
+    light — PSA's pool blends its red and its blue, the two
+    colors of its mark. */
+const GRADER_GLOWS: Record<string, string> = {
+  PSA:
+    "radial-gradient(ellipse 55% 100% at 26% 50%, rgba(238,4,3,0.55), transparent 70%), " +
+    "radial-gradient(ellipse 55% 100% at 76% 50%, rgba(38,92,220,0.55), transparent 70%)",
+  "Beckett (BGS)":
+    "radial-gradient(ellipse 70% 100% at 50% 50%, rgba(64,156,255,0.50), transparent 70%)",
+  SGC: "radial-gradient(ellipse 70% 100% at 50% 50%, rgba(150,96,255,0.50), transparent 70%)",
+  "CGC Cards":
+    "radial-gradient(ellipse 70% 100% at 50% 50%, rgba(255,84,112,0.48), transparent 70%)",
+  TAG: "radial-gradient(ellipse 70% 100% at 50% 50%, rgba(164,110,255,0.50), transparent 70%)",
+};
+
+/** Marks whose official artwork is a single dark colorway
+    (SGC near-black, CGC red, TAG black) render in their
+    light edition here — the same artwork, shown white, the
+    way these companies themselves print the mark on dark
+    material. Beckett's wordmark asset already ships in its
+    white edition (see the header note), so it needs no
+    filter. PSA is NOT in this set (Anthony's Option 3,
+    re-confirmed Nov 5, 2026 after he reported the row still
+    did not match the mockup): PSA keeps its official color
+    — the mark renders exactly as PSA's own brand asset
+    ships it, never whitened. */
+const LIGHT_EDITION = new Set(["SGC", "CGC Cards", "TAG"]);
+
 /** The Search tab's "We support:" row (Anthony, Nov 5, 2026):
     the five grading companies' real logos in one clean row at
-    the very bottom of the Search tab. Every logo renders in
-    its NATIVE official colors — no filter, no monochrome
-    treatment, the artwork files are the companies' own, byte
-    for byte, never redrawn.
-    REDESIGN (Anthony, Nov 5, 2026, on-device, superseding
-    the earlier bare-on-dark presentation): three of the
-    five official marks are dark artwork — TAG's official
-    logo is black lettering, SGC's official SVG is filled
-    near-black (#1a1a1a), and Beckett's carries thin silver
-    and grey detail — so set straight onto the app's dark
-    background they washed out to near-invisible ("TAG is
-    washed out in black, SGC is washed out in black, and
-    Beckett doesn't look good"). Each logo now sits on its
-    own light backing plate — a warm-white rounded chip —
-    which is the background these marks were designed for,
-    so every native color reads exactly as the company
-    drew it. All five plates are ONE uniform size (the row
-    reads at the old TAG footprint: same size, same
-    spacing, one even row), and each logo is contained
-    inside its plate with padding, so wide wordmarks and
-    compact square marks alike sit at the same visual
-    weight. The plates are plain light chips — no recolor
-    of the artwork itself, ever. */
+    the very bottom of the Search tab.
+    FINAL PRESENTATION — MOCKUP OPTION 3, picked and approved
+    by Anthony on Nov 5, 2026 after on-device review of three
+    mockups (superseding the light backing plates of v1.98.3,
+    which he judged a light format, not a dark one, and the
+    Option 2 gunmetal pill he picked first and then replaced
+    with this one): NO tiles, NO bar, NO light background of
+    any kind. The five marks stand directly on the app's dark
+    background in bright, readable editions — the dark
+    single-color marks in their white edition (see
+    LIGHT_EDITION above) — each with a soft colored spotlight
+    glow pooled underneath it, PSA's glow carrying its red
+    and blue. The artwork files remain the companies' own,
+    never redrawn.
+    SIZE + CENTERING (Anthony, Nov 5, 2026 — re-reported
+    the same day: the row STILL did not match the mockup.
+    The equal-HEIGHT pass was not enough: at one shared
+    height the wide wordmarks (Beckett ~99px) dwarfed the
+    compact marks (PSA's square mark at 26px), so the five
+    still read at five different sizes, and PSA rendered
+    WHITE under the light-edition filter, losing the
+    official color the mockup keeps). FINAL FORM: every
+    logo stands in the SAME fixed slot — one width, one
+    height (the TAG footprint) — with its artwork contained
+    inside it, centered both ways, so all five carry the
+    exact same size and visual weight; the row is a single
+    no-wrap line of identical slots with one even gap,
+    centered as a group; PSA renders in its official
+    color; the dark single-color marks render in their
+    white edition; Beckett's sharp 512px wordmark ships in
+    its white edition; and each slot pools its brand glow
+    directly underneath its logo. */
 export function GraderSupportRow() {
   return (
     <div className="flex flex-col items-center gap-2.5">
       <p className="text-xs font-semibold tracking-wide text-[var(--dim)]">
         We support:
       </p>
-      <div className="flex flex-wrap items-stretch justify-center gap-2.5 px-2">
+      <div className="flex items-start justify-center gap-2 px-1 pb-2">
         {GRADER_LOGOS.map((logo) => (
           <span
             key={logo.name}
-            className="flex h-11 w-[76px] items-center justify-center rounded-lg bg-[#f5f3ee] px-2.5 py-1.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+            className="relative flex h-[52px] w-[68px] shrink-0 flex-col items-center"
           >
-            <img
-              src={logo.src}
-              alt={`${logo.name} logo`}
-              className="max-h-full max-w-full object-contain"
-              draggable={false}
+            <span className="flex h-[34px] w-full items-center justify-center">
+              <img
+                src={logo.src}
+                alt={`${logo.name} logo`}
+                className={`max-h-full max-w-full object-contain ${
+                  LIGHT_EDITION.has(logo.name)
+                    ? "[filter:brightness(0)_invert(1)]"
+                    : ""
+                }`}
+                draggable={false}
+              />
+            </span>
+            <span
+              aria-hidden="true"
+              className="mt-[3px] h-[10px] w-[54px] shrink-0 rounded-full blur-[6px]"
+              style={{ background: GRADER_GLOWS[logo.name] }}
             />
           </span>
         ))}

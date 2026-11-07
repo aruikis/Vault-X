@@ -35,9 +35,9 @@ import { api, type ApiResponse } from "./api";
 import { useCachedArt } from "./artCache";
 import { hapticConfirm, hapticTick } from "./haptics";
 import {
-  pushWindowState,
-  readNavState,
-  scrubWindowKeys,
+pushWindowState,
+readNavState,
+scrubWindowKeys,
 } from "./historyNav";
 import { VxSelect } from "./vxSelect";
 

@@ -433,10 +433,33 @@ async function clearArtCache(): Promise<void> {
 
 let warmupRunning = false;
 
-const idleYield = (): Promise<void> =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, 30);
+// Speed pass (Nov 5, 2026): between warm-up batches, stand
+// down properly instead of merely yielding a tick — pause
+// outright while the app is backgrounded (a hidden tab has
+// no browsing to keep smooth, but its downloads still cost
+// the device battery and bandwidth), and otherwise wait for
+// a genuinely idle moment (requestIdleCallback, with a
+// short timeout so the pass still finishes on a busy page).
+async function waitForBrowsingRoom(): Promise<void> {
+  while (typeof document !== "undefined" && document.hidden) {
+    await new Promise((r) => window.setTimeout(r, 1000));
+  }
+  await new Promise<void>((resolve) => {
+    const ric = (
+      window as unknown as {
+        requestIdleCallback?: (
+          cb: () => void,
+          opts?: { timeout: number },
+        ) => number;
+      }
+    ).requestIdleCallback;
+    if (typeof ric === "function") {
+      ric(() => resolve(), { timeout: 500 });
+    } else {
+      window.setTimeout(resolve, 30);
+    }
   });
+}
 
 async function waitUntilOnline(): Promise<boolean> {
   // Pause (don't spin) while offline; give up for this open after
@@ -504,7 +527,7 @@ export function startArtworkWarmup(plan: {
             if (blob) await cachePut(id, "grid", blob);
             if (cursor % 4 === 0) {
               emitProgress(true);
-              await idleYield();
+              await waitForBrowsingRoom();
             }
           }
         };
@@ -536,7 +559,7 @@ export function startArtworkWarmup(plan: {
             if (id == null) continue;
             const blob = await fetchSourceBlob(id);
             if (blob) await cachePut(id, "large", blob);
-            if (cursor % 4 === 0) await idleYield();
+            if (cursor % 4 === 0) await waitForBrowsingRoom();
           }
         };
         await Promise.all([largeWorker(), largeWorker()]);
