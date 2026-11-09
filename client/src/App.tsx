@@ -4710,7 +4710,7 @@ function ProfileMyCollectionSection({
             hapticTick();
             onOpenComics();
           }}
-          aria-label={`Open your SLABS collection — ${comicsCount} graded comic slabs, total value ${fmtUSD(comicsValue, 0)}`}
+          aria-label={`Open your Comics collection — ${comicsCount} graded comics, total value ${fmtUSD(comicsValue, 0)}`}
           className={rowClass}
         >
           <span
@@ -4744,10 +4744,10 @@ function ProfileMyCollectionSection({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[17px] font-bold leading-tight text-[var(--text)]">
-              SLABS
+              Comics
             </span>
             <span className="mt-0.5 block text-[13px] font-semibold text-[var(--dim)]">
-              {comicsCount} graded comic slabs
+              {comicsCount} graded comics
             </span>
           </span>
           <span className="shrink-0 text-right leading-none">
@@ -5926,6 +5926,26 @@ function CollectorIdCard({
   // so it must paint in the same first frame — not pop in
   // after the reveal the way it did before the snapshot.
   const [homeSeed] = useState(readHomeSnapshot);
+  // Quick-copy for the Collector ID code on the expanded ID
+  // page (Anthony, Nov 9, 2026): one tap on the copy button
+  // beside the code puts the exact code on the clipboard and
+  // flashes a brief "Copied" confirmation, so nobody has to
+  // long-press the code and copy it by hand.
+  const [codeCopied, setCodeCopied] = useState(false);
+  useEffect(() => {
+    if (!codeCopied) return;
+    const t = window.setTimeout(() => setCodeCopied(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [codeCopied]);
+  const copyCollectorCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+    } catch {
+      // Clipboard unavailable in this frame — the code stays
+      // visible on the page, so nothing is lost.
+    }
+  };
   const profile = useQuery({
     queryKey: ["collectorId"],
     queryFn: () => api.getCollectorId({}),
@@ -6421,9 +6441,56 @@ function CollectorIdCard({
                   className="h-5 w-5"
                 />
               </h2>
-              <p className="mt-0.5 text-sm tabular-nums text-[var(--dim)]">
-                {data.collectorCode}
-              </p>
+              <div className="mt-0.5 flex items-center justify-center gap-2">
+                <p className="text-sm tabular-nums text-[var(--dim)]">
+                  {data.collectorCode}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void copyCollectorCode(data.collectorCode)}
+                  aria-label={
+                    codeCopied
+                      ? "Collector ID copied"
+                      : `Copy collector ID ${data.collectorCode}`
+                  }
+                  className="flex h-7 items-center gap-1 rounded-full border border-white/15 bg-black/45 px-2.5 text-[11px] font-semibold text-white shadow backdrop-blur transition active:scale-95"
+                >
+                  {codeCopied ? (
+                    <>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-3.5 w-3.5"
+                        aria-hidden="true"
+                      >
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-3.5 w-3.5"
+                        aria-hidden="true"
+                      >
+                        <rect x="9" y="9" width="12" height="12" rx="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
               {/* Profile stats, directly under the name and photo
                   (Anthony's direction): the Trust Score and the
                   Confirmed connections count. Both are verified-only
@@ -9618,11 +9685,11 @@ function HomePanel({
                         aria: "Open your Legos section",
                       },
                       comics: {
-                        label: "SLABS",
+                        label: "Comics",
                         img: collectionComics,
-                        alt: "SLABS collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art",
+                        alt: "Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art",
                         open: onOpenComics,
-                        aria: "Open your SLABS collection",
+                        aria: "Open your Comics collection",
                       },
                       sports: {
                         label: "Sports Cards",
@@ -9755,18 +9822,18 @@ function HomePanel({
                   <button
                     type="button"
                     onClick={tileClickGuarded(onOpenComics)}
-                    aria-label="Open your SLABS collection"
+                    aria-label="Open your Comics collection"
                     className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                   >
                     <img
                       src={collectionComics}
-                      alt="SLABS collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art"
+                      alt="Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
                     <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
-                      SLABS
+                      Comics
                     </span>
                   </button>
                 ) : key === "sports" ? (
@@ -14133,7 +14200,7 @@ const AU_TILE_KEYS_CLIENT = [
 
 const COLLECTION_TILE_OPTIONS = [
   { key: "tcg", label: "TCG Universe" },
-  { key: "comics", label: "SLABS" },
+  { key: "comics", label: "Comics" },
   { key: "lego", label: "Legos" },
   { key: "funko", label: "Funko" },
   { key: "sports", label: "Sports Cards" },
@@ -17734,7 +17801,7 @@ function AdminDashboard({
       : kind === "sealed"
         ? "Sealed"
         : kind === "comic"
-          ? "SLABS"
+          ? "Comics"
           : kind;
   const dash = (n: number | null) =>
     n != null ? n.toLocaleString() : "—";
@@ -35584,10 +35651,10 @@ export function App() {
     // it reads refs and state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // The SLABS shelves' and graded-cards list's tap-through
-  // (Anthony, Nov 9, 2026): a graded slab tapped anywhere —
-  // the Library's small shelf, the SLABS section's shelves,
-  // its Graded Cards list — asks the root to open that
+  // The Library SLABS shelves' and graded-cards list's
+  // tap-through (Anthony, Nov 9, 2026): a graded slab tapped
+  // anywhere — the Library's two shelves, the Comics
+  // section's Graded Cards list — asks the root to open that
   // slab's Card / Slab View, the same event pattern as the
   // slab-scan shortcut above.
   useEffect(() => {
@@ -38025,7 +38092,7 @@ export function App() {
                           {c.title}
                         </span>
                         <span className="block text-xs text-[var(--dim)]">
-                          SLABS · {c.publisher} · CGC {c.label}
+                          Comics · {c.publisher} · CGC {c.label}
                         </span>
                       </span>
                       <span className="shrink-0 text-xs font-semibold text-[var(--gold-soft)]">

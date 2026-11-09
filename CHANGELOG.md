@@ -2,6 +2,15 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.117.0
+
+- New: your Collector ID page now has a quick Copy button right beside your code — one tap copies the exact code (like MC-XFU8-Z5WD) to the clipboard and briefly shows Copied, so nobody has to long-press and copy it by hand anymore. It is on every collector's own Collector ID page; the QR code and everything else on that page are unchanged.
+- Fixed: brand-new users were being registered under the wrong name. A fresh install started with a built-in default username left over from when there was only one user, and the app published it to the network registry before the Welcome registration ran — so two collectors who joined on Nov 9 appeared on the network with someone else's username, and the Welcome page could then skip letting them choose their own. Now a new profile starts with a neutral placeholder, nothing is published to the registry until registration is finished, the Welcome page always lets a new user choose their username, and usernames are enforced unique on the server — a name another collector already holds can never be registered or taken by a second profile. If your name was one of the ones affected, your one allowed username change has NOT been used up by this fix.
+
+## v1.116.4
+
+- Correction: SLABS is the Library's name, and only the Library's — the sign and the two shelves there (your graded comics on the big shelf, graded card slabs on the smaller shelf above) stay exactly as they are. Everywhere the rename reached too far is Comics again: the Home tile reads Comics, the section it opens is the Comics section again with its Comics name, headings, and labels, your profile row and the Admin numbers read Comics, and the shelf display that had appeared at the top of that section is gone — those shelves live only in the Library. Your comics, counts, and values are unchanged, and the Graded Cards area still lists your graded card slabs with its company filter and the scan-a-cert add flow.
+
 ## v1.116.3
 
 - Fixed: the search bar on the Lorcana chapters page now suggests cards as you type, exactly like the Search tab. It used to be submit-only — typing a name like Ariel showed nothing at all until you pressed Enter. Now matches start from the very first letter and narrow with every keystroke (A, Ar, Ari… Ariel), each showing its chapter, number, and whether you own it; the list stays on screen while the next letter's results load, so it never vanishes mid-typing. Tap a suggestion to open that card right there; pressing Enter still opens the full Search page as before.

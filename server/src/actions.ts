@@ -1956,10 +1956,12 @@ const searchResponse = z.object({
   ),
 });
 
-/** Anthony's collector identity (the oval Collector ID card at the
-    top of Home): one profile row, created on first read with his
-    established handle ARUIKIS (his Shiny handle and gamer tag) as the
-    starting username — fully editable in the UI — and a collector
+/** A collector's identity (the oval Collector ID card at the
+    top of Home): one profile row per install, created on first
+    read with a neutral placeholder username the Welcome
+    registration immediately replaces with the user's own chosen
+    name (it used to seed Anthony's handle ARUIKIS for every
+    install — the Nov 9, 2026 duplicate-name bug), and a collector
     code generated once and never changed, so the QR code that
     encodes username + code is a stable unique identifier. */
 const COLLECTOR_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1984,10 +1986,20 @@ async function ensureCollectorProfile(ctx: Ctx) {
   if (existing) return existing;
   const profile = {
     id: 1,
-    // His Vault X display styling (Nov 3, 2026): "ARuikis" —
-    // capital A, capital R, then lowercase — in the app; his
-    // cross-platform gamer tag stays ARUIKIS elsewhere.
-    username: "ARuikis",
+    // Placeholder only (fixed Nov 9, 2026): a brand-new profile
+    // used to seed with Anthony's own username "ARuikis" — a
+    // default written when he was the only user — so every
+    // fresh install started life carrying HIS name, and the
+    // registry auto-sync published it under the new install's
+    // own collector code before registration ever ran (two new
+    // users landed in the network registry as "ARuikis" on
+    // Nov 9, 2026). The seed is now a neutral placeholder; the
+    // Welcome registration replaces it with the username the
+    // user actually chooses, and an unregistered profile is
+    // never published to the registry (see
+    // publishOwnRegistryProfile). Anthony's own long-standing
+    // profile row already exists and is untouched by this.
+    username: "Collector",
     collectorCode: newCollectorCode(),
     photoBlobKey: null as string | null,
     bannerBlobKey: null as string | null,
@@ -2607,6 +2619,81 @@ async function upsertRegistryProfile(profile: {
   return asRegistryRows(read.json)[0] ?? null;
 }
 
+/** Is this username already held in the registry by a DIFFERENT
+    collector code? Returns null when the registry cannot be
+    read, so callers can fail closed instead of guessing. */
+async function registryUsernameTakenByOther(
+  collectorCode: string,
+  username: string,
+): Promise<boolean | null> {
+  const list = await supabaseRest(
+    "profiles?select=collector_id,username&order=created_at.asc",
+  );
+  if (!list.ok) return null;
+  const rows = asRegistryRows(list.json);
+  return rows.some(
+    (r) =>
+      r.username.toLowerCase() === username.toLowerCase() &&
+      r.collector_id !== collectorCode,
+  );
+}
+
+/** Publishes THIS install's own profile to the network registry
+    — with the two guards the Nov 9, 2026 duplicate-name bug
+    proved necessary:
+    1. Registration gate: a profile that has neither completed
+       registration (registeredAt) nor finished the one-time
+       Welcome flow (welcomeSeen) is NEVER published. The Home
+       auto-sync and the backup sync both run from the very
+       first open, long before a new user picks a username in
+       the Welcome flow — publishing then is exactly how fresh
+       installs landed in the registry under a name that was
+       not theirs.
+    2. Uniqueness: a username another collector code already
+       holds is never written under this code, so the registry
+       can never gain a second profile sharing a name.
+    Returns the registry row on success, null when gated,
+    refused, or unreachable. */
+async function publishOwnRegistryProfile(profile: {
+  collectorCode: string;
+  username: string;
+  registeredAt: string | null;
+  welcomeSeen: number;
+}): Promise<RegistryProfileRow | null> {
+  if (profile.registeredAt == null && profile.welcomeSeen === 0)
+    return null;
+  // Uniqueness, with the original-holder exception: refuse
+  // when another code holds this name AND this code does not
+  // already hold it too. (While the two Nov 9 duplicate rows
+  // still carry the owner's name, the owner's own refresh of
+  // his long-standing row — held since Nov 3 — must not be
+  // blocked by the duplicates; a fresh code claiming a held
+  // name still is.)
+  const list = await supabaseRest(
+    "profiles?select=collector_id,username&order=created_at.asc",
+  );
+  if (list.ok) {
+    const rows = asRegistryRows(list.json);
+    const lower = profile.username.toLowerCase();
+    const heldByOther = rows.some(
+      (r) =>
+        r.username.toLowerCase() === lower &&
+        r.collector_id !== profile.collectorCode,
+    );
+    const heldByMe = rows.some(
+      (r) =>
+        r.username.toLowerCase() === lower &&
+        r.collector_id === profile.collectorCode,
+    );
+    if (heldByOther && !heldByMe) return null;
+  }
+  return upsertRegistryProfile({
+    collector_id: profile.collectorCode,
+    username: profile.username,
+    trust_score: 0,
+  });
+}
+
 /** ----- Cloud collection backup (Supabase `collection_items`) -----
     Anthony approved making Supabase the cloud backup for users'
     collections (Nov 2, 2026): every owned item — cards in every
@@ -2979,14 +3066,12 @@ async function fullCloudSync(
 ): Promise<{ owner: string; items: number; copies: number } | null> {
   const profile = await ensureCollectorProfile(ctx);
   const owner = profile.collectorCode;
-  // Keep Anthony's own registry row fresh in the same pass (the
-  // longstanding acceptance check: his profile sits in the server
-  // profiles table next to MC-JARVIS).
-  await upsertRegistryProfile({
-    collector_id: owner,
-    username: profile.username,
-    trust_score: 0,
-  }).catch(() => null);
+  // Keep the owner's own registry row fresh in the same pass
+  // (the longstanding acceptance check: his profile sits in the
+  // server profiles table next to MC-JARVIS) — through the
+  // guarded publisher, so a not-yet-registered install's backup
+  // sync can never leak its placeholder name to the registry.
+  await publishOwnRegistryProfile(profile).catch(() => null);
   const local = await buildLocalCloudItems(ctx, owner);
   if (!(await upsertCloudItems(local))) return null;
   const remote = await fetchCloudItems(owner);
@@ -12718,7 +12803,9 @@ export const Actions = {
     }> {
       const profile = await ensureCollectorProfile(ctx);
       const used = (profile.usernameChangeUsed ?? 0) > 0;
-      if (args.username === profile.username) {
+      if (
+        args.username.toLowerCase() === profile.username.toLowerCase()
+      ) {
         return {
           ok: true,
           username: profile.username,
@@ -12733,6 +12820,33 @@ export const Actions = {
           changeUsed: true,
           error:
             "Your username change has already been used — usernames can only be changed one time.",
+        };
+      }
+      // Username uniqueness, enforced server-side (Nov 9,
+      // 2026): a name another collector already holds is
+      // refused, and an unreadable registry fails closed —
+      // either way the refusal does NOT consume the one
+      // change; it is spent only when a verified-free name is
+      // actually saved below.
+      const taken = await registryUsernameTakenByOther(
+        profile.collectorCode,
+        args.username,
+      );
+      if (taken === null) {
+        return {
+          ok: false,
+          username: profile.username,
+          changeUsed: used,
+          error:
+            "Couldn't check that username against the network just now — check your connection and try again.",
+        };
+      }
+      if (taken) {
+        return {
+          ok: false,
+          username: profile.username,
+          changeUsed: used,
+          error: "That username is already taken on the network.",
         };
       }
       const db = ctx.db<typeof schema>();
@@ -13072,11 +13186,13 @@ export const Actions = {
       ctx,
     ): Promise<z.infer<typeof registrySyncResponse>> {
       const profile = await ensureCollectorProfile(ctx);
-      const mine = await upsertRegistryProfile({
-        collector_id: profile.collectorCode,
-        username: profile.username,
-        trust_score: 0,
-      });
+      // Guarded publish (Nov 9, 2026): before registration this
+      // returns null and stamps nothing, so the Home auto-sync
+      // firing on a fresh install's first open can no longer
+      // register the seeded placeholder name under the new
+      // collector code — and a name held by another collector
+      // is never written.
+      const mine = await publishOwnRegistryProfile(profile);
       const jarvis = await upsertRegistryProfile({
         ...JARVIS_REGISTRY_PROFILE,
       });
@@ -19564,10 +19680,15 @@ export const Actions = {
     }),
     async handler(ctx) {
       const profile = await ensureCollectorProfile(ctx);
+      // Established means the user actually registered or set
+      // up a photo — a registry sync stamp deliberately does
+      // NOT count (Nov 9, 2026): the app's own auto-sync used
+      // to stamp it on a fresh install's first open, which
+      // flipped brand-new users into the dismissible
+      // "returning" welcome so they never chose a username at
+      // all and stayed on the seeded default name.
       const established =
-        profile.registeredAt != null ||
-        profile.registrySyncedAt != null ||
-        profile.photoBlobKey != null;
+        profile.registeredAt != null || profile.photoBlobKey != null;
       return {
         needsWelcome: profile.welcomeSeen === 0,
         mode: established ? ("returning" as const) : ("register" as const),
@@ -19611,7 +19732,7 @@ export const Actions = {
 
   registerCollector: defineAction({
     description:
-      "Registers the username chosen on the Welcome page (Anthony, Nov 3, 2026): re-checks availability against the network registry (a name held by another collector is refused when the registry answers), saves the username on the profile, and stamps registered_at — the profile's Collector ID (username + its stable code) is created from it. The client follows with syncCollectorRegistry to write the row to the network registry.",
+      "Registers the username chosen on the Welcome page (Anthony, Nov 3, 2026): re-checks availability against the network registry and enforces uniqueness server-side (Nov 9, 2026) — a name held by another collector is refused, and an unreadable registry fails the registration closed rather than saving an unverified name. Saves the username on the profile and stamps registered_at — the profile's Collector ID (username + its stable code) is created from it. Registration never consumes the user's one later username change. The client follows with syncCollectorRegistry to write the row to the network registry.",
     request: z.object({
       username: z
         .string()
@@ -19643,26 +19764,34 @@ export const Actions = {
       if (
         args.username.toLowerCase() !== profile.username.toLowerCase()
       ) {
-        const list = await supabaseRest(
-          "profiles?select=collector_id,username&order=created_at.asc",
+        // Username uniqueness is enforced here, server-side
+        // (Nov 9, 2026): a name held by a different collector
+        // code is refused, and if the registry cannot be read
+        // the registration fails closed with an honest error
+        // instead of saving an unverified name that could turn
+        // out to be a duplicate.
+        const taken = await registryUsernameTakenByOther(
+          profile.collectorCode,
+          args.username,
         );
-        if (list.ok) {
-          const rows = asRegistryRows(list.json);
-          const taken = rows.some(
-            (r) =>
-              r.username.toLowerCase() ===
-                args.username.toLowerCase() &&
-              r.collector_id !== profile.collectorCode,
-          );
-          if (taken) {
-            return {
-              ok: false,
-              error: "That username is already taken on the network.",
-              username: null,
-              collectorCode: null,
-              vouchedByUsername: null,
-            };
-          }
+        if (taken === null) {
+          return {
+            ok: false,
+            error:
+              "Couldn't check that username against the network just now — check your connection and try again.",
+            username: null,
+            collectorCode: null,
+            vouchedByUsername: null,
+          };
+        }
+        if (taken) {
+          return {
+            ok: false,
+            error: "That username is already taken on the network.",
+            username: null,
+            collectorCode: null,
+            vouchedByUsername: null,
+          };
         }
       }
       const db = ctx.db<typeof schema>();

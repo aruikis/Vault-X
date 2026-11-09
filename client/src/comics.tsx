@@ -1042,7 +1042,7 @@ export function ComicSheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Back to SLABS"
+            aria-label="Back to Comics"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-black/45 text-xl leading-none text-white shadow-lg backdrop-blur"
           >
             ←
@@ -1696,7 +1696,8 @@ function ShelfSlabCard({
   );
 }
 
-/** The Graded Cards area of SLABS (Anthony, Nov 9, 2026):
+/** The Graded Cards area of the Comics section (Anthony,
+    Nov 9, 2026):
     every graded slab CARD saved in the vault — all five
     companies (PSA, BGS, SGC, CGC, TAG), filterable by
     company — each rendered with the existing slab visual
@@ -1823,23 +1824,25 @@ function GradedCardsArea() {
   );
 }
 
-/** SLABS's two display shelves (Anthony, Nov 9, 2026):
-    the section that used to be just Comics is now SLABS —
-    a SMALL shelf of graded slab CARDS (up to four) standing
+/** The Library SLABS area's two display shelves (Anthony,
+    Nov 9, 2026): a SMALL shelf of graded slab CARDS (up to
+    four) standing
     centered above a BIG shelf of graded COMICS, the small
     shelf offset in the middle over the big one, like a
     display case over a bookcase. Both shelves show the
     owner's own pieces only: comics from the COMICS catalog,
     slab cards from his saved graded slabs (any game, any of
     the five grading companies). Which pieces stand on each
-    shelf is chosen in the SLABS section's display picker;
+    shelf is chosen in the Comics section's display picker;
     until he chooses, the comics shelf shows his two signed
     comics (his standing Comics-wall default, max five
     selectable as before) and the cards shelf his four most
     recently saved slabs. Hold any piece a moment, then drag
     to rearrange its shelf — the order saves as his own.
-    Used on the Library page (under the SLABS sign) and at
-    the top of the SLABS section itself. */
+    Used on the Library page only, under the SLABS sign
+    (v1.116.4: the copy briefly shown at the top of the
+    Comics section was removed — the shelves are the
+    Library's). */
 export function SlabsShelves({
   onOpenComic,
 }: {
@@ -2093,7 +2096,7 @@ export function SlabsShelves({
           <p className="mt-2 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--dim)]">
             No comics on display — choose up to five of your
             graded comics to stand here from Edit display in
-            the SLABS section.
+            the Comics section.
           </p>
         )}
         {comicDisplay.isError ? (
@@ -2108,7 +2111,7 @@ export function SlabsShelves({
                 hapticTick();
                 void comicDisplay.refetch();
               }}
-              aria-label="Try loading your saved SLABS shelf choice again"
+              aria-label="Try loading your saved shelf choice again"
               className="mt-1.5 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--text)] transition active:scale-[0.97]"
             >
               Try again
@@ -2138,13 +2141,14 @@ export function SlabsShelves({
   );
 }
 
-/** SLABS display picker (Anthony, Nov 9, 2026 —
+/** Library SLABS display picker (Anthony, Nov 9, 2026 —
     reworked from the Library display wall picker of Nov 5,
-    2026): choosing which pieces stand on SLABS's two
-    shelves lives here in the SLABS section, where the
-    pieces themselves live. The big comics shelf holds at
-    most FOUR comics; the small graded-cards shelf holds at
-    most FOUR saved graded slabs. Same settings underneath
+    2026): choosing which pieces stand on the Library
+    SLABS area's two shelves lives here in the Comics
+    section, where the pieces themselves live. The big
+    comics shelf holds at most FIVE comics; the small
+    graded-cards shelf holds at most FOUR saved graded
+    slabs. Same settings underneath
     (getLibraryComicDisplay / setLibraryComicDisplay and
     getLibrarySlabCardDisplay / setLibrarySlabCardDisplay),
     same defaults when never chosen. */
@@ -2217,7 +2221,7 @@ export function SlabsPicker() {
   const saveFailed = saveComics.isError || saveSlabs.isError;
   return (
     <section
-      aria-label="SLABS display shelves"
+      aria-label="Display shelves"
       className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
     >
       <div className="flex items-center justify-between gap-3">
@@ -2505,13 +2509,8 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
   return (
     <div className="pt-4">
       <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
-        SLABS
+        Comics
       </h1>
-      <p className="mt-1 text-sm text-[var(--dim)]">
-        Every slab you own, in one place: your graded cards on
-        the small shelf up top, your graded comics on the big
-        shelf below — tap any piece to see it up close.
-      </p>
 
       {/* Search + Scan row (Anthony, Nov 3, 2026, ~11:14 PM):
           the same top row every collection section carries.
@@ -2570,7 +2569,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
           blocks (slabs, total value, key issues), replacing the old
           always-full progress bar. */}
       <section
-        aria-label="SLABS comics summary"
+        aria-label="Comics summary"
         className="mt-4 grid grid-cols-3 gap-3"
       >
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
@@ -2608,25 +2607,20 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
         </div>
       </section>
 
-      {/* SLABS's display shelves (Anthony, Nov 9,
-          2026): the small graded-cards shelf centered above
-          the big comics shelf — the same two shelves that
-          stand in the Library under the SLABS sign. */}
-      <section aria-label="SLABS display shelves" className="mt-5">
-        <SlabsShelves
-          onOpenComic={(comic) => openComic(comic.id)}
-        />
-      </section>
-
-      {/* The display shelves are managed HERE, in the SLABS
+      {/* The display shelves are managed HERE, in the Comics
           section (the picker moved off the Library page,
-          Anthony, Nov 5, 2026). */}
+          Anthony, Nov 5, 2026). The shelves themselves stand
+          only in the Library, under its SLABS sign — the
+          two-shelf display was briefly duplicated at the top
+          of this section in v1.116.0 and removed again in
+          v1.116.4 at Anthony's correction: the SLABS area is
+          the Library's, this section is Comics. */}
       <SlabsPicker />
 
       <div
         className="mt-4 flex flex-wrap gap-2"
         role="group"
-        aria-label="SLABS areas"
+        aria-label="Comics areas"
       >
         {COMICS_AREAS.map((a) => (
           <button
@@ -2867,7 +2861,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
                 setShowPicker(true);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              aria-label="Back to SLABS group selection"
+              aria-label="Back to Comics group selection"
               className="rounded-full border border-[var(--accent)]/50 px-3.5 py-1.5 text-sm font-medium text-[var(--gold-soft)]"
             >
               ← All comics

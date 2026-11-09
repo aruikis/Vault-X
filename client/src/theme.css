@@ -2228,12 +2228,10 @@ span.stepper-ring {
   z-index: 2;
 }
 
-/* SLABS shelf boards (Anthony, Nov 9, 2026): the same
-   mahogany board the Library shelves sit on, usable outside
-   the Library case — the SLABS section page stands its
-   two display shelves (small graded-cards shelf above, big
-   comics shelf below) on these boards so both places read as
-   the same furniture. Wood values match .library-case. */
+/* SLABS shelf boards (Anthony, Nov 9, 2026): the mahogany
+   board the Library SLABS area's two display shelves stand
+   on (small graded-cards shelf above, big comics shelf
+   below). Wood values match .library-case. */
 .slabs-board {
   height: 11px;
   border-radius: 1px;
