@@ -345,6 +345,12 @@ export const collectorProfile = sqliteTable("collector_profile", {
       the wall then shows Anthony's standing default, his two
       signed comics (aliens-1, batman-136). */
   libraryComicDisplay: text("library_comic_display"),
+  /** The graded slab CARD ids on display on the small upper
+      shelf of SLABS (migration 0080, Anthony, Nov 9,
+      2026): a JSON array of graded_slabs ids, max 4. NULL =
+      never chosen — the shelf then shows his four most
+      recently saved graded slabs. */
+  librarySlabCardDisplay: text("library_slab_card_display"),
   /** 1 = this collector's TOTAL COLLECTION VALUE is hidden
       from other collectors on their profile (Anthony, Nov 3,
       2026, ~11:23 AM): a privacy choice with two controls —

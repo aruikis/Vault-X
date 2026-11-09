@@ -2,6 +2,17 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.116.1
+
+- Fixed: Bolt - Superdog #223 and Elsa - Ice Maker #224 (Archazia's Island) no longer show a Regular pocket. Those two printings only ever existed as Cold Foil, so each now has exactly one pocket, labeled Cold Foil — and Archazia's Island counts 428 pockets instead of 430. Your owned Cold Foil copies, prices paid, and values are unchanged.
+- The same fix covers every other printing like them found in a full-catalog audit — the Illumineer's Quest foil reprints: Piglet - Pooh Pirate Captain #223 (Into the Inklands), Yen Sid - Powerful Sorcerer #223, Mulan - Elite Archer #224 and Mickey Mouse - Playful Sorcerer #225 (Ursula's Return), Half Hexwell Crown #223 (Shimmering Skies), Goofy - Groundbreaking Chef #223 and Pinocchio - Strings Attached #224 (Reign of Jafar), Sven - Leaping Reindeer #243 (Winterspell), Mr. Incredible - Super Strong #243 (Wilds Unknown), Christopher Robin - Hunny Sage #246 and Violet Parr - Super Resilient #247 (Attack of the Vine!). Each now shows its one real finish, Cold Foil, everywhere — set pages, card details, binder views, search, and the scanner.
+- Half Hexwell Crown #223: your one copy was filed as Regular in the old export, but that printing only exists as a foil — the copy itself is now filed as Cold Foil, same copy, same $0.57 paid and value as recorded.
+
+## v1.116.0
+
+- Comics is now SLABS: the section, the Home tile, and the Library shelf sign all read SLABS — one home for every slab you own. In the Library, your comics stand on the big shelf exactly as you picked them (your two signed comics by default, up to five), and a new smaller shelf sits just above them, offset in the middle, showcasing up to four of your graded CARD slabs.
+- The SLABS section opens with those same two shelves, and its new Graded Cards area lists every graded slab you have saved — PSA, Beckett (BGS), SGC, CGC, and TAG — with a filter by company. Tap any slab, on a shelf or in the list, to open its Card / Slab View, and use 'Add a graded slab — scan its cert' to bring a new one in by its cert number, the same confirm-before-save flow as always. Which pieces stand on each shelf is yours to pick under Edit display, and holding any piece lets you drag it into a new order on its shelf.
+
 ## v1.115.1
 
 - Admin is simpler: each user's entry on the Registered Users list now shows just their name, Collector ID, joined date, and one number — total copies. The overlapping counters that crowded it before (logged items, cards logged, and the extra tallies beside them) are gone for good, on every user's entry.

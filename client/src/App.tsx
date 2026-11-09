@@ -26,6 +26,7 @@ import {
 ComicsPanel,
 ComicSheet,
 SlabFront,
+SlabsShelves,
 COMICS,
 COMICS_TOTAL_VALUE,
 type Comic,
@@ -33,7 +34,6 @@ type Comic,
 import { LegoPanel } from "./lego";
 import { GamePanel, GAME_TITLES } from "./games";
 import { TcgUniversePage } from "./tcgUniverse";
-import { useDragReorder } from "./dragReorder";
 import {
 ToppsAlternateUniversePage,
 type AuAreaView,
@@ -1787,14 +1787,22 @@ function CardSheet({
   // The same one-line rule covers the other foil-only
   // rarities, Enchanted and Iconic, which the old filter
   // wrongly dressed up with Regular + Cold Foil lines too.
+  // The server names the one finish (card.foilOnlyFinish),
+  // which also covers the Illumineer's Quest foil reprints —
+  // Bolt #223 and Elsa #224 among them (Anthony, Nov 9, 2026):
+  // those printings exist ONLY as Cold Foil, so their detail
+  // shows exactly one "Cold Foil" line and no Regular stepper.
+  // The rarity fallback below only guards a detail payload
+  // from an older build that predates the server field.
   const foilOnlyFinish =
-    card?.rarity === "Epic"
+    card?.foilOnlyFinish ??
+    (card?.rarity === "Epic"
       ? "Epic Foil"
       : card?.rarity === "Enchanted"
         ? "Enchanted"
         : card?.rarity === "Iconic"
           ? "Iconic"
-          : null;
+          : null);
   const shownFinishes = foilOnlyFinish
     ? [foilOnlyFinish]
     : FINISH_OPTIONS.filter(
@@ -4702,7 +4710,7 @@ function ProfileMyCollectionSection({
             hapticTick();
             onOpenComics();
           }}
-          aria-label={`Open your Comics collection — ${comicsCount} graded slabs, total value ${fmtUSD(comicsValue, 0)}`}
+          aria-label={`Open your SLABS collection — ${comicsCount} graded comic slabs, total value ${fmtUSD(comicsValue, 0)}`}
           className={rowClass}
         >
           <span
@@ -4736,10 +4744,10 @@ function ProfileMyCollectionSection({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[17px] font-bold leading-tight text-[var(--text)]">
-              Comics
+              SLABS
             </span>
             <span className="mt-0.5 block text-[13px] font-semibold text-[var(--dim)]">
-              {comicsCount} graded slabs
+              {comicsCount} graded comic slabs
             </span>
           </span>
           <span className="shrink-0 text-right leading-none">
@@ -5241,8 +5249,8 @@ function OwnProfilePage({
     {
       id: "comics",
       spineLabel: "C",
-      title: "Graded Comics",
-      detail: "Comics binder",
+      title: "SLABS",
+      detail: "Graded cards & comics",
       owned: COMICS.length,
       total: COMICS.length,
       canOpen: Boolean(onOpenBinderGroup),
@@ -5761,7 +5769,7 @@ function OwnProfilePage({
             entries={libraryEntries}
             arrangeable
             shelfStatus={libraryShelfStatus}
-            comicsWall={<LibraryComicWall />}
+            comicsWall={<SlabsShelves />}
             onClose={librarySheet.closeSheet}
             onOpenEntry={(entry) => {
               // Funko / Legos spines open that game's section
@@ -9610,11 +9618,11 @@ function HomePanel({
                         aria: "Open your Legos section",
                       },
                       comics: {
-                        label: "Comics",
+                        label: "SLABS",
                         img: collectionComics,
-                        alt: "Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art",
+                        alt: "SLABS collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art",
                         open: onOpenComics,
-                        aria: "Open your Comics collection",
+                        aria: "Open your SLABS collection",
                       },
                       sports: {
                         label: "Sports Cards",
@@ -9747,18 +9755,18 @@ function HomePanel({
                   <button
                     type="button"
                     onClick={tileClickGuarded(onOpenComics)}
-                    aria-label="Open your Comics collection"
+                    aria-label="Open your SLABS collection"
                     className="block w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                   >
                     <img
                       src={collectionComics}
-                      alt="Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art"
+                      alt="SLABS collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art"
                       loading="lazy"
                       draggable={false}
                       className="block aspect-square w-full object-cover"
                     />
                     <span className="flex h-11 items-center justify-center px-1 text-center text-xs font-semibold text-[var(--text)] sm:text-sm">
-                      Comics
+                      SLABS
                     </span>
                   </button>
                 ) : key === "sports" ? (
@@ -10315,7 +10323,9 @@ function ScanMatchRow({
   readNote?: string;
 }) {
   const { url } = useCachedArt(match.cardId, "grid", true);
-  const [finish, setFinish] = useState(match.suggestedFinish);
+  const [finish, setFinish] = useState(
+    match.foilOnlyFinish ?? match.suggestedFinish,
+  );
   const [finishes, setFinishes] = useState(match.finishes);
   const [ownedQty, setOwnedQty] = useState(match.ownedQty);
   const queryClient = useQueryClient();
@@ -10332,8 +10342,13 @@ function ScanMatchRow({
       void queryClient.invalidateQueries({ queryKey: ["card", match.cardId] });
     },
   });
-  const finishOptions =
-    finish === "Regular"
+  // A foil-only printing (Nov 9, 2026) offers exactly its one
+  // real finish — no Regular toggle for a version that does
+  // not exist (Bolt #223 / Elsa #224 and the other Illumineer's
+  // Quest foil reprints, plus the chase rarities).
+  const finishOptions = match.foilOnlyFinish
+    ? [match.foilOnlyFinish]
+    : finish === "Regular"
       ? ["Regular", "Cold Foil"]
       : finish === "Cold Foil"
         ? ["Cold Foil", "Regular"]
@@ -12061,6 +12076,7 @@ function ScanPanel({
                             finishes: r.finishes,
                             marketValue: r.marketValue,
                             suggestedFinish: r.suggestedFinish,
+                            foilOnlyFinish: r.foilOnlyFinish,
                             readName: r.fullName,
                             readNumber: null,
                           }}
@@ -14117,7 +14133,7 @@ const AU_TILE_KEYS_CLIENT = [
 
 const COLLECTION_TILE_OPTIONS = [
   { key: "tcg", label: "TCG Universe" },
-  { key: "comics", label: "Comics" },
+  { key: "comics", label: "SLABS" },
   { key: "lego", label: "Legos" },
   { key: "funko", label: "Funko" },
   { key: "sports", label: "Sports Cards" },
@@ -17718,7 +17734,7 @@ function AdminDashboard({
       : kind === "sealed"
         ? "Sealed"
         : kind === "comic"
-          ? "Comics"
+          ? "SLABS"
           : kind;
   const dash = (n: number | null) =>
     n != null ? n.toLocaleString() : "—";
@@ -24241,7 +24257,7 @@ function ComicsFlipBinder({
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="font-album truncate text-lg text-amber-50">
-              Graded Comics
+              SLABS · Comics Binder
             </h2>
             <p className="text-xs text-amber-100/70">
               {ownerName}&rsquo;s slab binder
@@ -24404,245 +24420,6 @@ function ComicsFlipBinder({
     what's clear) naming the owner and the chapter and saying
     what they hold there; press and hold a spine (or use the
     window's Open button) to open that binder. */
-/** A slab on the Library display wall, at wall size
-    (Anthony, Nov 4, 2026): SlabFront's label is built at
-    fixed print sizes, so laying the slab out directly at
-    wall width left the label band taking about a fifth of
-    the height — stretched and fake-looking next to a real
-    slab, whose label is a slim band of roughly a tenth.
-    The wall instead renders the slab at a natural width
-    and scales the FINISHED piece down to fit, so the label
-    keeps its real proportion at any wall size. In this
-    view the label text is not meant to be read — Anthony
-    is explicit that proportion and a legitimate real-slab
-    look are the whole goal here. */
-function ScaledSlabFront({ comic }: { comic: Comic }) {
-  // Library wall uniformity (Anthony, Nov 4, 2026): every slab
-  // on the wall renders SlabFront in uniform-label mode — one
-  // fixed slim label height and one fixed cover aspect for all
-  // slabs — so the scaled results share identical geometry and
-  // align evenly side by side, like real slabs on a shelf.
-  // Label text readability in this view does not matter.
-  const NATURAL_WIDTH = 264;
-  const outerRef = useRef<HTMLDivElement | null>(null);
-  const innerRef = useRef<HTMLDivElement | null>(null);
-  const [scale, setScale] = useState(0.5);
-  const [naturalHeight, setNaturalHeight] = useState(400);
-  useEffect(() => {
-    const outer = outerRef.current;
-    const inner = innerRef.current;
-    if (!outer || !inner) return;
-    const update = () => {
-      const w = outer.clientWidth;
-      if (w > 0) setScale(w / NATURAL_WIDTH);
-      const h = inner.offsetHeight;
-      if (h > 0) setNaturalHeight(h);
-    };
-    update();
-    if (typeof ResizeObserver === "function") {
-      const ro = new ResizeObserver(update);
-      ro.observe(outer);
-      ro.observe(inner);
-      return () => ro.disconnect();
-    }
-    return undefined;
-  }, []);
-  return (
-    <div
-      ref={outerRef}
-      className="relative w-full overflow-hidden"
-      style={{ height: naturalHeight * scale }}
-    >
-      <div
-        ref={innerRef}
-        className="absolute left-0 top-0"
-        style={{
-          width: NATURAL_WIDTH,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-        }}
-      >
-        <SlabFront comic={comic} uniformLabel />
-      </div>
-    </div>
-  );
-}
-
-/** The Library's Comics display wall (Anthony, Nov 4, 2026):
-    the Comics binder in the Library is replaced by a wall of
-    chosen slabs — up to FIVE, picked from the owner's own
-    graded comics, rendered as slabs (label and all), never as
-    raw photos. Never chosen (the stored list is null), the
-    wall defaults to Anthony's two signed comics: Aliens #1
-    (CGC Signature Series, signed by Sigourney Weaver) and
-    Batman #136 (Whatnot Foil, signed + sketch by Tyler
-    Kirkham). Tapping a slab opens that comic's detail sheet,
-    float-and-turn view and all. */
-function LibraryComicWall() {
-  const display = useQuery({
-    queryKey: ["libraryComicDisplay"],
-    queryFn: () => api.getLibraryComicDisplay({}),
-  });
-  // Edit display MOVED (Anthony, Nov 5, 2026): the picker
-  // no longer lives on the Library page — he did not like
-  // the control sitting here. The wall is display-only now;
-  // choosing which slabs hang here (max five) happens in
-  // the Comics section itself (LibraryDisplayPicker in
-  // comics.tsx), writing the same getLibraryComicDisplay /
-  // setLibraryComicDisplay setting, so this wall simply
-  // renders whatever is chosen there.
-  const [openComic, setOpenComicState] = useState<Comic | null>(null);
-  // Back audit (Anthony, Nov 5, 2026): a comic opened from
-  // the wall is a window ABOVE the Library window, so it
-  // takes its OWN pushed entry (the useOwnEntryWindow
-  // pattern): one Back press closes the comic and lands
-  // back on the Library. Before this fix the sheet was
-  // plain state with no trap, so the phone's Back popped
-  // the Library's entry and dumped the whole Library
-  // instead of just closing the comic.
-  const comicWin = useOwnEntryWindow("libraryComicSheet", (v) => {
-    if (!v) setOpenComicState(null);
-  });
-  const openWallComic = (comic: Comic) => {
-    hapticTick();
-    setOpenComicState(comic);
-    comicWin.open();
-  };
-  const DEFAULT_WALL = ["aliens-1", "batman-136"];
-  const chosen = display.data?.ids ?? DEFAULT_WALL;
-  // Non-card shelf items long-hold rearrange (Anthony,
-  // Nov 5, 2026): the slabs hanging on this wall are
-  // display objects, not binders — they carry the same
-  // shared long-hold drag as every other shelf item, and
-  // the wall's order saves through the same display
-  // setting that chooses which slabs hang here. A local
-  // override holds the dropped order until the saved
-  // setting reads back with it.
-  const queryClient = useQueryClient();
-  const [orderOverride, setOrderOverride] = useState<string[] | null>(
-    null,
-  );
-  useEffect(() => {
-    const savedIds = display.data?.ids;
-    if (
-      orderOverride &&
-      savedIds &&
-      savedIds.join() === orderOverride.join()
-    ) {
-      setOrderOverride(null);
-    }
-  }, [display.data, orderOverride]);
-  const saveDisplay = useMutation({
-    mutationFn: (ids: string[]) => api.setLibraryComicDisplay({ ids }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["libraryComicDisplay"],
-      });
-    },
-  });
-  const effectiveIds = orderOverride ?? chosen;
-  const shown = effectiveIds
-    .map((id) => COMICS.find((c) => c.id === id))
-    .filter((c): c is Comic => Boolean(c));
-  const wallDrag = useDragReorder({
-    keys: shown.map((c) => c.id),
-    onCommit: (order) => {
-      const rest = effectiveIds.filter((id) => !order.includes(id));
-      const next = [...order, ...rest].slice(0, 5);
-      setOrderOverride(next);
-      saveDisplay.mutate(next);
-    },
-  });
-  return (
-    <div>
-      {shown.length > 0 ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 pb-3 pt-4">
-          <div
-            ref={wallDrag.containerRef}
-            className="flex flex-wrap items-end justify-center gap-3"
-          >
-            {shown.map((comic) => (
-              <button
-                key={comic.id}
-                type="button"
-                {...wallDrag.itemProps(comic.id)}
-                onClick={() => {
-                  if (wallDrag.suppressClick()) return;
-                  openWallComic(comic);
-                }}
-                aria-label={`Open ${comic.title}`}
-                className={`w-[30%] max-w-[130px] shrink-0 transition active:scale-[0.98] ${
-                  wallDrag.draggingKey === comic.id ? "z-30" : ""
-                }`}
-              >
-                <ScaledSlabFront comic={comic} />
-                {/* No title under the slab — STANDING RULE
-                    (Anthony, Nov 5, 2026): no displayed item
-                    in the Library ever shows a name label or
-                    caption underneath it, comics included. The
-                    slab keeps its name in its aria-label above
-                    and in its own detail sheet. */}
-              </button>
-            ))}
-          </div>
-          {shown.length > 1 ? (
-            <p className="mt-2 text-center text-[11px] leading-relaxed text-[var(--dim)]">
-              Hold a slab a moment, then drag to rearrange the
-              wall — the order saves as yours.
-            </p>
-          ) : null}
-          <div
-            aria-hidden="true"
-            className="library-board library-grain mt-3"
-          />
-        </div>
-      ) : (
-        <p className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--dim)]">
-          No slabs on display — choose up to five of your graded
-          comics to hang here from Edit display in the Comics
-          section.
-        </p>
-      )}
-      {display.isError ? (
-        /* The wall's chosen-slabs lookup failed (Anthony,
-            Nov 7, 2026 — the Library loading report): the
-            wall above is showing the default slabs because
-            his saved choice couldn't be read. Say so, and
-            let him retry the read right here, instead of
-            the failure passing silently. */
-        <div className="mt-2 text-center">
-          <p role="alert" className="text-xs leading-relaxed text-[var(--dim)]">
-            Your saved wall choice couldn&rsquo;t load — showing
-            the default slabs for now.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              hapticTick();
-              void display.refetch();
-            }}
-            aria-label="Try loading your saved comics wall choice again"
-            className="mt-1.5 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--text)] transition active:scale-[0.97]"
-          >
-            Try again
-          </button>
-        </div>
-      ) : null}
-      {openComic ? (
-        /* The Library overlay sits at z-70 and ComicSheet's own
-            root is z-50 — this wrapper's stacking context lifts
-            the sheet above the Library it was opened from. */
-        <div className="fixed inset-0 z-[80]">
-          <ComicSheet
-            comic={openComic}
-            onClose={() => comicWin.close()}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function LibraryPage({
   ownerName,
   entries,
@@ -25227,16 +25004,16 @@ function LibraryPage({
                     <span className="quests-word">Quests</span>
                   </span>
                 ) : shelf.section === "comics" ? (
-                  /* "Comics" as a classic comic-book masthead
-                      (Anthony, Nov 3, 2026): bold punchy block
-                      lettering with a comic offset shadow on a
-                      halftone-dot plaque — unmistakably comic
-                      books, the way the Promos sticker is
-                      unmistakably promos. Styles live in
+                  /* "SLABS" in the classic comic-book
+                      masthead (Anthony, Nov 3, 2026, sign;
+                      renamed Nov 9, 2026 when the Comics
+                      section became SLABS): bold punchy
+                      block lettering with a comic offset shadow
+                      on a halftone-dot plaque. Styles live in
                       theme.css (.comics-sign / .comics-masthead). */
-                  <span className="comics-sign" aria-label="Comics">
+                  <span className="comics-sign" aria-label="SLABS">
                     <span aria-hidden="true" className="comics-masthead">
-                      Comics
+                      SLABS
                     </span>
                   </span>
                 ) : shelf.section === "funko" ? (
@@ -25408,12 +25185,16 @@ function LibraryPage({
               ))}
               {block.section === "comics" && comicsWall ? (
                 <div>
-                  {/* The Comics sign over the slab display wall —
-                      same masthead as the old Comics shelf sign. */}
+                  {/* The SLABS sign over the two display
+                      shelves (Anthony, Nov 9, 2026: the section
+                      formerly called Comics is SLABS now —
+                      graded cards on the small shelf above,
+                      comics on the big shelf below) — same
+                      masthead as the old Comics shelf sign. */}
                   <div className="mb-1.5 flex justify-center">
-                    <span className="comics-sign" aria-label="Comics">
+                    <span className="comics-sign" aria-label="SLABS">
                       <span aria-hidden="true" className="comics-masthead">
-                        Comics
+                        SLABS
                       </span>
                     </span>
                   </div>
@@ -35795,6 +35576,23 @@ export function App() {
     // it reads refs and state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // The SLABS shelves' and graded-cards list's tap-through
+  // (Anthony, Nov 9, 2026): a graded slab tapped anywhere —
+  // the Library's small shelf, the SLABS section's shelves,
+  // its Graded Cards list — asks the root to open that
+  // slab's Card / Slab View, the same event pattern as the
+  // slab-scan shortcut above.
+  useEffect(() => {
+    const onSlabView = (e: Event) => {
+      const id = (e as CustomEvent<number>).detail;
+      if (typeof id === "number" && Number.isFinite(id)) {
+        setSlabViewId(id);
+      }
+    };
+    window.addEventListener("vaultx:open-slab-view", onSlabView);
+    return () =>
+      window.removeEventListener("vaultx:open-slab-view", onSlabView);
+  }, []);
   /** A slab saved (or an existing cert chosen) in the
       scanner: close the scanner, then land on the slab's
       Card / Slab View — the small delay lets the scanner's
@@ -38128,7 +37926,7 @@ export function App() {
                           {c.title}
                         </span>
                         <span className="block text-xs text-[var(--dim)]">
-                          Comics · {c.publisher} · CGC {c.label}
+                          SLABS · {c.publisher} · CGC {c.label}
                         </span>
                       </span>
                       <span className="shrink-0 text-xs font-semibold text-[var(--gold-soft)]">

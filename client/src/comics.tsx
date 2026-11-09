@@ -23,14 +23,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, type ApiResponse } from "./api";
 import { hapticTick } from "./haptics";
 import {
 pushWindowState,
 readNavState,
 replaceNavState,
 scrubWindowKeys,
+useOwnEntryWindow,
 } from "./historyNav";
+import { useDragReorder } from "./dragReorder";
+import { GradedSlabVisual, GRADING_COMPANIES } from "./gradedScan";
 import { Turntable } from "./turntable";
 import { SearchScanRow } from "./searchScanRow";
 import { OwnedLocationBar } from "./whereItLives";
@@ -1039,7 +1042,7 @@ export function ComicSheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Back to comics"
+            aria-label="Back to SLABS"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-black/45 text-xl leading-none text-white shadow-lg backdrop-blur"
           >
             ←
@@ -1515,10 +1518,11 @@ const KEY_ISSUES: { id: string; reason: string }[] = [
   },
 ];
 
-type ComicsArea = "slabs" | "wall" | "keys" | "signed" | "wish";
+type ComicsArea = "slabs" | "cards" | "wall" | "keys" | "signed" | "wish";
 
 const COMICS_AREAS: { key: ComicsArea; label: string }[] = [
-  { key: "slabs", label: "Slabs" },
+  { key: "slabs", label: "Comics" },
+  { key: "cards", label: "Graded Cards" },
   { key: "wall", label: "Cover Wall" },
   { key: "keys", label: "Key Issues" },
   { key: "signed", label: "Signed" },
@@ -1549,31 +1553,650 @@ const COMICS_AREAS: { key: ComicsArea; label: string }[] = [
     setLibraryComicDisplay), same default when never chosen
     (his two signed comics: Aliens #1 and Batman #136), so
     the Library wall shows exactly what is picked here. */
-export function LibraryDisplayPicker() {
+export type SlabsSlabRow = ApiResponse<
+  typeof api,
+  "listAllGradedSlabs"
+>["slabs"][number];
+
+/** The standing default for the SLABS comics shelf
+    (Anthony, Nov 9, 2026 — preserved from the Comics wall
+    before it): his two signed comics, Aliens #1 and Batman
+    #136. Used only until he picks his own in the display
+    picker (max five, as before). */
+export const SLABS_DEFAULT_COMICS = ["aliens-1", "batman-136"];
+
+/** Dispatches the app-wide "open this graded slab" event —
+    the root owns the Card / Slab View and already listens
+    for slab-scan events the same way (the Sports Cards
+    shortcut's pattern), so shelves anywhere in the app open
+    a slab the one way. */
+export function openSlabsSlab(slabId: number) {
+  window.dispatchEvent(
+    new CustomEvent("vaultx:open-slab-view", { detail: slabId }),
+  );
+}
+
+/** A comic slab on a display shelf, at shelf size: SlabFront
+    rendered at a natural width and scaled down to fit, so
+    its label keeps a real slab's slim proportion (the
+    Library wall's proven approach, Nov 4, 2026). */
+function ShelfComicSlab({ comic }: { comic: Comic }) {
+  const NATURAL_WIDTH = 264;
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0.5);
+  const [naturalHeight, setNaturalHeight] = useState(400);
+  useEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const update = () => {
+      const w = outer.clientWidth;
+      if (w > 0) setScale(w / NATURAL_WIDTH);
+      const h = inner.offsetHeight;
+      if (h > 0) setNaturalHeight(h);
+    };
+    update();
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(update);
+      ro.observe(outer);
+      ro.observe(inner);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, []);
+  return (
+    <div
+      ref={outerRef}
+      className="relative w-full overflow-hidden"
+      style={{ height: naturalHeight * scale }}
+    >
+      <div
+        ref={innerRef}
+        className="absolute left-0 top-0"
+        style={{
+          width: NATURAL_WIDTH,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <SlabFront comic={comic} uniformLabel />
+      </div>
+    </div>
+  );
+}
+
+/** One graded slab CARD on SLABS's small upper shelf:
+    a compact slab — the grading company's band with the
+    grade, the slab's own photo when one was imported (the
+    catalog card art stands in when no photo exists, and the
+    caption says which it is), and the card name with its
+    company, grade, and cert under it. */
+function ShelfSlabCard({
+  slab,
+  onOpen,
+}: {
+  slab: SlabsSlabRow;
+  onOpen: (id: number) => void;
+}) {
+  const img = slab.imageUrl ?? slab.cardImageUrl;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(slab.id)}
+      aria-label={`Open ${slab.cardName} — ${slab.company} ${slab.grade}, cert ${slab.cert}`}
+      className="block w-full text-left focus:outline-none"
+    >
+      <span className="relative block overflow-hidden rounded-[7px] bg-[linear-gradient(135deg,rgba(255,255,255,0.5)_0%,rgba(210,226,248,0.12)_30%,rgba(160,185,220,0.10)_55%,rgba(255,255,255,0.28)_85%,rgba(190,210,238,0.35)_100%)] p-[3px] shadow-[0_8px_20px_rgba(0,0,0,0.55),inset_0_0_0_1.5px_rgba(238,246,255,0.5)] ring-1 ring-white/50">
+        <span
+          className={`flex items-center justify-between gap-1 px-1.5 py-[3px] ${
+            slab.company === "PSA"
+              ? "bg-[#f4f1ea] text-[#191919]"
+              : slab.company === "CGC"
+                ? "bg-[#005eb8] text-white"
+                : slab.company === "BGS"
+                  ? "bg-gradient-to-b from-[#e8cd7a] to-[#c9a227] text-[#221a04]"
+                  : "bg-[#14161a] text-white"
+          }`}
+        >
+          <span
+            className={`text-[8px] font-black leading-none tracking-tight ${
+              slab.company === "PSA" ? "italic text-[#c8102e]" : ""
+            }`}
+          >
+            {slab.company}
+          </span>
+          <span className="text-[11px] font-black leading-none tabular-nums">
+            {slab.grade === "Authentic" ? "AUTH" : slab.grade}
+          </span>
+        </span>
+        {img ? (
+          <img
+            src={img}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            draggable={false}
+            className="block aspect-[2.5/3.2] w-full object-cover"
+          />
+        ) : (
+          <span className="flex aspect-[2.5/3.2] w-full items-center justify-center bg-[#101623] px-1.5 text-center text-[9px] font-semibold leading-tight text-[var(--dim)]">
+            {slab.cardName}
+          </span>
+        )}
+      </span>
+      <span className="mt-1 block truncate text-center text-[10px] font-semibold leading-tight text-[var(--text)]">
+        {slab.cardName}
+      </span>
+      <span className="block truncate text-center text-[9px] leading-tight text-[var(--dim)]">
+        {slab.company} {slab.grade} · #{slab.cert}
+        {slab.imageUrl == null ? " · catalog art" : ""}
+      </span>
+    </button>
+  );
+}
+
+/** The Graded Cards area of SLABS (Anthony, Nov 9, 2026):
+    every graded slab CARD saved in the vault — all five
+    companies (PSA, BGS, SGC, CGC, TAG), filterable by
+    company — each rendered with the existing slab visual
+    and tapping through to its Card / Slab View. Adding a
+    slab reuses the existing cert capture / confirm-before-
+    save flow (the scanner in slab mode); nothing here
+    changes the per-card graded flow or its owned-count
+    coupling. */
+function GradedCardsArea() {
+  const [company, setCompany] = useState<
+    "PSA" | "BGS" | "SGC" | "CGC" | "TAG" | null
+  >(null);
+  const slabsQ = useQuery({
+    queryKey: ["allGradedSlabs", company],
+    queryFn: () => api.listAllGradedSlabs({ company }),
+  });
+  const rows = slabsQ.data?.slabs ?? [];
+  return (
+    <section aria-label="Graded Cards" className="mt-5">
+      <h2 className="font-album text-lg text-[var(--text)]">
+        Graded Cards
+      </h2>
+      <p className="mt-1 text-sm text-[var(--dim)]">
+        Every graded card slab you&rsquo;ve saved, from any of
+        the five grading companies. Tap a slab to open its
+        Card / Slab View.
+      </p>
+      <div
+        className="mt-3 flex flex-wrap gap-1.5"
+        role="group"
+        aria-label="Filter graded cards by grading company"
+      >
+        <button
+          type="button"
+          aria-pressed={company === null}
+          onClick={() => setCompany(null)}
+          className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+            company === null
+              ? "bg-[var(--gold)] text-black"
+              : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+          }`}
+        >
+          All companies
+        </button>
+        {GRADING_COMPANIES.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            aria-pressed={company === c.key}
+            onClick={() => setCompany(c.key)}
+            aria-label={`Show only ${c.label} graded cards`}
+            className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+              company === c.key
+                ? "bg-[var(--gold)] text-black"
+                : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+            }`}
+          >
+            {c.short}
+          </button>
+        ))}
+      </div>
+      {slabsQ.isPending ? (
+        <p
+          role="status"
+          className="mt-4 animate-pulse text-center text-sm text-[var(--dim)]"
+        >
+          Lining up your graded cards…
+        </p>
+      ) : slabsQ.isError ? (
+        <div className="mt-4 text-center">
+          <p role="alert" className="text-sm text-[var(--dim)]">
+            Your graded cards couldn&rsquo;t load.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              hapticTick();
+              void slabsQ.refetch();
+            }}
+            aria-label="Try loading your graded cards again"
+            className="mt-2 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--text)]"
+          >
+            Try again
+          </button>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="mt-4 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
+          <p className="text-sm font-medium text-[var(--text)]">
+            {company
+              ? `No ${company} slabs saved yet`
+              : "No graded cards saved yet"}
+          </p>
+          <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--dim)]">
+            Scan a slab&rsquo;s cert number — QR code, barcode,
+            a photo of its label, or the typed number — and
+            after you confirm it, the slab lives here and on
+            the small shelf above your comics.
+          </p>
+        </div>
+      ) : (
+        <div className="mx-auto mt-4 flex w-full max-w-sm flex-col gap-3">
+          {rows.map((slab) => (
+            <GradedSlabVisual
+              key={slab.id}
+              slab={slab}
+              cardName={slab.cardName}
+              onOpen={() => openSlabsSlab(slab.id)}
+            />
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          hapticTick();
+          window.dispatchEvent(new Event("vaultx:open-slab-scan"));
+        }}
+        aria-label="Add a graded slab — scan its cert number"
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-semibold text-[var(--gold-soft)]"
+      >
+        Add a graded slab — scan its cert
+      </button>
+    </section>
+  );
+}
+
+/** SLABS's two display shelves (Anthony, Nov 9, 2026):
+    the section that used to be just Comics is now SLABS —
+    a SMALL shelf of graded slab CARDS (up to four) standing
+    centered above a BIG shelf of graded COMICS, the small
+    shelf offset in the middle over the big one, like a
+    display case over a bookcase. Both shelves show the
+    owner's own pieces only: comics from the COMICS catalog,
+    slab cards from his saved graded slabs (any game, any of
+    the five grading companies). Which pieces stand on each
+    shelf is chosen in the SLABS section's display picker;
+    until he chooses, the comics shelf shows his two signed
+    comics (his standing Comics-wall default, max five
+    selectable as before) and the cards shelf his four most
+    recently saved slabs. Hold any piece a moment, then drag
+    to rearrange its shelf — the order saves as his own.
+    Used on the Library page (under the SLABS sign) and at
+    the top of the SLABS section itself. */
+export function SlabsShelves({
+  onOpenComic,
+}: {
+  /** Opens a comic's detail sheet. When omitted (the
+      Library), the shelves open the sheet themselves with
+      their own Back-trapped window. */
+  onOpenComic?: (comic: Comic) => void;
+}) {
   const queryClient = useQueryClient();
-  const display = useQuery({
+  const comicDisplay = useQuery({
     queryKey: ["libraryComicDisplay"],
     queryFn: () => api.getLibraryComicDisplay({}),
   });
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string[]>([]);
-  const saveDisplay = useMutation({
+  const slabDisplay = useQuery({
+    queryKey: ["librarySlabCardDisplay"],
+    queryFn: () => api.getLibrarySlabCardDisplay({}),
+  });
+  const allSlabs = useQuery({
+    queryKey: ["allGradedSlabs"],
+    queryFn: () => api.listAllGradedSlabs({}),
+  });
+
+  // The Library's own comic sheet window (used only when no
+  // opener was handed in): one Back press closes the comic
+  // and lands back on the Library.
+  const [ownComic, setOwnComic] = useState<Comic | null>(null);
+  const comicWin = useOwnEntryWindow("libraryComicSheet", (v) => {
+    if (!v) setOwnComic(null);
+  });
+  const openComic = (comic: Comic) => {
+    hapticTick();
+    if (onOpenComic) {
+      onOpenComic(comic);
+    } else {
+      setOwnComic(comic);
+      comicWin.open();
+    }
+  };
+
+  const chosenComicIds =
+    comicDisplay.data?.ids ?? SLABS_DEFAULT_COMICS;
+  const [comicOrder, setComicOrder] = useState<string[] | null>(
+    null,
+  );
+  useEffect(() => {
+    const saved = comicDisplay.data?.ids;
+    if (
+      comicOrder &&
+      saved &&
+      saved.join() === comicOrder.join()
+    ) {
+      setComicOrder(null);
+    }
+  }, [comicDisplay.data, comicOrder]);
+  const saveComicDisplay = useMutation({
     mutationFn: (ids: string[]) =>
       api.setLibraryComicDisplay({ ids }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["libraryComicDisplay"],
       });
+    },
+  });
+  const effectiveComicIds = comicOrder ?? chosenComicIds;
+  const shownComics = effectiveComicIds
+    .map((id) => COMICS.find((c) => c.id === id))
+    .filter((c): c is Comic => Boolean(c))
+    .slice(0, 5);
+  const comicDrag = useDragReorder({
+    keys: shownComics.map((c) => c.id),
+    onCommit: (order) => {
+      const rest = effectiveComicIds.filter(
+        (id) => !order.includes(id),
+      );
+      const next = [...order, ...rest].slice(0, 5);
+      setComicOrder(next);
+      saveComicDisplay.mutate(next);
+    },
+  });
+
+  const slabRows = allSlabs.data?.slabs ?? [];
+  const chosenSlabIds =
+    slabDisplay.data?.ids ?? slabRows.slice(0, 4).map((s) => s.id);
+  const [slabOrder, setSlabOrder] = useState<number[] | null>(
+    null,
+  );
+  useEffect(() => {
+    const saved = slabDisplay.data?.ids;
+    if (
+      slabOrder &&
+      saved &&
+      saved.join() === slabOrder.join()
+    ) {
+      setSlabOrder(null);
+    }
+  }, [slabDisplay.data, slabOrder]);
+  const saveSlabDisplay = useMutation({
+    mutationFn: (ids: number[]) =>
+      api.setLibrarySlabCardDisplay({ ids }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["librarySlabCardDisplay"],
+      });
+    },
+  });
+  const effectiveSlabIds = slabOrder ?? chosenSlabIds;
+  const shownSlabs = effectiveSlabIds
+    .map((id) => slabRows.find((s) => s.id === id))
+    .filter((s): s is SlabsSlabRow => Boolean(s))
+    .slice(0, 4);
+  const slabDrag = useDragReorder({
+    keys: shownSlabs.map((s) => String(s.id)),
+    onCommit: (order) => {
+      const orderIds = order.map((k) => Number(k));
+      const rest = effectiveSlabIds.filter(
+        (id) => !orderIds.includes(id),
+      );
+      const next = [...orderIds, ...rest].slice(0, 4);
+      setSlabOrder(next);
+      saveSlabDisplay.mutate(next);
+    },
+  });
+
+  return (
+    <div>
+      {/* The small upper shelf: graded slab cards, centered
+          and narrower than the comics shelf below it, offset
+          in the middle above the comics. */}
+      <div className="mx-auto w-[78%] max-w-[430px]">
+        <p className="text-center text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--gold-soft)]">
+          Graded Cards
+        </p>
+        {allSlabs.isPending ? (
+          <p
+            role="status"
+            className="mt-2 animate-pulse rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-5 text-center text-xs text-[var(--dim)]"
+          >
+            Lining up your graded cards…
+          </p>
+        ) : shownSlabs.length > 0 ? (
+          <>
+            <div
+              ref={slabDrag.containerRef}
+              className="mt-2 flex items-start justify-center gap-2"
+            >
+              {shownSlabs.map((slab) => (
+                <div
+                  key={slab.id}
+                  {...slabDrag.itemProps(String(slab.id))}
+                  className={`w-[23%] max-w-[96px] shrink-0 ${
+                    slabDrag.draggingKey === String(slab.id)
+                      ? "z-30"
+                      : ""
+                  }`}
+                >
+                  <ShelfSlabCard
+                    slab={slab}
+                    onOpen={(id) => {
+                      if (slabDrag.suppressClick()) return;
+                      openSlabsSlab(id);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className="slabs-board mt-2"
+            />
+          </>
+        ) : (
+          <div className="mt-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-3 py-4 text-center">
+            <p className="text-xs leading-relaxed text-[var(--dim)]">
+              No graded cards on this shelf yet — the first
+              slab you scan by its cert number stands here.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                window.dispatchEvent(
+                  new Event("vaultx:open-slab-scan"),
+                );
+              }}
+              aria-label="Scan a graded slab's cert number"
+              className="mt-2 rounded-full bg-[var(--gold)] px-4 py-1.5 text-xs font-bold text-black"
+            >
+              Scan a slab
+            </button>
+            <div
+              aria-hidden="true"
+              className="slabs-board mt-3"
+            />
+          </div>
+        )}
+        {allSlabs.isError ? (
+          <div className="mt-1.5 text-center">
+            <p role="alert" className="text-[11px] text-[var(--dim)]">
+              Your graded cards couldn&rsquo;t load just now.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                void allSlabs.refetch();
+              }}
+              aria-label="Try loading your graded cards again"
+              className="mt-1 rounded-full border border-[var(--border)] px-3.5 py-1 text-[11px] font-semibold text-[var(--text)]"
+            >
+              Try again
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* The big lower shelf: graded comics, full width. */}
+      <div className="mt-4">
+        <p className="text-center text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--gold-soft)]">
+          Comics
+        </p>
+        {shownComics.length > 0 ? (
+          <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 pb-3 pt-3">
+            <div
+              ref={comicDrag.containerRef}
+              className="flex flex-wrap items-start justify-center gap-2.5"
+            >
+              {shownComics.map((comic) => (
+                <button
+                  key={comic.id}
+                  type="button"
+                  {...comicDrag.itemProps(comic.id)}
+                  onClick={() => {
+                    if (comicDrag.suppressClick()) return;
+                    openComic(comic);
+                  }}
+                  aria-label={`Open ${comic.title}`}
+                  className={`w-[22%] max-w-[120px] shrink-0 transition active:scale-[0.98] ${
+                    comicDrag.draggingKey === comic.id ? "z-30" : ""
+                  }`}
+                >
+                  <ShelfComicSlab comic={comic} />
+                </button>
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className="slabs-board mt-3"
+            />
+          </div>
+        ) : (
+          <p className="mt-2 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--dim)]">
+            No comics on display — choose up to five of your
+            graded comics to stand here from Edit display in
+            the SLABS section.
+          </p>
+        )}
+        {comicDisplay.isError ? (
+          <div className="mt-2 text-center">
+            <p role="alert" className="text-xs leading-relaxed text-[var(--dim)]">
+              Your saved shelf choice couldn&rsquo;t load —
+              showing the default comics for now.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                hapticTick();
+                void comicDisplay.refetch();
+              }}
+              aria-label="Try loading your saved SLABS shelf choice again"
+              className="mt-1.5 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--text)] transition active:scale-[0.97]"
+            >
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {shownComics.length > 1 || shownSlabs.length > 1 ? (
+          <p className="mt-2 text-center text-[11px] leading-relaxed text-[var(--dim)]">
+            Hold a piece a moment, then drag to rearrange its
+            shelf — the order saves as yours.
+          </p>
+        ) : null}
+      </div>
+
+      {ownComic ? (
+        /* The Library overlay sits at z-70 and ComicSheet's
+            own root is z-50 — this wrapper's stacking context
+            lifts the sheet above the Library it opened from. */
+        <div className="fixed inset-0 z-[80]">
+          <ComicSheet
+            comic={ownComic}
+            onClose={() => comicWin.close()}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** SLABS display picker (Anthony, Nov 9, 2026 —
+    reworked from the Library display wall picker of Nov 5,
+    2026): choosing which pieces stand on SLABS's two
+    shelves lives here in the SLABS section, where the
+    pieces themselves live. The big comics shelf holds at
+    most FOUR comics; the small graded-cards shelf holds at
+    most FOUR saved graded slabs. Same settings underneath
+    (getLibraryComicDisplay / setLibraryComicDisplay and
+    getLibrarySlabCardDisplay / setLibrarySlabCardDisplay),
+    same defaults when never chosen. */
+export function SlabsPicker() {
+  const queryClient = useQueryClient();
+  const comicDisplay = useQuery({
+    queryKey: ["libraryComicDisplay"],
+    queryFn: () => api.getLibraryComicDisplay({}),
+  });
+  const slabDisplay = useQuery({
+    queryKey: ["librarySlabCardDisplay"],
+    queryFn: () => api.getLibrarySlabCardDisplay({}),
+  });
+  const allSlabs = useQuery({
+    queryKey: ["allGradedSlabs"],
+    queryFn: () => api.listAllGradedSlabs({}),
+  });
+  const [editing, setEditing] = useState(false);
+  const [comicDraft, setComicDraft] = useState<string[]>([]);
+  const [slabDraft, setSlabDraft] = useState<number[]>([]);
+  const saveComics = useMutation({
+    mutationFn: (ids: string[]) =>
+      api.setLibraryComicDisplay({ ids }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["libraryComicDisplay"],
+      });
+    },
+  });
+  const saveSlabs = useMutation({
+    mutationFn: (ids: number[]) =>
+      api.setLibrarySlabCardDisplay({ ids }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["librarySlabCardDisplay"],
+      });
       setEditing(false);
     },
   });
-  const DEFAULT_WALL = ["aliens-1", "batman-136"];
-  const chosen = display.data?.ids ?? DEFAULT_WALL;
-  const chosenTitles = chosen
+  const chosenComics =
+    comicDisplay.data?.ids ?? SLABS_DEFAULT_COMICS;
+  const slabRows = allSlabs.data?.slabs ?? [];
+  const chosenSlabs =
+    slabDisplay.data?.ids ?? slabRows.slice(0, 4).map((s) => s.id);
+  const chosenComicTitles = chosenComics
     .map((id) => COMICS.find((c) => c.id === id)?.title)
     .filter((t): t is string => Boolean(t));
-  const toggleDraft = (id: string) => {
-    setDraft((d) =>
+  const chosenSlabNames = chosenSlabs
+    .map((id) => slabRows.find((s) => s.id === id)?.cardName)
+    .filter((t): t is string => Boolean(t));
+  const toggleComic = (id: string) => {
+    setComicDraft((d) =>
       d.includes(id)
         ? d.filter((x) => x !== id)
         : d.length >= 5
@@ -1581,27 +2204,45 @@ export function LibraryDisplayPicker() {
           : [...d, id],
     );
   };
+  const toggleSlab = (id: number) => {
+    setSlabDraft((d) =>
+      d.includes(id)
+        ? d.filter((x) => x !== id)
+        : d.length >= 4
+          ? d
+          : [...d, id],
+    );
+  };
+  const saving = saveComics.isPending || saveSlabs.isPending;
+  const saveFailed = saveComics.isError || saveSlabs.isError;
   return (
     <section
-      aria-label="Library display wall"
+      aria-label="SLABS display shelves"
       className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-album text-base text-[var(--text)]">
-            Library display wall
+            Display shelves
           </h2>
           <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
-            {chosenTitles.length > 0
-              ? `On the wall now: ${chosenTitles.join(" · ")}`
-              : "Nothing on the Library wall right now."}
+            Comics:{" "}
+            {chosenComicTitles.length > 0
+              ? chosenComicTitles.join(" · ")
+              : "none chosen"}
+            . Graded cards:{" "}
+            {chosenSlabNames.length > 0
+              ? chosenSlabNames.join(" · ")
+              : "none yet"}
+            .
           </p>
         </div>
         <button
           type="button"
           onClick={() => {
             hapticTick();
-            setDraft(chosen);
+            setComicDraft(chosenComics);
+            setSlabDraft(chosenSlabs);
             setEditing((v) => !v);
           }}
           aria-expanded={editing}
@@ -1613,22 +2254,22 @@ export function LibraryDisplayPicker() {
       {editing ? (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <p className="text-sm font-semibold text-[var(--text)]">
-            On the wall — {draft.length} of 5
+            On the comics shelf — {comicDraft.length} of 5
           </p>
           <p className="mt-0.5 text-xs text-[var(--dim)]">
-            Tap your comics to add or remove them. The wall holds
-            at most five.
+            Tap your comics to add or remove them. The big
+            shelf holds at most five.
           </p>
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {COMICS.map((comic) => {
-              const on = draft.includes(comic.id);
-              const full = !on && draft.length >= 5;
+              const on = comicDraft.includes(comic.id);
+              const full = !on && comicDraft.length >= 5;
               return (
                 <button
                   key={comic.id}
                   type="button"
                   disabled={full}
-                  onClick={() => toggleDraft(comic.id)}
+                  onClick={() => toggleComic(comic.id)}
                   aria-pressed={on}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                     on
@@ -1641,14 +2282,53 @@ export function LibraryDisplayPicker() {
               );
             })}
           </div>
+          <p className="mt-4 text-sm font-semibold text-[var(--text)]">
+            On the graded cards shelf — {slabDraft.length} of 4
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--dim)]">
+            Tap your graded slabs to add or remove them. The
+            small shelf holds at most four.
+          </p>
+          {slabRows.length > 0 ? (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {slabRows.map((slab) => {
+                const on = slabDraft.includes(slab.id);
+                const full = !on && slabDraft.length >= 4;
+                return (
+                  <button
+                    key={slab.id}
+                    type="button"
+                    disabled={full}
+                    onClick={() => toggleSlab(slab.id)}
+                    aria-pressed={on}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                      on
+                        ? "bg-[var(--gold)] text-black"
+                        : "border border-[var(--border)] text-[var(--text)] disabled:opacity-40"
+                    }`}
+                  >
+                    {slab.cardName} · {slab.company} {slab.grade}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              No graded slabs saved yet — scan a slab by its
+              cert number and it can stand on this shelf.
+            </p>
+          )}
           <div className="mt-3 flex gap-2">
             <button
               type="button"
-              disabled={saveDisplay.isPending}
-              onClick={() => saveDisplay.mutate(draft)}
+              disabled={saving}
+              onClick={() => {
+                saveComics.mutate(comicDraft);
+                saveSlabs.mutate(slabDraft);
+              }}
               className="flex-1 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
             >
-              {saveDisplay.isPending ? "Saving…" : "Save display"}
+              {saving ? "Saving…" : "Save display"}
             </button>
             <button
               type="button"
@@ -1658,7 +2338,7 @@ export function LibraryDisplayPicker() {
               Cancel
             </button>
           </div>
-          {saveDisplay.isError ? (
+          {saveFailed ? (
             <p role="alert" className="mt-2 text-xs text-red-400">
               That didn&rsquo;t save — try again.
             </p>
@@ -1825,11 +2505,12 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
   return (
     <div className="pt-4">
       <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
-        Graded Comics
+        SLABS
       </h1>
       <p className="mt-1 text-sm text-[var(--dim)]">
-        Your graded comics, covers first — tap any cover to see the slab
-        up close.
+        Every slab you own, in one place: your graded cards on
+        the small shelf up top, your graded comics on the big
+        shelf below — tap any piece to see it up close.
       </p>
 
       {/* Search + Scan row (Anthony, Nov 3, 2026, ~11:14 PM):
@@ -1889,7 +2570,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
           blocks (slabs, total value, key issues), replacing the old
           always-full progress bar. */}
       <section
-        aria-label="Comics collection summary"
+        aria-label="SLABS comics summary"
         className="mt-4 grid grid-cols-3 gap-3"
       >
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
@@ -1897,7 +2578,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
             {COMICS.length}
           </p>
           <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)]">
-            Slabs
+            Comic slabs
           </p>
           <p className="mt-1 text-xs leading-snug text-[var(--dim)]">
             All CGC 9.8 · WHITE Pages
@@ -1927,15 +2608,25 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
         </div>
       </section>
 
-      {/* The Library display wall is managed HERE, in the
-          Comics section (moved off the Library page,
+      {/* SLABS's display shelves (Anthony, Nov 9,
+          2026): the small graded-cards shelf centered above
+          the big comics shelf — the same two shelves that
+          stand in the Library under the SLABS sign. */}
+      <section aria-label="SLABS display shelves" className="mt-5">
+        <SlabsShelves
+          onOpenComic={(comic) => openComic(comic.id)}
+        />
+      </section>
+
+      {/* The display shelves are managed HERE, in the SLABS
+          section (the picker moved off the Library page,
           Anthony, Nov 5, 2026). */}
-      <LibraryDisplayPicker />
+      <SlabsPicker />
 
       <div
         className="mt-4 flex flex-wrap gap-2"
         role="group"
-        aria-label="Comics areas"
+        aria-label="SLABS areas"
       >
         {COMICS_AREAS.map((a) => (
           <button
@@ -2043,6 +2734,8 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
             each slab&rsquo;s own page.
           </p>
         </section>
+      ) : area === "cards" ? (
+        <GradedCardsArea />
       ) : area === "wish" ? (
         <section aria-label="Wish List" className="mt-5">
           <h2 className="font-album text-lg text-[var(--text)]">Wish List</h2>
@@ -2066,10 +2759,10 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
               marker on the cover and title / publisher · date /
               value under each. This is the Slabs home now; grouping
               lives in the browse lists below it. */}
-          <section aria-label="All slabs" className="mt-5">
+          <section aria-label="All comics" className="mt-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-album text-lg text-[var(--text)]">
-                All Slabs
+                All Comics
               </h2>
               <div
                 className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-0.5"
@@ -2174,7 +2867,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
                 setShowPicker(true);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              aria-label="Back to comics group selection"
+              aria-label="Back to SLABS group selection"
               className="rounded-full border border-[var(--accent)]/50 px-3.5 py-1.5 text-sm font-medium text-[var(--gold-soft)]"
             >
               ← All comics
@@ -2198,7 +2891,7 @@ export function ComicsPanel({ onScan }: { onScan?: () => void }) {
               </div>
 
               {/* One continuous shelf in the same cover-forward
-                  grid as All Slabs: 3 across on phone, 4 on wider
+                  grid as All Comics: 3 across on phone, 4 on wider
                   screens. */}
               <div className="mt-3 grid grid-cols-3 gap-x-2.5 gap-y-4 sm:grid-cols-4">
                 {group.comics.map((comic) => (

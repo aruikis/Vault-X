@@ -12,7 +12,9 @@
 // Pockets: like Anthony's physical binders, a card number gets two adjacent
 // pockets — regular first, foil next to it — each owned/ghosted on its own
 // (getSection expands printings into pockets). Foil-only printings (Epics,
-// Enchanteds, Iconics) and one-version promos/quests keep a single pocket.
+// Enchanteds, Iconics, and the Illumineer's Quest foil reprints numbered
+// above each set's chase block — see FOIL_ONLY_QUEST_REPRINT_UIDS below)
+// and one-version promos/quests keep a single pocket.
 //
 // Finances: getFinance computes collection totals live from stored
 // per-finish prices plus the sealed/token/puzzle items accounted in
@@ -358,6 +360,104 @@ const POCKET_FINISH_LABELS = new Set([
   ...FOIL_FINISHES,
 ]);
 
+/** Illumineer's Quest foil reprints (Anthony, Nov 9, 2026 — his
+    standing rule: a card must never be represented in a finish
+    that does not exist). Each Illumineer's Quest box reprints a
+    few cards from its companion sets in a unique frame, numbered
+    ABOVE the set's chase block (past the Enchanteds, and past
+    the Epics/Iconics in the newer sets), and those reprints were
+    produced ONLY as Cold Foil — there is no Regular version of
+    any of them. The catalog files them inside their companion
+    sets, so the binder's default for a numbered set card (a
+    Regular pocket + a Cold Foil pocket) invented a phantom
+    Regular pocket for each. The full-catalog audit of Nov 9,
+    2026 found exactly these thirteen — every other numbered set
+    card sits inside its set's base range (1–204, or 1–207 for
+    Attack of the Vine!) and exists in both finishes, and the
+    chase rarities were already single-finish. Verified against
+    the checklists and market records for each Quest set:
+    Deep Trouble's checklist heads this group "Deep Trouble
+    Foil" with a foil price and no regular price for every card
+    (EchoMTG printable checklist, tradercracks checklist);
+    Lorcast carries a foil price and NO non-foil price for the
+    Palace Heist four it tracks (Bolt, Elsa, Goofy, Pinocchio);
+    the Great Hunny Rescue four are listed everywhere only as
+    "(Cold Foil)" and the box's own reviews describe them as the
+    foil versions included in the box.
+    - Deep Trouble (with Into the Inklands / Ursula's Return /
+      Shimmering Skies): Piglet - Pooh Pirate Captain 223/204,
+      Yen Sid - Powerful Sorcerer 223/204, Mulan - Elite Archer
+      224/204, Mickey Mouse - Playful Sorcerer 225/204,
+      Half Hexwell Crown 223/204.
+    - Palace Heist (with Archazia's Island / Reign of Jafar):
+      Bolt - Superdog 223/204, Elsa - Ice Maker 224/204,
+      Goofy - Groundbreaking Chef 223/204,
+      Pinocchio - Strings Attached 224/204.
+    - The Great Hunny Rescue (with Winterspell / Wilds Unknown /
+      Attack of the Vine!): Sven - Leaping Reindeer 243/204,
+      Mr. Incredible - Super Strong 243/204,
+      Christopher Robin - Hunny Sage 246/207,
+      Violet Parr - Super Resilient 247/207.
+    Keyed by catalog uid, the stable printing key. */
+const FOIL_ONLY_QUEST_REPRINT_UIDS: ReadonlySet<string> = new Set([
+  "3:945", // Piglet - Pooh Pirate Captain, 223/204, Into the Inklands
+  "4:946", // Yen Sid - Powerful Sorcerer, 223/204, Ursula's Return
+  "4:948", // Mulan - Elite Archer, 224/204, Ursula's Return
+  "4:949", // Mickey Mouse - Playful Sorcerer, 225/204, Ursula's Return
+  "5:1179", // Half Hexwell Crown, 223/204, Shimmering Skies
+  "7:1931", // Bolt - Superdog, 223/204, Archazia's Island
+  "7:1932", // Elsa - Ice Maker, 224/204, Archazia's Island
+  "8:1933", // Goofy - Groundbreaking Chef, 223/204, Reign of Jafar
+  "8:1934", // Pinocchio - Strings Attached, 224/204, Reign of Jafar
+  "11:3570", // Sven - Leaping Reindeer, 243/204, Winterspell
+  "12:3571", // Mr. Incredible - Super Strong, 243/204, Wilds Unknown
+  "13:3572", // Christopher Robin - Hunny Sage, 246/207, Attack of the Vine!
+  "13:3573", // Violet Parr - Super Resilient, 247/207, Attack of the Vine!
+]);
+
+/** The ONE finish a printing exists in, when it exists in
+    exactly one: the chase rarities by rarity, the Illumineer's
+    Quest foil reprints by uid. The returned name is the finish
+    KEY the collection records use ("Epic Foil" for an Epic —
+    the detail view displays it as "Epic"). Null for ordinary
+    two-finish printings. */
+function singleFinishOf(row: {
+  uid: string;
+  rarity: string | null;
+}): string | null {
+  if (row.rarity === "Epic") return "Epic Foil";
+  if (row.rarity === "Enchanted") return "Enchanted";
+  if (row.rarity === "Iconic") return "Iconic";
+  if (FOIL_ONLY_QUEST_REPRINT_UIDS.has(row.uid)) return "Cold Foil";
+  return null;
+}
+
+function isFoilOnlyPrinting(row: {
+  uid: string;
+  rarity: string | null;
+}): boolean {
+  return singleFinishOf(row) != null;
+}
+
+/** Folds a foil-only quest reprint's finish counts into its one
+    real finish: any non-foil finish key (a "Regular" the export
+    or an earlier pocket write recorded) moves into "Cold Foil".
+    Quantities are preserved exactly — the copies are real, only
+    the finish they were filed under does not exist. Foil-family
+    keys already present are left as they are. */
+function foldFinishesToColdFoil(
+  finishes: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  let folded = 0;
+  for (const [finish, qty] of Object.entries(finishes)) {
+    if (!isFoilFinish(finish) && finish !== "Iconic") folded += qty;
+    else out[finish] = (out[finish] ?? 0) + qty;
+  }
+  if (folded > 0) out["Cold Foil"] = (out["Cold Foil"] ?? 0) + folded;
+  return out;
+}
+
 interface Pocket {
   kind: "regular" | "foil" | "single";
   label: string;
@@ -419,8 +519,7 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
       regQty += qty;
     }
   }
-  const foilOnlyPrinting =
-    row.rarity === "Epic" || row.rarity === "Enchanted" || row.rarity === "Iconic";
+  const foilOnlyPrinting = isFoilOnlyPrinting(row);
   const foilLabel =
     Object.keys(foilFinishes)[0] ??
     (row.grp === "promo" ? "Promo Foil" : "Cold Foil");
@@ -431,7 +530,8 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
         kind: "single",
         label:
           Object.keys(foilFinishes)[0] ??
-          (row.rarity === "Epic" ? "Epic Foil" : (row.rarity ?? "Foil")),
+          singleFinishOf(row) ??
+          (row.rarity ?? "Foil"),
         qty: row.ownedQty,
         finishes,
         sceneQty: sceneTotal,
@@ -654,7 +754,8 @@ type ArtGroupData = NonNullable<
     foil family when its scene tally holds any foil-family
     finish (cold/epic/promo foil, Enchanted, Iconic) — pocket
     copies never inflate the scene lines. Foil-only printings
-    (Enchanted / Iconic / Epic) have no Regular version, so
+    (Enchanted / Iconic / Epic, and the quest foil reprints)
+    have no Regular version, so
     the Regular line is scored only when at least one member
     could own one; the foil line is labeled Enchanted / Iconic
     for those chase-only scenes. A member's ownedQty here is
@@ -685,8 +786,7 @@ async function computeArtGroup(
     const mFinishes = parseFinishes(m.finishes);
     const mScene = sceneFinishesOf(m);
     const sceneEntries = Object.entries(mScene).filter(([, q]) => q > 0);
-    const foilOnlyPrinting =
-      m.rarity === "Enchanted" || m.rarity === "Iconic" || m.rarity === "Epic";
+    const foilOnlyPrinting = isFoilOnlyPrinting(m);
     if (!foilOnlyPrinting) anyRegularPossible = true;
     const hasRegular = sceneEntries.some(
       ([f]) => !isFoilFinish(f) && f !== "Iconic",
@@ -821,6 +921,68 @@ function financeJsonOf(
   return JSON.stringify(out);
 }
 
+/** The finance twin of foldFinishesToColdFoil (Nov 9, 2026):
+    re-keys a foil-only quest reprint's per-finish prices so a
+    non-foil finish's value/paid move under "Cold Foil",
+    quantity-weighted by the copies held in each finish. Totals
+    are preserved exactly; a record with no non-foil entry comes
+    back unchanged. */
+function foldFinanceToColdFoil(
+  prices: Record<string, FinishPrice>,
+  qtyByFinish: Record<string, number>,
+): Record<string, FinishPrice> {
+  const keys = Object.keys(prices);
+  if (keys.every((k) => isFoilFinish(k) || k === "Iconic")) return prices;
+  const out: Record<string, FinishPrice> = {};
+  let qtySum = 0;
+  let valueSum = 0;
+  let paidSum = 0;
+  for (const [finish, price] of Object.entries(prices)) {
+    if (!isFoilFinish(finish) && finish !== "Iconic") {
+      const qty = qtyByFinish[finish] ?? 0;
+      if (qty > 0) {
+        qtySum += qty;
+        valueSum += price.value * qty;
+        paidSum += price.paid * qty;
+      }
+    } else {
+      out[finish] = price;
+    }
+  }
+  if (qtySum > 0) {
+    const existing = out["Cold Foil"];
+    if (existing) {
+      const existingQty = qtyByFinish["Cold Foil"] ?? 0;
+      const totalQty = existingQty + qtySum;
+      out["Cold Foil"] = {
+        value:
+          totalQty > 0
+            ? (existing.value * existingQty + valueSum) / totalQty
+            : existing.value,
+        paid:
+          totalQty > 0
+            ? (existing.paid * existingQty + paidSum) / totalQty
+            : existing.paid,
+      };
+    } else {
+      out["Cold Foil"] = {
+        value: valueSum / qtySum,
+        paid: paidSum / qtySum,
+      };
+    }
+  }
+  return out;
+}
+
+function foldFinanceJsonToColdFoil(
+  raw: string | null,
+  qtyByFinish: Record<string, number>,
+): string | null {
+  if (!raw) return raw;
+  const folded = foldFinanceToColdFoil(parseFinance(raw), qtyByFinish);
+  return JSON.stringify(folded);
+}
+
 /** Builds the cards-table row for one catalog entry at a given
     slot position — the exact shape seedBinder writes, shared by
     the catalog sync/save actions below so every insert path
@@ -831,6 +993,13 @@ function catalogRowOf(
   slotSort: number,
 ): typeof schema.cards.$inferInsert {
   const own = ownership[entry.uid];
+  // Foil-only quest reprints (Nov 9, 2026): a fresh row starts
+  // with the export's copy already filed under its one real
+  // finish — the export filed Half Hexwell Crown's copy under
+  // "Regular", a finish that printing does not exist in.
+  const questFoilOnly = FOIL_ONLY_QUEST_REPRINT_UIDS.has(entry.uid);
+  const ownFinishes = own?.finishes ?? {};
+  const ownQtyByFinish: Record<string, number> = { ...ownFinishes };
   return {
     uid: entry.uid,
     grp: entry.grp,
@@ -862,10 +1031,16 @@ function catalogRowOf(
         ? String(entry.tcg)
         : (tcgplayerBackfill[entry.uid] ?? null),
     ownedQty: own?.qty ?? 0,
-    finishes: JSON.stringify(own?.finishes ?? {}),
+    finishes: JSON.stringify(
+      questFoilOnly
+        ? foldFinishesToColdFoil(ownFinishes)
+        : ownFinishes,
+    ),
     marketValue: own && own.value > 0 ? own.value : null,
     paidValue: own ? own.paid : null,
-    financeJson: financeJsonOf(own),
+    financeJson: questFoilOnly
+      ? foldFinanceJsonToColdFoil(financeJsonOf(own), ownQtyByFinish)
+      : financeJsonOf(own),
   };
 }
 
@@ -1425,6 +1600,14 @@ const cardDetailResponse = z.object({
   cardText: z.string().nullable(),
   ownedQty: z.number(),
   finishes: z.record(z.string(), z.number()),
+  /** The ONE finish this printing exists in, when it exists in
+      exactly one (Nov 9, 2026): the chase rarities (Epic /
+      Enchanted / Iconic) and the Illumineer's Quest foil
+      reprints (see FOIL_ONLY_QUEST_REPRINT_UIDS). The detail
+      editor offers exactly this one stepper line for such a
+      card — never a Regular line for a printing that has no
+      Regular version. Null for ordinary two-finish printings. */
+  foilOnlyFinish: z.string().nullable(),
   /** This printing's joined-scene tally (Anthony, Nov 9, 2026):
       separate from the pocket finishes — the detail hero treats
       the card as owned when either tally holds a copy. */
@@ -1764,6 +1947,7 @@ const searchResponse = z.object({
       finishes: z.record(z.string(), z.number()),
       marketValue: z.number().nullable(),
       suggestedFinish: z.string(),
+      foilOnlyFinish: z.string().nullable(),
       /** True when this printing's artwork joins a verified
           connecting-art scene (Nov 9, 2026), so search rows
           can carry the same link marker as the pockets. */
@@ -1831,6 +2015,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     hiddenCollections: null as string | null,
     collectionOrder: null as string | null,
     libraryComicDisplay: null as string | null,
+    librarySlabCardDisplay: null as string | null,
     usernameChangeUsed: 0,
     updatedAt: new Date().toISOString(),
   };
@@ -7746,43 +7931,10 @@ export const Actions = {
             });
             sorted.forEach((entry, idx) => {
               if (existingUids.has(entry.uid)) return;
-              const own = ownership[entry.uid];
-              newRows.push({
-                uid: entry.uid,
-                grp: entry.grp,
-                groupKey: groupKeyOf(entry),
-                groupName: entry.setName,
-                groupLabel: groupLabelOf(entry),
-                groupSort: groupSortOf(entry),
-                slotSort: idx,
-                setCode: entry.setCode,
-                family: entry.family,
-                number: entry.number,
-                printed: entry.printed,
-                fullName: entry.fullName ?? entry.name ?? "Unknown card",
-                name: entry.name,
-                rarity: entry.rarity,
-                ink: entry.ink,
-                cost: entry.cost,
-                inkwell: entry.inkwell ? 1 : 0,
-                cardType: entry.type,
-                strength: entry.strength,
-                willpower: entry.willpower,
-                lore: entry.lore,
-                cardText: entry.text,
-                subtypes: entry.subtypes,
-                imageUrl: entry.image,
-                imageBlobKey: null,
-                tcgplayerId:
-                  entry.tcg != null
-                    ? String(entry.tcg)
-                    : (tcgplayerBackfill[entry.uid] ?? null),
-                ownedQty: own?.qty ?? 0,
-                finishes: JSON.stringify(own?.finishes ?? {}),
-                marketValue: own && own.value > 0 ? own.value : null,
-                paidValue: own ? own.paid : null,
-                financeJson: financeJsonOf(own),
-              });
+              // The shared row builder (catalogRowOf) — it also
+              // files a foil-only quest reprint's export copy
+              // under its one real finish (Nov 9, 2026).
+              newRows.push(catalogRowOf(entry, idx));
             });
           }
           for (let i = 0; i < newRows.length; i += 250) {
@@ -7840,7 +7992,19 @@ export const Actions = {
         const firstCorrectedSync = marker.length === 0;
         for (const row of existing) {
           const own = ownership[row.uid];
-          const financeJson = financeJsonOf(own);
+          // Foil-only quest reprints (Nov 9, 2026): the export
+          // filed Half Hexwell Crown's copy under "Regular", a
+          // finish that printing does not exist in — so wherever
+          // this loop derives per-finish prices from the export,
+          // they are re-keyed to the printing's one real finish,
+          // Cold Foil, with value and paid unchanged.
+          const questFoilOnly = FOIL_ONLY_QUEST_REPRINT_UIDS.has(row.uid);
+          const financeJson = questFoilOnly
+            ? foldFinanceJsonToColdFoil(
+                financeJsonOf(own),
+                own?.finishes ?? {},
+              )
+            : financeJsonOf(own);
           const marketValue = own && own.value > 0 ? own.value : null;
           const set: Partial<typeof schema.cards.$inferInsert> = {};
           if (row.financeJson !== financeJson) set.financeJson = financeJson;
@@ -7860,6 +8024,31 @@ export const Actions = {
             const finishesJson = JSON.stringify(own?.finishes ?? {});
             if (row.ownedQty !== qty) set.ownedQty = qty;
             if (row.finishes !== finishesJson) set.finishes = finishesJson;
+          }
+          // One-finish repair (Nov 9, 2026): a stored finishes
+          // record for a foil-only quest reprint that still
+          // carries a non-foil finish is folded into Cold Foil —
+          // the quantity is untouched, only the finish it was
+          // filed under stops being represented, because that
+          // finish does not exist for the printing. Idempotent:
+          // once folded, the record no longer matches. In
+          // practice this reaches exactly one stored record —
+          // Half Hexwell Crown's Regular copy — since the other
+          // twelve reprints were exported under Cold Foil (or
+          // are unowned).
+          if (questFoilOnly) {
+            const effective = parseFinishes(
+              typeof set.finishes === "string" ? set.finishes : row.finishes,
+            );
+            if (
+              Object.keys(effective).some(
+                (f) => !isFoilFinish(f) && f !== "Iconic",
+              )
+            ) {
+              set.finishes = JSON.stringify(
+                foldFinishesToColdFoil(effective),
+              );
+            }
           }
           // Puzzle/lore descriptive sync (see the catalogByUid
           // note above): names, printed numbers, slot order,
@@ -7951,43 +8140,10 @@ export const Actions = {
           return (a.fullName ?? "").localeCompare(b.fullName ?? "");
         });
         sorted.forEach((entry, idx) => {
-          const own = ownership[entry.uid];
-          rows.push({
-            uid: entry.uid,
-            grp: entry.grp,
-            groupKey: groupKeyOf(entry),
-            groupName: entry.setName,
-            groupLabel: groupLabelOf(entry),
-            groupSort: groupSortOf(entry),
-            slotSort: idx,
-            setCode: entry.setCode,
-            family: entry.family,
-            number: entry.number,
-            printed: entry.printed,
-            fullName: entry.fullName ?? entry.name ?? "Unknown card",
-            name: entry.name,
-            rarity: entry.rarity,
-            ink: entry.ink,
-            cost: entry.cost,
-            inkwell: entry.inkwell ? 1 : 0,
-            cardType: entry.type,
-            strength: entry.strength,
-            willpower: entry.willpower,
-            lore: entry.lore,
-            cardText: entry.text,
-            subtypes: entry.subtypes,
-            imageUrl: entry.image,
-            imageBlobKey: null,
-            tcgplayerId:
-              entry.tcg != null
-                ? String(entry.tcg)
-                : (tcgplayerBackfill[entry.uid] ?? null),
-            ownedQty: own?.qty ?? 0,
-            finishes: JSON.stringify(own?.finishes ?? {}),
-            marketValue: own && own.value > 0 ? own.value : null,
-            paidValue: own ? own.paid : null,
-            financeJson: financeJsonOf(own),
-          });
+          // The shared row builder (catalogRowOf) — it also
+          // files a foil-only quest reprint's export copy under
+          // its one real finish (Nov 9, 2026).
+          rows.push(catalogRowOf(entry, idx));
         });
       }
 
@@ -9170,7 +9326,15 @@ export const Actions = {
         .limit(1);
       const row = rows[0];
       if (!row) throw new Error("Card not found");
-      const finishes = parseFinishes(row.finishes);
+      // Foil-only quest reprints (Nov 9, 2026): the detail reads
+      // the same folded record the seed repair writes — a copy
+      // filed under a finish that does not exist for this
+      // printing is presented under its one real finish,
+      // Cold Foil, with its quantity, value and paid intact.
+      const questFoilOnly = FOIL_ONLY_QUEST_REPRINT_UIDS.has(row.uid);
+      const finishes = questFoilOnly
+        ? foldFinishesToColdFoil(parseFinishes(row.finishes))
+        : parseFinishes(row.finishes);
       // Connecting-art group (Nov 9, 2026): this printing's
       // verified joined scene, resolved and scored per finish
       // family by the shared helper.
@@ -9178,7 +9342,9 @@ export const Actions = {
       const artGroup = artGroupInfo
         ? await computeArtGroup(ctx, artGroupInfo.members, row.uid)
         : null;
-      const prices = parseFinance(row.financeJson);
+      const prices = questFoilOnly
+        ? foldFinanceToColdFoil(parseFinance(row.financeJson), finishes)
+        : parseFinance(row.financeJson);
       const money = cardMoney(row);
       // Per-finish money rows tally BOTH counts (Anthony, Nov 9,
       // 2026): qty and valueTotal cover pocket + scene copies so
@@ -9256,6 +9422,7 @@ export const Actions = {
         cardText: row.cardText,
         ownedQty: row.ownedQty,
         finishes,
+        foilOnlyFinish: singleFinishOf(row),
         sceneFinishes: sceneFinishesOf(row),
         // Fall back to the Lorcast snapshot (via the shared
         // chain) when the database carries no price for this
@@ -9423,6 +9590,7 @@ export const Actions = {
           finishes: z.record(z.string(), z.number()),
           marketValue: z.number().nullable(),
           suggestedFinish: z.string(),
+          foilOnlyFinish: z.string().nullable(),
           /** What the vision read actually saw, so the result
               screen can show it and the user can spot a misread
               before adding. */
@@ -9449,6 +9617,7 @@ export const Actions = {
               finishes: z.record(z.string(), z.number()),
               marketValue: z.number().nullable(),
               suggestedFinish: z.string(),
+              foilOnlyFinish: z.string().nullable(),
               readName: z.string(),
               readNumber: z.number().nullable(),
             }),
@@ -9604,6 +9773,7 @@ export const Actions = {
           finishes: parseFinishes(row.finishes),
           marketValue: row.marketValue,
           suggestedFinish,
+          foilOnlyFinish: singleFinishOf(row),
           readName: found.name,
           readNumber: found.collectorNumber,
         };
@@ -9909,6 +10079,7 @@ export const Actions = {
           finishes: z.record(z.string(), z.number()),
           marketValue: z.number().nullable(),
           suggestedFinish: z.string(),
+          foilOnlyFinish: z.string().nullable(),
           readName: z.string(),
           readNumber: z.number().nullable(),
         }),
@@ -9941,6 +10112,7 @@ export const Actions = {
             finishes: parseFinishes(row.finishes),
             marketValue: row.marketValue,
             suggestedFinish,
+            foilOnlyFinish: singleFinishOf(row),
             // The on-device match names the printing itself;
             // readName mirrors it and readNumber stays null so
             // the result screen shows no spurious "read as" note.
@@ -10459,7 +10631,7 @@ export const Actions = {
 
   getLibraryComicDisplay: defineAction({
     description:
-      "The comic ids on display on the user's Library slab wall (max 5). When the user has never chosen, ids is null and the client shows Anthony's standing default: his two signed comics (Aliens #1 and Batman #136).",
+      "The comic ids on display on the comics shelf of SLABS in the Library (max 5). When the user has never chosen, ids is null and the client shows Anthony's standing default: his two signed comics (Aliens #1 and Batman #136).",
     request: z.object({}),
     response: z.object({ ids: z.array(z.string()).nullable() }),
     async handler(ctx) {
@@ -10480,7 +10652,7 @@ export const Actions = {
 
   setLibraryComicDisplay: defineAction({
     description:
-      "Sets which of the user's graded comics are on display on their Library slab wall — up to five comic ids from their own comics; an empty list is a valid, empty wall.",
+      "Sets which of the user's graded comics are on display on the comics shelf of SLABS in their Library — up to five comic ids from their own comics; an empty list is a valid, empty shelf.",
     request: z.object({
       ids: z.array(z.string().min(1).max(60)).max(5),
     }),
@@ -10499,6 +10671,128 @@ export const Actions = {
         .where(eq(schema.collectorProfile.id, profile.id));
       ctx.invalidateQueries();
       return { ok: true };
+    },
+  }),
+
+  getLibrarySlabCardDisplay: defineAction({
+    description:
+      "The graded slab ids on display on the small upper shelf of SLABS in the Library (max 4). When the user has never chosen, ids is null and the client shows the four most recently saved graded slabs.",
+    request: z.object({}),
+    response: z.object({ ids: z.array(z.number()).nullable() }),
+    async handler(ctx) {
+      const profile = await ensureCollectorProfile(ctx);
+      if (!profile.librarySlabCardDisplay) return { ids: null };
+      try {
+        const parsed = JSON.parse(
+          profile.librarySlabCardDisplay,
+        ) as unknown;
+        return {
+          ids: Array.isArray(parsed)
+            ? parsed
+                .filter((x): x is number => typeof x === "number")
+                .slice(0, 4)
+            : null,
+        };
+      } catch {
+        return { ids: null };
+      }
+    },
+  }),
+
+  setLibrarySlabCardDisplay: defineAction({
+    description:
+      "Sets which of the user's graded slabs are on display on the small upper shelf of SLABS in their Library — up to four graded slab ids from their own saved slabs; an empty list is a valid, empty shelf.",
+    request: z.object({
+      ids: z.array(z.number().int().positive()).max(4),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const profile = await ensureCollectorProfile(ctx);
+      const rows = await db.select().from(schema.gradedSlabs);
+      const valid = new Set(rows.map((r) => r.id));
+      const ids = [...new Set(args.ids)].filter((id) => valid.has(id));
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          librarySlabCardDisplay: JSON.stringify(ids),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, profile.id));
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+
+  listAllGradedSlabs: defineAction({
+    description:
+      "Every graded slab saved in the vault, newest first, each with the catalog card it belongs to (game, name, set, number, catalog art, market price) — the source for the SLABS shelves and graded-cards list. Optionally filtered to one grading company (PSA, BGS, SGC, CGC, or TAG).",
+    request: z.object({
+      company: z
+        .enum(["PSA", "BGS", "SGC", "CGC", "TAG"])
+        .nullable()
+        .optional(),
+    }),
+    response: z.object({
+      slabs: z.array(
+        gradedSlabZ.extend({
+          cardId: z.number(),
+          cardGame: z.string(),
+          cardName: z.string(),
+          cardPrinted: z.string(),
+          cardSectionName: z.string(),
+          cardImageUrl: z.string().nullable(),
+          cardPrice: z.number().nullable(),
+        }),
+      ),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = (
+        await db
+          .select()
+          .from(schema.gradedSlabs)
+          .orderBy(desc(schema.gradedSlabs.createdAt))
+      ).filter((r) => !args.company || r.company === args.company);
+      const out: {
+        id: number;
+        company: string;
+        cert: string;
+        grade: string;
+        paid: number | null;
+        qty: number;
+        imageUrl: string | null;
+        imageBackUrl: string | null;
+        imageSource: string | null;
+        onlineLine: string | null;
+        createdAt: number;
+        cardId: number;
+        cardGame: string;
+        cardName: string;
+        cardPrinted: string;
+        cardSectionName: string;
+        cardImageUrl: string | null;
+        cardPrice: number | null;
+      }[] = [];
+      for (const r of rows) {
+        const base = await gradedSlabShape(ctx, r);
+        const cardRows = await db
+          .select()
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.id, r.gameCardId));
+        const card = cardRows[0];
+        out.push({
+          ...base,
+          cardId: r.gameCardId,
+          cardGame: card?.game ?? "",
+          cardName: card?.name ?? "Graded card",
+          cardPrinted: card?.printed ?? "",
+          cardSectionName: card?.sectionName ?? "",
+          cardImageUrl: card?.imageUrl ?? null,
+          cardPrice: card?.price ?? null,
+        });
+      }
+      return { slabs: out };
     },
   }),
 
@@ -12059,19 +12353,28 @@ export const Actions = {
     response: updateResponse,
     async handler(ctx, args): Promise<z.infer<typeof updateResponse>> {
       const db = ctx.db<typeof schema>();
-      const clean: Record<string, number> = {};
-      let total = 0;
-      for (const [finish, qty] of Object.entries(args.finishes)) {
-        if (qty > 0) {
-          clean[finish] = qty;
-          total += qty;
-        }
-      }
       const before = await db
-        .select({ ownedQty: schema.cards.ownedQty })
+        .select({
+          ownedQty: schema.cards.ownedQty,
+          uid: schema.cards.uid,
+        })
         .from(schema.cards)
         .where(eq(schema.cards.id, args.cardId))
         .limit(1);
+      const rawClean: Record<string, number> = {};
+      for (const [finish, qty] of Object.entries(args.finishes)) {
+        if (qty > 0) rawClean[finish] = qty;
+      }
+      // Foil-only quest reprints (Nov 9, 2026): whatever a
+      // caller sends, the copies are filed under the printing's
+      // one real finish — a Regular count for one of these
+      // printings can never be written back into existence.
+      const clean =
+        before[0] && FOIL_ONLY_QUEST_REPRINT_UIDS.has(before[0].uid)
+          ? foldFinishesToColdFoil(rawClean)
+          : rawClean;
+      let total = 0;
+      for (const qty of Object.values(clean)) total += qty;
       await db
         .update(schema.cards)
         .set({ ownedQty: total, finishes: JSON.stringify(clean) })
@@ -12164,16 +12467,20 @@ export const Actions = {
         pockets.find((p) => p.kind === args.pocket) ?? pockets[0];
       if (!target) throw new Error(`Card ${args.cardId} has no pockets`);
       const full = parseFinishes(row.finishes);
-      const finishKey =
-        Object.keys(target.finishes)[0] ??
-        (target.kind === "foil"
-          ? row.grp === "promo"
-            ? "Promo Foil"
-            : "Cold Foil"
-          : target.kind === "single" &&
-              POCKET_FINISH_LABELS.has(target.label)
-            ? target.label
-            : "Regular");
+      const finishKey = FOIL_ONLY_QUEST_REPRINT_UIDS.has(row.uid)
+        ? // Foil-only quest reprints (Nov 9, 2026): the one
+          // pocket's finish is Cold Foil by definition, whatever
+          // a legacy stored record still carries.
+          "Cold Foil"
+        : (Object.keys(target.finishes)[0] ??
+          (target.kind === "foil"
+            ? row.grp === "promo"
+              ? "Promo Foil"
+              : "Cold Foil"
+            : target.kind === "single" &&
+                POCKET_FINISH_LABELS.has(target.label)
+              ? target.label
+              : "Regular"));
       const current = full[finishKey] ?? 0;
       const nextQty = Math.max(
         0,
@@ -12183,14 +12490,19 @@ export const Actions = {
         ...full,
         [finishKey]: nextQty,
       };
-      const clean: Record<string, number> = {};
-      let total = 0;
+      const rawClean: Record<string, number> = {};
       for (const [finish, qty] of Object.entries(merged)) {
-        if (qty > 0) {
-          clean[finish] = qty;
-          total += qty;
-        }
+        if (qty > 0) rawClean[finish] = qty;
       }
+      // Same one-finish guard as updateOwnership (Nov 9, 2026):
+      // a pocket write on a foil-only quest reprint folds any
+      // legacy non-foil entry into Cold Foil instead of
+      // preserving the phantom finish.
+      const clean = FOIL_ONLY_QUEST_REPRINT_UIDS.has(row.uid)
+        ? foldFinishesToColdFoil(rawClean)
+        : rawClean;
+      let total = 0;
+      for (const qty of Object.values(clean)) total += qty;
       await db
         .update(schema.cards)
         .set({ ownedQty: total, finishes: JSON.stringify(clean) })
@@ -22613,6 +22925,7 @@ export const Actions = {
               pockets.find((pk) => pk.kind === "regular")?.label ?? "Regular"
             );
           })(),
+          foilOnlyFinish: singleFinishOf(row),
           artLinked: ART_GROUP_BY_UID.has(row.uid),
         })),
       };
