@@ -1467,3 +1467,30 @@ export const libraryOrders = sqliteTable("library_orders", {
   orderJson: text("order_json").notNull().default("{}"),
   updatedAt: integer("updated_at").notNull().default(0),
 });
+
+/** Cloud backup bookkeeping (Anthony, Nov 9, 2026 — the backup
+    habit he approved: back up on every change, a batched full
+    check about 30 seconds after he finishes making changes, a
+    sync when the app closes, and one daily safety check).
+    Single row (id = 1). `lastChangeAt` is stamped by every
+    collection-changing write; `lastFullSyncAt` is stamped only
+    when a full cloud sync completes and verifies by read-back.
+    A change newer than the last full sync means the debounced /
+    on-close / daily full check still owes the cloud a reconcile
+    — the incremental per-change pushes usually already landed,
+    but this row is what proves a FULL check happened and lets
+    the daily check and the app's open-time catch-up know there
+    is something to verify. Nulls are honest: no row / null
+    stamp = that event has never been recorded. */
+export const backupMeta = sqliteTable("backup_meta", {
+  id: integer("id").primaryKey(),
+  /** ISO instant of the most recent collection change. */
+  lastChangeAt: text("last_change_at"),
+  /** ISO instant of the most recent completed full sync. */
+  lastFullSyncAt: text("last_full_sync_at"),
+  /** Item / copy counts the last full sync verified. */
+  lastSyncItems: integer("last_sync_items"),
+  lastSyncCopies: integer("last_sync_copies"),
+  /** ISO instant the daily backup check last ran. */
+  lastDailyCheckAt: text("last_daily_check_at"),
+});

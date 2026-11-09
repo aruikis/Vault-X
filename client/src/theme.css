@@ -1946,22 +1946,28 @@ body::after {
   text-shadow: 0 0 6px color-mix(in srgb, var(--stepper-color) 65%, transparent);
 }
 .stepper-ring[data-dir="plus"] {
-  --stepper-color: #3ddc74;
+  /* Softened Nov 9, 2026 (Anthony): the original #3ddc74 was
+     too loud — a muted, lower-saturation green, still plainly
+     green. The glow derives from this variable, so the ring's
+     glow character is unchanged, only its intensity. */
+  --stepper-color: #5cb87f;
 }
 .stepper-ring[data-dir="minus"] {
-  --stepper-color: #ff5147;
+  /* Softened Nov 9, 2026 (Anthony): the original #ff5147 was
+     too loud — a muted coral red, still plainly red. */
+  --stepper-color: #e0655c;
 }
 
 /* Zero owned (Anthony, Nov 4, 2026): an owned count of 0 is
-   BOLD and in the MINUS button's exact red (#ff5147, the
-   .stepper-ring[data-dir="minus"] color above) — app-wide,
+   BOLD and in the MINUS button's exact red — app-wide,
    every owned-count display wears this class when its count
    is 0: binder pockets, per-finish counts, the Copies owned
    bar, game copies, sealed owned lines. Non-zero counts keep
-   their normal styling; the steppers themselves are
-   untouched (he called them a fantastic job). */
+   their normal styling. Nov 9, 2026: the red softened with
+   the minus stepper (#ff5147 → #e0655c), so this follows to
+   the same muted coral — the two stay one color by rule. */
 .zero-owned {
-  color: #ff5147 !important;
+  color: #e0655c !important;
   font-weight: 800;
 }
 

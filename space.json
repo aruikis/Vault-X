@@ -2,6 +2,12 @@
   "entry": "client/dist/index.html",
   "managedCronJobs": [
     {
+      "action": "dailyBackupCheck",
+      "id": "lorcana-binder-daily-backup-check",
+      "purpose": "Daily cloud-backup safety check (backup habit Anthony approved Nov 9, 2026: back up on every change, a batched full check ~30 seconds after changes finish, a sync when the app closes, and one daily check): records the check and runs a full sync to the Supabase collection backup whenever a recorded collection change is newer than the last completed full sync or the last full sync is over a day old, so a failed per-change push heals within a day. Runs after the morning re-pricing and audits.",
+      "schedule": "daily 08:15 America/Chicago"
+    },
+    {
       "action": "refreshFinance",
       "id": "lorcana-binder-daily-finance-refresh",
       "purpose": "Daily re-pricing of the collection's market values; appends one point per day to the value-over-time history. Paid amounts stay as recorded.",

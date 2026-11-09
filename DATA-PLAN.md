@@ -1189,3 +1189,169 @@ What changed (client only; no schema, no server changes, no data touched, the No
 - New warmGameCutouts export in cutoutImg.tsx + two effects in the profile component (App.tsx): when the Funko or Lego owned-items query lands, each item's pipeline (stored check, then live chain when needed) starts warming immediately on the profile — the Library shelf then rides promises already in flight instead of starting cold. Seed-cutout items skip the warm-up (already instant).
 - NOT shipped (held, see above): the sign repositioning and the routed board profile — both were reverted to the exact v1.106.0 source before this build shipped; the shelf visuals are byte-identical to v1.106.0. They return only when Anthony picks a routed-edge profile and lifts the hold.
 - Version 1.106.0 → 1.107.0 (minor) with its changelog entry, which describes the loading fix only and states the shelves themselves are unchanged.
+
+### Cloud backup habit — every change + 30s batch + on-close + daily check (Nov 9, 2026)
+**Requested by**: Anthony asked how often the cloud backup runs and what good backup habits would be ("Every hour, every 10 minutes?"), then approved Jarvis's recommendation verbatim in substance: backup on every change, with a quick batch after about 30 seconds of finishing, plus a sync when the app closes and one daily check ("Yes.").
+**Found before this build**: there was NO timer at all. The backup was kept current only by (a) incremental per-change pushes inside two editors (Lorcana `updateOwnership`/`adjustPocketCount` and sealed `setSealedQty`) and (b) the manual "Back up now" full sync. Everything else — Pokémon/Magic/Star Wars Unlimited/Funko/Lego/Topps owned counts (`setGameCardOwned`) and all graded-slab records — was never written to the Supabase `collection_items` backup at all, and nothing reconciled a failed push.
+**Applied**:
+- **Coverage (server, `buildLocalCloudItems`)**: the full backup row set now also includes one row per owned other-games catalog item (`game:{id}`, kind "game"), a separate row for Lego sealed copies (`game:{id}:sealed` — sealed-vs-opened never merged), and one row per graded slab (`slab:{company}:{cert}`, kind "slab", meta carries gameCardId/company/cert/grade/paid). Restore (`restoreCollectionFromCloud`, still fresh-device-only) applies game rows onto empty catalog rows and re-creates slab records from meta without double-counting ownedQty.
+- **On every change (server)**: new incremental `syncGameCardToCloud` (the item's opened row, sealed row, and all its slab rows; deletes rows whose count hit zero) wired into `setGameCardOwned`, `addGradedSlab`, `removeGradedSlab`, `setGradedSlabQty`, `updateGradedSlabPaid`. The existing Lorcana/sealed incremental pushes are unchanged; trade/cash/marketplace settlement also stamps a change.
+- **Bookkeeping (server)**: new `backup_meta` table (migration 0077, single row id=1): `last_change_at` stamped by every collection-changing write via `markBackupDirty`, `last_full_sync_at` (+ verified item/copy counts) stamped only when a full sync completes its read-back verification, `last_daily_check_at` stamped by the daily check. `getBackupStatus` now also returns these stamps plus `needsFullCheck` (a recorded change newer than the last full sync).
+- **30-second batch + on-close (client)**: new `BackupAutoSync` component at the app root (renders nothing) watches the react-query mutation cache; a successful collection-changing mutation arms a 30s timer (each new change restarts it, so a cataloging burst costs one full check ~30s after the last tap) that runs `syncCollectionBackup`. On `visibilitychange`→hidden or `pagehide` with a check armed, it flushes immediately. On open it reads `getBackupStatus` once and arms the same check when `needsFullCheck` is already true (heals a previous session's missed push).
+- **Daily check (server + schedule)**: new `dailyBackupCheck` action records the check and runs a full sync when a change is owed or the last full sync is >23h old; a check with nothing owed does not rewrite the cloud. Scheduled daily 08:15 America/Chicago (`lorcana-binder-daily-backup-check` in space.json), after the morning re-pricing and audits.
+- **Settings**: Your data & backups now states the habit in plain words (every change backed up at once; full check ~30s after finishing; check on close; daily safety check) and the Cloud backup block shows the last full check time, whether a newer change is waiting for its check, and when the daily check last ran. Version 1.108.0.
+
+## v1.109.0 — Connecting artwork (conjoined art) + softer steppers (Nov 9, 2026)
+
+- Connecting-art linkage is a static, verified table in `server/src/actions.ts`
+  (`ART_GROUPS`, keyed by catalog uid, members in left-to-right scene order):
+  29 groups / 75 printings across sets 1–13. Source spine: Jarvis web research
+  (Mushu Report "Conjoined Art" catalogue cross-checked against the Fandom
+  Continuous Art category and collector coverage; report at
+  ~/workspace/research_notes/lorcana-connecting-art-cards-20261109-1458/report.md).
+  Every group was then verified from the actual Ravensburger artwork in this
+  build: all 75 member scans were downloaded, joined edge-to-edge, and the
+  seams inspected (all 29 joins confirmed in the research's stated order).
+  Deliberately NOT linked (research left them unverified): Inklands
+  Flotsam/Jetsam "Riffraff" #72/#76, Reign of Jafar Chaca #88/Tipo #89, Wilds
+  Unknown Ariel #18/Prince Eric #8. Chase-only scenes are keyed to the exact
+  printings: Inklands Enchanted Hook #214/Pan #215 and Fabled Iconic Minnie
+  #241/Mickey #242 — their regular printings carry different art and stay
+  unlinked, as do all reprints (e.g. Fabled's Steamboat Pilot and Dwarfs).
+  The Mickey #89 (Set 1) + Pete #116 (Set 5) pair crosses sets.
+- Payloads: `cardLite.artLink {size, position}` (pockets), `getCard.artGroup`
+  (members in scene order with owned finishes + per-finish-family completion;
+  the Regular line is scored only when a member printing could have a Regular
+  version, and the foil-family line is labeled Enchanted/Iconic for those
+  chase-only scenes), `searchCards.artLinked` boolean. No schema/migration —
+  linkage is catalog knowledge, not user data; owned counts untouched.
+- Client: a small chain-link insignia (ArtLinkInsignia) overlaid bottom-left
+  on the card art (stacked just above the finish-label pill) in both pocket
+  renderers (set grid `Pocket`, flip binder `FlipPocket`), on both finishes'
+  pockets; the ×N count keeps the upper-right exclusively. Search result rows
+  (text-only) carry the same glyph inline. Detail page: "Pairs with" strip
+  (ArtGroupStrip) under Best Offer — joined scene (members edge-to-edge in
+  order, own card ringed, ghosted when unowned, clean placeholder when art is
+  unsourced), per-member owned finishes, and completion lines ("Regular pair:
+  complete ✓" / "Foil pair: 0 of 2 owned"). Partner taps open the partner's
+  detail as a peel layer (own pushed history entry, `lorcanaPartnerCard`):
+  one Back returns to the first card; hopping within a scene replaces the
+  partner entry instead of stacking.
+- Stepper softening (Anthony, Nov 9, 2026): plus green #3ddc74 → #5cb87f,
+  minus red #ff5147 → #e0655c, both in `theme.css` `.stepper-ring` (the glow
+  derives from the same variable, so the hollow glowing-ring design is
+  unchanged, only intensity). `.zero-owned` red follows to #e0655c by its
+  standing same-color rule; the one hardcoded save-error red in App.tsx
+  matched to #e0655c as well. Before/after shades are also in the in-app
+  changelog for 1.109.0.
+- Verified live in the audit probe: Ellie #75 search row glyph; her detail
+  strip (joined Carl+Elli scene, Regular ×6 / Regular ×11 member lines,
+  "Regular pair: complete ✓", "Foil pair: 0 of 2 owned"); tap-through to
+  Carl's detail and Back returning to Ellie; flip-binder page 13 showing the
+  insignia on both Ellie pockets (and Carl's). Server probes: getCard for
+  Ellie/Carl (group order + Regular 2/2 complete), Iconic Minnie #241
+  (Iconic-only status line), Sleepy #44 in the 8-card panorama (Regular 6/8,
+  Foil 2/8); searchCards flags only the exact linked printings.
+- Sequenced next (own version, per Anthony's Nov 9 queue): the Hyperia City
+  Full Puzzle Art fix (v1.110.0). Shelf/Library restyling remains HELD.
+
+## v1.110.0 — Joined-scene display cards (Nov 9, 2026, Anthony's locked layout)
+
+- Anthony compared layouts on a live call and LOCKED his own: the joined
+  scene is a separate full-width DISPLAY card in the set-page grid,
+  immediately after the group's latest member's last pocket in that section
+  (supersedes the earlier "grid unchanged" design and the swipe-between-views
+  idea — neither shipped; the swipe variant was never built). Non-foil scene
+  first, foil scene stacked below, both visible at once; Enchanted/Iconic
+  scenes show their single finish row labeled. Display-only: no stepper, no
+  count, excluded from section totals (Set 13 total stayed 456 pockets).
+- Server: `getSection` response gained `scenes` (anchor card id + pocket,
+  members with `inThisSection` flags, shared `finishStatus`). Group math was
+  factored into `computeArtGroup(ctx, memberUids, selfUid)` used by both
+  getCard and getSection. Anchor = the last pocket of the group present in
+  the (filtered) pocket list, so filtered views anchor correctly and a
+  fully-filtered-out group shows no card. Cross-set Mickey/Pete: the scene
+  renders in each member's own section after that section's latest member,
+  with the foreign member noted by name + set on the card.
+- Client: `SceneDisplayCard` (insignia header, member names/numbers,
+  per-finish completion, foreign-member note) interleaved into the section
+  grid at `col-span-full`; `JoinedSceneRows` shared between the grid card
+  and the detail `ArtGroupStrip` — finish rows from `finishStatus` (regular
+  row plain; foil row carries the foil-img treatment + foil-overlay;
+  chase-only scenes get one labeled row), member slots keep the clean
+  placeholder for unsourced art and the scene labels itself
+  "Artwork incomplete" once all slots settle with any missing.
+- Verified live in the audit probe on the Shimmering Skies grid: Rutt #4 /
+  Tuke #7 pockets (insignia bottom-left, ×N top-right, softened stepper
+  rings visible — muted coral minus / muted green plus) followed by the
+  scene card with REGULAR SCENE and FOIL SCENE stacked and "Regular scene:
+  complete ✓ · Foil scene: 0 of 2 owned"; the grid continues with #8 after
+  it. Server probes: Set 13 returns its 3 scenes anchored at each group's
+  last foil pocket; getCard regression-checked after the refactor.
+
+## NEXT (queued): Hyperia City Full Puzzle Art fix — ground truth on file
+
+- Correct scene (Jarvis web check + Anthony-supplied photo): Miguel Rivera
+  (Coco) with his white guitar amid magical swirls, fantastical city
+  buildings and marigold petals; art by Alejandro Hernandez; assembled from
+  Hyperia City's OWN nine puzzle pieces.
+- Anthony's files: original upload ~/workspace/user/files/9670_0_frbu.jpg;
+  Jarvis's cleaned composite ~/workspace/lorcana/hyperia-full-puzzle-art.png
+  (scene/layout ground truth).
+- PRESENTATION CORRECTION (Anthony, Nov 9, 2026, later call; also in
+  MEMORY.md): the nine pieces display kept SEPARATE — gaps and rounded
+  corners showing, like cards laid in a book — NOT blended edge-to-edge.
+  His sharper cropped version of the photo is the definitive reference;
+  cleanup limited to light smoothing of jaggy edges. So the fix should make
+  the Full Puzzle Art render Hyperia's own nine piece images as separate
+  tiles (the CompositeArt grid treatment) showing the Miguel scene — and
+  diagnose in the build notes what the entry currently shows instead.
+  Do NOT regress Chapter One's verified Mickey Mouse Full Puzzle Art.
+
+## v1.111.0 — Hyperia City Full Puzzle Art: root cause found + Anthony's photo shipped (Nov 9, 2026)
+
+DIAGNOSIS (verified in the rendered app + from the raw scans, Nov 9, 2026 —
+this is why three earlier fix attempts still looked broken on Anthony's
+phone): the Hyperia Full Puzzle Art entry (uid puzzle:14:full, cardId 3714)
+carries NO photo — TCGplayer's only "Set of 9" product picture (723665) is a
+different product's photo — so it rendered the assembled-from-pieces
+composite. But Hyperia's nine pieces are LANDSCAPE cards (TCGplayer scans
+1000x716), and CompositeArt squeezes each scan into a PORTRAIT cell
+(object-cover inside the 63/88 pocket grid), center-cropping roughly half of
+every slice: the joined picture's seams never continue, Miguel's face and
+guitar land in the wrong bands, and at detail-page size it reads as a
+misaligned patchwork. The piece scans themselves are correct (verified:
+724315 Middle Center = Miguel's torso/guitar, 724318 Bottom Middle = guitar
+base + marigold petals). Every other 9-piece set's pieces are PORTRAIT
+cards, which is why their composites join correctly and only Hyperia broke.
+
+FIX: Anthony supplied his own photo of the nine physical pieces and
+directed the exact presentation — nine SEPARATE cards in a 3x3 layout, thin
+gaps and rounded corners kept, pieces NOT joined edge-to-edge, clean light
+background, "like cards laid in a book". His definitive enhanced file:
+~/workspace/lorcana/hyperia-full-puzzle-art-final.png (2070x1410; his
+untouched crop: ~/workspace/user/files/images_d92fe2cb-a391-4f_2_0l48.jpg;
+earlier edge-joined and v2 cleanups superseded at his direction — do not
+use). Shipped as a 204 KB webp at client/src/assets/puzzle/
+hyperia-full-puzzle-art.webp. Plumbing: server BUNDLED_ART_BY_UID
+(uid -> key "hyperia-full") + bundledArtForRow; cardLite.bundledArt and
+getCard.bundledArt carry the key; the client renders the bundled image
+ahead of the entry's own art and the composite in the set-grid Pocket
+(object-contain on its light ground, ghosted while unowned), the
+flip-binder FlipPocket (which previously showed only "#Full" for this
+entry), and the card detail hero (landscape frame at the photo's natural
+ratio). No counts, pockets, or totals change.
+
+ALL-SETS FULL PUZZLE ART AUDIT (same pass, via getSection + cardImage per
+Full entry): S1 Mickey Mouse — own assembled photo, renders it (Anthony
+verified GOOD Nov 5, 2026; untouched). S2 Minnie (WDWNT assembled photo),
+S4 Ursula, S6 Stitch, S9 Powerline, S11 Snowball Fight, S12, S13 Winnie the
+Pooh — each carries its real assembled photo and prefers it; their
+composites are fallback-only (all portrait pieces except S11's landscape
+Snowball pieces, whose fallback would crop the same way if its photo ever
+failed — not user-visible today, noted honestly). S5 Shimmering Skies — no
+piece scans exist anywhere; S7 Archazia's Island + S8 Reign of Jafar — the
+pictures live on the Lore cards' BACKS and only front scans exist; S10
+Whispers in the Well — no scans anywhere: those four Full entries honestly
+keep the clean name-plate placeholder. S3 Into the Inklands has no puzzle
+inserts at all (no section, by design).

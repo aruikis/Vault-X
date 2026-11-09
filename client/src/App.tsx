@@ -134,6 +134,7 @@ type ThemeId,
 } from "./themes";
 import tcgplayerLogo from "./assets/tcgplayer-logo.png";
 import vaultXRingArtwork from "./assets/vault-x-ring-artwork.webp";
+import hyperiaFullPuzzleArt from "./assets/puzzle/hyperia-full-puzzle-art.webp";
 import setLogo1 from "./assets/set-logos/set-1.webp";
 import setLogo2 from "./assets/set-logos/set-2.webp";
 import setLogo3 from "./assets/set-logos/set-3.webp";
@@ -550,6 +551,27 @@ function hasFoil(finishes: Record<string, number>): boolean {
 }
 
 /** One binder pocket: real card art, full color when owned, ghosted when missing. */
+/** Owner-supplied display artwork bundled with the app
+    (Anthony, Nov 9, 2026): for the rare entry whose correct
+    picture exists in no fetchable source, the server sends a
+    bundledArt key and every surface renders the shipped
+    image INSTEAD of the entry's fetched art or its
+    assembled-from-pieces composite. "hyperia-full" is
+    Anthony's own photo of the nine physical Hyperia City
+    puzzle pieces laid out 3x3 — separate cards, thin gaps,
+    rounded corners, clean light background, exactly as he
+    directed — because the composite center-crops that set's
+    LANDSCAPE pieces into portrait cells and the joined
+    picture never lines up (the three-time-reported bug this
+    replaces). */
+const BUNDLED_ART_IMAGES: Record<string, string> = {
+  "hyperia-full": hyperiaFullPuzzleArt,
+};
+
+function bundledArtSrc(key: string | null | undefined): string | null {
+  return key ? (BUNDLED_ART_IMAGES[key] ?? null) : null;
+}
+
 /** One cell of an assembled Full Puzzle Art composite: the
     piece card's own cached art, so the joined artwork is
     built from the exact scans the piece pockets show. */
@@ -601,6 +623,37 @@ function CompositeArt({
         <CompositeCell key={id} id={id} kind={kind} enabled={enabled} />
       ))}
     </div>
+  );
+}
+
+/** Connecting-art insignia (Anthony, Nov 9, 2026): a small
+    link glyph overlaid ON the card artwork — the duels.ink
+    ability-insignia treatment — flagging that this card's art
+    joins a bigger scene. It sits in the bottom-left of the
+    artwork (stacked just above the pocket's finish label,
+    which already holds the very corner), never touches the
+    ×N count badge in the upper-right, and is a pure overlay:
+    no layout shift, no caption. */
+function ArtLinkInsignia({ px }: { px: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex items-center justify-center rounded-full bg-black/60 text-[var(--gold-soft)] shadow ring-1 ring-white/25"
+      style={{ width: px, height: px }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ width: px * 0.68, height: px * 0.68 }}
+      >
+        <path d="M10 14a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 5.43" />
+        <path d="M14 10a5 5 0 0 0-7.07 0L4.1 12.83a5 5 0 0 0 7.07 7.07l1.33-1.33" />
+      </svg>
+    </span>
   );
 }
 
@@ -691,7 +744,9 @@ const Pocket = memo(function Pocket({
   const isFoilPocket = card.pocket === "foil" || hasFoil(card.finishes);
   const pocketAria = `${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
     isFoilPocket ? ", foil" : ""
-  }, ${owned ? `owned, ${shownQty} copies` : "missing"}`;
+  }, ${owned ? `owned, ${shownQty} copies` : "missing"}${
+    card.artLink ? ", artwork joins a larger scene" : ""
+  }`;
   const cardButton = (
     <button
       ref={rootRef}
@@ -704,7 +759,17 @@ const Pocket = memo(function Pocket({
       className="group block w-full scroll-mt-28 text-left focus:outline-none"
     >
       <div className="pocket-sheen relative aspect-[63/88] overflow-hidden rounded-[8px] border border-[var(--pocket-edge)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_2px_6px_rgba(0,0,0,0.45)]">
-        {url ? (
+        {bundledArtSrc(card.bundledArt) ? (
+          <img
+            src={bundledArtSrc(card.bundledArt) ?? ""}
+            alt={owned ? card.fullName : `${card.fullName} (missing)`}
+            loading="lazy"
+            decoding="async"
+            className={`h-full w-full bg-[#f5f1e8] object-contain ${
+              owned ? "" : "ghost-img"
+            }`}
+          />
+        ) : url ? (
           <img
             src={url}
             alt={owned ? card.fullName : `${card.fullName} (missing)`}
@@ -765,6 +830,11 @@ const Pocket = memo(function Pocket({
         >
           {card.pocketLabel}
         </span>
+        {card.artLink ? (
+          <span className="absolute bottom-6 left-1">
+            <ArtLinkInsignia px={17} />
+          </span>
+        ) : null}
       </div>
       {cols !== 2 ? (
         <div className="px-0.5 pt-1">
@@ -890,12 +960,356 @@ function HoverCard({
 }
 
 /** Card detail sheet: big art, stats, rules text, and the ownership editor. */
+/** One member's artwork inside a joined scene: the member's
+    own cached full art, or the clean name placeholder while
+    it loads / when no art is sourced — never a broken image
+    (the standing placeholder rule). Reports its art state up
+    so the scene can label itself incomplete when a member
+    has no sourced art. The foil treatment (foil-img) applies
+    on the scene's foil row for owned copies. */
+function ArtGroupMemberArt({
+  cardId,
+  name,
+  owned,
+  foil = false,
+  onArtState,
+}: {
+  cardId: number;
+  name: string;
+  owned: boolean;
+  foil?: boolean;
+  onArtState?: (hasArt: boolean) => void;
+}) {
+  const { url, settled } = useCachedArt(cardId, "full", true);
+  const sinkRef = useRef(onArtState);
+  sinkRef.current = onArtState;
+  useEffect(() => {
+    if (url) sinkRef.current?.(true);
+    else if (settled) sinkRef.current?.(false);
+  }, [url, settled]);
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        loading="lazy"
+        decoding="async"
+        className={`h-full w-full object-cover ${
+          owned ? (foil ? "foil-img" : "") : "ghost-img"
+        }`}
+      />
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-black/30 p-1">
+      <span className="text-center text-[9px] leading-tight text-[var(--dim)]">
+        {settled ? name : "Loading art…"}
+      </span>
+    </div>
+  );
+}
+
+type SceneMember = {
+  id: number;
+  fullName: string;
+  printed: string;
+  groupName: string;
+  ownedQty: number;
+  finishes: Record<string, number>;
+  isSelf: boolean;
+};
+type SceneFinishStatus = {
+  key: string;
+  label: string;
+  owned: number;
+  total: number;
+  complete: boolean;
+};
+
+/** The joined artwork rows of a connecting-art scene
+    (Anthony, Nov 9, 2026, locked layout): the members' arts
+    edge-to-edge in scene order, the non-foil scene first and
+    the foil scene stacked below it — both visible at once,
+    no swipe or toggle. Chase-only scenes carry the single
+    finish row that exists, labeled Enchanted or Iconic. A
+    member with no sourced art keeps a clean placeholder
+    slot, and once every slot has settled the scene labels
+    itself artwork-incomplete instead of ever showing a
+    broken image. Tapping a member opens its detail. */
+function JoinedSceneRows({
+  members,
+  finishStatus,
+  onOpenMember,
+}: {
+  members: SceneMember[];
+  finishStatus: SceneFinishStatus[];
+  onOpenMember: (id: number) => void;
+}) {
+  const [artState, setArtState] = useState<Record<number, boolean>>({});
+  const report = useCallback((id: number, has: boolean) => {
+    setArtState((prev) =>
+      prev[id] === has ? prev : { ...prev, [id]: has },
+    );
+  }, []);
+  const allSettled = members.every((m) => artState[m.id] != null);
+  const incomplete =
+    allSettled && members.some((m) => artState[m.id] === false);
+  return (
+    <div>
+      {finishStatus.map((s) => {
+        const foilRow = s.key === "foil";
+        return (
+          <div key={s.key} className="mt-2.5 first:mt-0">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--dim)]">
+              {s.label} scene
+            </p>
+            <div className="relative flex overflow-hidden rounded-lg border border-white/10">
+              {members.map((m) => {
+                const art = (
+                  <ArtGroupMemberArt
+                    cardId={m.id}
+                    name={m.fullName}
+                    owned={m.ownedQty > 0}
+                    foil={foilRow}
+                    onArtState={(has) => report(m.id, has)}
+                  />
+                );
+                const cls = `relative block aspect-[63/88] min-w-0 flex-1 ${
+                  m.isSelf
+                    ? "shadow-[inset_0_0_0_2px_var(--gold)]"
+                    : ""
+                }`;
+                return m.isSelf ? (
+                  <div key={m.id} className={cls} aria-current="true">
+                    {art}
+                  </div>
+                ) : (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onOpenMember(m.id)}
+                    aria-label={`Open ${m.fullName}, number ${m.printed}`}
+                    className={`${cls} focus:outline-none`}
+                  >
+                    {art}
+                  </button>
+                );
+              })}
+              {foilRow ? (
+                <span aria-hidden="true" className="foil-overlay" />
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+      {incomplete ? (
+        <p className="mt-1.5 text-[11px] font-medium text-[var(--dim)]">
+          Artwork incomplete — one piece has no sourced art yet.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Pairs with" strip (Anthony, Nov 9, 2026): shown on the
+    detail page of every verified connecting-art printing. The
+    members' artworks sit edge-to-edge in scene order — the
+    joined wide scene, exactly as the physical cards join —
+    each member's owned status shows per finish underneath,
+    and the group's completion is scored per finish family.
+    Tapping a member opens its own detail page (peel layer:
+    Back returns to this card). */
+function ArtGroupStrip({
+  group,
+  selfGroupName,
+  onOpenPartner,
+}: {
+  group: NonNullable<CardDetail["artGroup"]>;
+  selfGroupName: string;
+  onOpenPartner: (id: number) => void;
+}) {
+  const partner =
+    group.size === 2
+      ? group.members.find((m) => !m.isSelf)
+      : undefined;
+  return (
+    <section
+      aria-label="Connecting artwork"
+      className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
+    >
+      <div className="flex items-center gap-2">
+        <ArtLinkInsignia px={20} />
+        <h3 className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">
+          {partner
+            ? `Pairs with ${partner.fullName} · #${partner.printed}`
+            : `Artwork joins a ${group.size}-card scene`}
+        </h3>
+      </div>
+      <div className="mt-3">
+        <JoinedSceneRows
+          members={group.members}
+          finishStatus={group.finishStatus}
+          onOpenMember={onOpenPartner}
+        />
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {group.members.map((m) => {
+          const finishBits = Object.entries(m.finishes)
+            .filter(([, q]) => q > 0)
+            .map(([f, q]) => `${f} ×${q}`)
+            .join(" · ");
+          const line = (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] text-[var(--text)]">
+                  {m.fullName} · #{m.printed}
+                  {m.isSelf ? " (this card)" : ""}
+                </span>
+                {m.groupName !== selfGroupName ? (
+                  <span className="block text-[11px] text-[var(--dim)]">
+                    {m.groupName}
+                  </span>
+                ) : null}
+              </span>
+              <span
+                className={`shrink-0 text-xs font-semibold ${
+                  m.ownedQty > 0
+                    ? "text-[var(--gold-soft)]"
+                    : "text-[var(--ghost)]"
+                }`}
+              >
+                {m.ownedQty > 0 ? finishBits || `Owned ×${m.ownedQty}` : "Missing"}
+              </span>
+            </>
+          );
+          return (
+            <li key={m.id}>
+              {m.isSelf ? (
+                <div className="flex items-center justify-between gap-2">
+                  {line}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenPartner(m.id)}
+                  aria-label={`Open ${m.fullName}, number ${m.printed}`}
+                  className="flex w-full items-center justify-between gap-2 text-left focus:outline-none"
+                >
+                  {line}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-3 space-y-1 border-t border-[var(--border)] pt-2.5">
+        {group.finishStatus.map((s) => (
+          <p
+            key={s.key}
+            className={`text-[13px] font-semibold ${
+              s.complete ? "text-[var(--gold-soft)]" : "text-[var(--dim)]"
+            }`}
+          >
+            {s.label} {group.size === 2 ? "pair" : "scene"}:{" "}
+            {s.complete
+              ? "complete ✓"
+              : `${s.owned} of ${s.total} owned`}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Joined-scene display card for the set-page grid
+    (Anthony, Nov 9, 2026, locked layout): ONE separate
+    full-width display card rendered immediately after the
+    group's latest member's last pocket in the section —
+    right in front of your face, impossible to miss when
+    hunting a master set. It is display-only: no stepper, no
+    owned count of its own, never a collectible pocket and
+    never counted in set totals. The members' own pockets
+    above it are untouched. Shows the non-foil scene first
+    and the foil scene below it (JoinedSceneRows), the
+    connector insignia, the members by name and number —
+    noting any member that lives in another set — and the
+    group's per-finish completion. */
+function SceneDisplayCard({
+  scene,
+  onOpen,
+}: {
+  scene: SectionData["scenes"][number];
+  onOpen: (id: number) => void;
+}) {
+  const foreign = scene.members.filter((m) => !m.inThisSection);
+  return (
+    <section
+      aria-label={`Connected artwork, ${scene.size}-card scene: ${scene.members
+        .map((m) => m.fullName)
+        .join(", ")}`}
+      className="rounded-xl border border-[var(--gold)]/45 bg-[var(--bg)] p-2.5 sm:p-3"
+    >
+      <div className="flex items-center gap-2">
+        <ArtLinkInsignia px={20} />
+        <h3 className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">
+          Connected artwork — {scene.size}-card scene
+        </h3>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+        {scene.members
+          .map(
+            (m) =>
+              `${m.fullName.split(" - ")[0]} #${m.printed.split("/")[0]}${
+                m.inThisSection ? "" : ` (${m.groupName})`
+              }`,
+          )
+          .join(" · ")}
+      </p>
+      <div className="mt-2">
+        <JoinedSceneRows
+          members={scene.members}
+          finishStatus={scene.finishStatus}
+          onOpenMember={onOpen}
+        />
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 border-t border-[var(--border)] pt-2">
+        {scene.finishStatus.map((s) => (
+          <p
+            key={s.key}
+            className={`text-xs font-semibold ${
+              s.complete ? "text-[var(--gold-soft)]" : "text-[var(--dim)]"
+            }`}
+          >
+            {s.label} scene:{" "}
+            {s.complete ? "complete ✓" : `${s.owned} of ${s.total} owned`}
+          </p>
+        ))}
+      </div>
+      {foreign.length > 0 ? (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--dim)]">
+          {foreign.map((m) => m.fullName.split(" - ")[0]).join(" and ")}{" "}
+          {foreign.length === 1 ? "lives" : "live"} in{" "}
+          {foreign.map((m) => m.groupName).join(" and ")} —{" "}
+          {foreign.length === 1 ? "its" : "their"} pocket is in that
+          set&rsquo;s binder, not this one.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function CardSheet({
   cardId,
   onClose,
+  onOpenPartner,
 }: {
   cardId: number;
   onClose: () => void;
+  /** Set when this sheet is itself a connecting-art partner
+      layer: scene-member taps route to the ROOT sheet's
+      partner navigation so hopping around a scene replaces
+      the one partner entry instead of stacking deeper. */
+  onOpenPartner?: (id: number) => void;
 }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
@@ -904,6 +1318,81 @@ function CardSheet({
   });
   // Full-resolution art, cached on-device from this view onward.
   const { url, settled: artSettled } = useCachedArt(cardId, "full", true);
+  // Connecting-art partner navigation (Nov 9, 2026): a scene
+  // partner opens as a PEEL layer over this sheet — its own
+  // pushed history entry (the useOwnEntryWindow pattern), so
+  // one Back returns to THIS card and the next Back closes the
+  // sheet, inside the three-back budget. Seeded from the
+  // surviving entry so a refresh restores the partner in
+  // place. A sheet that IS the partner layer receives
+  // onOpenPartner from its parent and never runs this itself.
+  const [partnerId, setPartnerId] = useState<number | null>(() => {
+    if (onOpenPartner) return null;
+    const v = readNavState()?.lorcanaPartnerCard;
+    return typeof v === "number" && v !== cardId ? v : null;
+  });
+  const partnerPushedRef = useRef(false);
+  const openPartner = useCallback(
+    (id: number) => {
+      if (onOpenPartner) {
+        onOpenPartner(id);
+        return;
+      }
+      if (id === cardId) return;
+      hapticTick();
+      const cur = readNavState() ?? {};
+      if (partnerId != null) {
+        // Hopping within the scene: replace the partner entry.
+        replaceNavState({ ...cur, lorcanaPartnerCard: id });
+        setPartnerId(id);
+        return;
+      }
+      try {
+        window.history.pushState(
+          {
+            ...cur,
+            lorcanaPartnerCard: id,
+            vxWin: "lorcanaPartnerCard",
+            vxDepth:
+              (typeof cur.vxDepth === "number" &&
+              Number.isFinite(cur.vxDepth)
+                ? cur.vxDepth
+                : 0) + 1,
+          },
+          "",
+        );
+        partnerPushedRef.current = true;
+      } catch {
+        partnerPushedRef.current = false;
+      }
+      setPartnerId(id);
+    },
+    [cardId, onOpenPartner, partnerId],
+  );
+  const closePartner = useCallback(() => {
+    if (partnerPushedRef.current) {
+      partnerPushedRef.current = false;
+      try {
+        window.history.back();
+        return;
+      } catch {
+        // fall through to the in-place close
+      }
+    }
+    scrubWindowKeys(["lorcanaPartnerCard"]);
+    setPartnerId(null);
+  }, []);
+  useEffect(() => {
+    if (onOpenPartner) return;
+    const onPopState = () => {
+      if (readNavState()?.lorcanaPartnerCard == null) {
+        partnerPushedRef.current = false;
+        setPartnerId(null);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [onOpenPartner]);
   const [finishes, setFinishes] = useState<Record<string, number> | null>(
     null,
   );
@@ -1119,7 +1608,17 @@ function CardSheet({
             </div>
 
             <div className="mt-2">
-              {url ? (
+              {bundledArtSrc(card.bundledArt) ? (
+                <div className="mx-auto w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 bg-[#f5f1e8] shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
+                  <img
+                    src={bundledArtSrc(card.bundledArt) ?? ""}
+                    alt={card.fullName}
+                    className={`block h-auto w-full ${
+                      card.ownedQty === 0 ? "ghost-img" : ""
+                    }`}
+                  />
+                </div>
+              ) : url ? (
                 <HoverCard
                   url={url}
                   alt={card.fullName}
@@ -1214,6 +1713,14 @@ function CardSheet({
             ) : (
               <BestOfferFallback name={card.fullName} />
             )}
+
+            {card.artGroup ? (
+              <ArtGroupStrip
+                group={card.artGroup}
+                selfGroupName={card.groupName}
+                onOpenPartner={openPartner}
+              />
+            ) : null}
 
             <div
               className="mt-4 flex rounded-full border border-[var(--border)] bg-[var(--bg)] p-1"
@@ -1436,6 +1943,21 @@ function CardSheet({
           </>
         )}
       </div>
+      {/* Connecting-art partner layer (Nov 9, 2026): the tapped
+          scene partner's own detail sheet, peeled over this
+          one. Its taps stop here so they never reach this
+          sheet's backdrop-close; its own Back/Close returns to
+          this card via closePartner. */}
+      {partnerId != null ? (
+        <div onClick={(e) => e.stopPropagation()}>
+          <CardSheet
+            key={partnerId}
+            cardId={partnerId}
+            onClose={closePartner}
+            onOpenPartner={openPartner}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -13449,7 +13971,7 @@ function ValuePrivacySwitch() {
         either place and both agree.
       </p>
       {saveError ? (
-        <p className="mt-2 text-xs font-semibold text-[#ff5147]">
+        <p className="mt-2 text-xs font-semibold text-[#e0655c]">
           {saveError}
         </p>
       ) : null}
@@ -14277,8 +14799,12 @@ function SettingsPanel({
   };
 
   // Cloud backup status (live from the server) + a manual
-  // "Back up now" that runs the full sync on demand. The backup
-  // also updates on its own whenever a quantity changes.
+  // "Back up now" that runs the full sync on demand. On its own
+  // the backup follows the Nov 9, 2026 habit: every change is
+  // pushed the moment it saves, a full check runs ~30 seconds
+  // after changes finish and again when the app closes
+  // (BackupAutoSync at the app root), and a daily safety check
+  // runs server-side each morning.
   const backup = useQuery({
     queryKey: ["backupStatus"],
     queryFn: () => api.getBackupStatus({}),
@@ -15019,10 +15545,18 @@ function SettingsPanel({
             account — not only on this phone.
           </li>
           <li>
-            Every card, sealed product, and graded comic you log is
-            also backed up to the Vault X cloud server, and the
-            backup updates on its own whenever your collection
-            changes.
+            Everything you log is backed up to the Vault X cloud
+            server — Lorcana cards, sealed products, graded
+            comics, and your Pokémon, Magic, Star Wars, Funko,
+            Lego, and Topps items and graded slabs too.
+          </li>
+          <li>
+            How the backup runs: every change is sent to the cloud
+            the moment you make it. About 30 seconds after you
+            finish making changes, the app runs one full check
+            that the whole backup matches. Closing the app runs
+            that check right away, and a daily safety check each
+            morning catches anything that ever missed.
           </li>
           <li>
             Lose your phone or get a new one? Sign back in and your
@@ -15047,11 +15581,41 @@ function SettingsPanel({
           </p>
           {backup.data ? (
             backup.data.reachable ? (
-              <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
-                {backup.data.inSync
-                  ? `In sync — ${backup.data.cloudItems.toLocaleString()} items (${backup.data.cloudCopies.toLocaleString()} copies) backed up.`
-                  : `${backup.data.cloudItems.toLocaleString()} of ${backup.data.localItems.toLocaleString()} items backed up so far — tap Back up now to finish.`}
-              </p>
+              <>
+                <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+                  {backup.data.inSync
+                    ? `In sync — ${backup.data.cloudItems.toLocaleString()} items (${backup.data.cloudCopies.toLocaleString()} copies) backed up.`
+                    : `${backup.data.cloudItems.toLocaleString()} of ${backup.data.localItems.toLocaleString()} items backed up so far — tap Back up now to finish.`}
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+                  {backup.data.lastFullSyncAt
+                    ? `Last full check ${new Date(
+                        backup.data.lastFullSyncAt,
+                      ).toLocaleString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                        timeZone: "America/Chicago",
+                      })}.`
+                    : "No full check has completed yet — the next one runs about 30 seconds after a change, when the app closes, or with tomorrow morning's daily check."}
+                  {backup.data.needsFullCheck
+                    ? " A newer change is waiting for its full check — it runs on its own about 30 seconds after you finish, or when you close the app."
+                    : ""}
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
+                  {backup.data.lastDailyCheckAt
+                    ? `Daily safety check last ran ${new Date(
+                        backup.data.lastDailyCheckAt,
+                      ).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        timeZone: "America/Chicago",
+                      })}.`
+                    : "The daily safety check runs every morning at 8:15 AM (Chicago time); its first run will show here."}
+                </p>
+              </>
             ) : (
               <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
                 The cloud server couldn&rsquo;t be reached just now
@@ -22307,11 +22871,23 @@ function FlipPocket({
       onClick={() => onOpen(card.id)}
       aria-label={`${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
         isFoilPocket ? ", foil" : ""
-      }, ${owned ? `owned, ${card.ownedQty} copies` : "missing"}`}
+      }, ${owned ? `owned, ${card.ownedQty} copies` : "missing"}${
+        card.artLink ? ", artwork joins a larger scene" : ""
+      }`}
       className="group block w-full text-left focus:outline-none"
     >
       <div className="pocket-sheen relative aspect-[63/88] overflow-hidden rounded-[6px] border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_1px_rgba(0,0,0,0.35),0_1px_3px_rgba(0,0,0,0.5)]">
-        {url ? (
+        {bundledArtSrc(card.bundledArt) ? (
+          <img
+            src={bundledArtSrc(card.bundledArt) ?? ""}
+            alt={owned ? card.fullName : `${card.fullName} (missing)`}
+            loading="eager"
+            decoding="async"
+            className={`h-full w-full bg-[#f5f1e8] object-contain ${
+              owned ? "" : "ghost-img"
+            }`}
+          />
+        ) : url ? (
           <img
             src={url}
             alt={owned ? card.fullName : `${card.fullName} (missing)`}
@@ -22361,6 +22937,11 @@ function FlipPocket({
         <span className="absolute bottom-0.5 right-0.5 rounded-full bg-black/55 px-1 py-px text-[8px] font-semibold text-[var(--text)]">
           #{card.printed}
         </span>
+        {card.artLink ? (
+          <span className="absolute bottom-[19px] left-0.5">
+            <ArtLinkInsignia px={15} />
+          </span>
+        ) : null}
       </div>
     </button>
   );
@@ -33452,6 +34033,126 @@ function ScrollArrows() {
   );
 }
 
+/** Cloud backup auto-sync (Anthony, Nov 9, 2026 — the backup
+    habit he approved: back up on every change, a batched full
+    check about 30 seconds after he finishes, a sync when the
+    app closes, and one daily check). The server already pushes
+    every collection change to the cloud the moment it saves;
+    this manager owns the FULL check that proves the whole
+    backup matches:
+      • It watches the app's mutation cache — when a
+        collection-changing action succeeds (the Lorcana pocket
+        and card editors, the sealed stepper, the other games'
+        owned steppers, the graded-slab writes), it arms a
+        30-second timer. Every further change restarts the
+        timer, so a burst of cataloging (a dozen cards in a few
+        minutes) costs ONE full check, about 30 seconds after
+        the last tap.
+      • When the app is backgrounded or closed (visibility
+        hidden / pagehide) with a check still armed, it runs
+        the check immediately instead of waiting out the timer.
+      • On open, it asks the server once whether a full check
+        is owed (a change was recorded after the last completed
+        full sync — e.g. a push that failed last session, or a
+        trade that settled server-side) and arms the same
+        30-second check when one is.
+    The daily check itself runs server-side on its schedule;
+    "Back up now" in Settings still runs the same full sync on
+    demand. Renders nothing. */
+const BACKUP_COLLECTION_ACTIONS = [
+  "adjustPocketCount",
+  "updateOwnership",
+  "setSealedQty",
+  "setGameCardOwned",
+  "addGradedSlab",
+  "removeGradedSlab",
+  "setGradedSlabQty",
+  "updateGradedSlabPaid",
+  "setGameCardCost",
+] as const;
+
+function BackupAutoSync() {
+  const queryClient = useQueryClient();
+  const timerRef = useRef<number | null>(null);
+  const pendingRef = useRef(false);
+  const syncingRef = useRef(false);
+
+  useEffect(() => {
+    const flush = () => {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (!pendingRef.current || syncingRef.current) return;
+      syncingRef.current = true;
+      pendingRef.current = false;
+      void api
+        .syncCollectionBackup({})
+        .catch(() => {
+          // The cloud didn't answer: the change is still
+          // recorded server-side as newer than the last full
+          // sync, so the next open, the next change's check,
+          // or the daily check heals it.
+        })
+        .finally(() => {
+          syncingRef.current = false;
+          void queryClient.invalidateQueries({
+            queryKey: ["backupStatus"],
+          });
+          if (pendingRef.current) schedule();
+        });
+    };
+    const schedule = () => {
+      pendingRef.current = true;
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+      }
+      timerRef.current = window.setTimeout(flush, 30_000);
+    };
+
+    // Open-time catch-up: is a full check already owed?
+    void api
+      .getBackupStatus({})
+      .then((status) => {
+        if (status.needsFullCheck) schedule();
+      })
+      .catch(() => {
+        // Status unreachable: nothing to arm from here; the
+        // daily server check still runs.
+      });
+
+    const unsubscribe = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type !== "updated") return;
+      const mutation = event.mutation;
+      if (!mutation || mutation.state.status !== "success") return;
+      const fn = mutation.options.mutationFn;
+      if (!fn) return;
+      const src = String(fn);
+      if (BACKUP_COLLECTION_ACTIONS.some((name) => src.includes(name))) {
+        schedule();
+      }
+    });
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const onPageHide = () => flush();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [queryClient]);
+
+  return null;
+}
+
 export function App() {
   const queryClient = useQueryClient();
   // Theme (Settings > Theme): starts from the device mirror so the
@@ -35100,6 +35801,7 @@ export function App() {
 
   return (
     <div className="app-shell min-h-screen">
+      <BackupAutoSync />
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
       <main className="mx-auto w-full max-w-3xl px-3 pb-28 sm:px-4">
         {/* The pockets-filled collection header USED to render
@@ -35629,15 +36331,50 @@ export function App() {
                     gridCols === 2 ? "grid-cols-2" : "grid-cols-4"
                   }`}
                 >
-                  {sectionData.data.cards
-                    .slice(0, visibleCount)
-                    .map((card) => (
-                      <Pocket
-                        key={`${card.id}:${card.pocket}`}
-                        card={card}
-                        onOpen={openCard}
-                      />
-                    ))}
+                  {(() => {
+                    // Joined-scene display cards (Nov 9, 2026):
+                    // interleaved immediately after their
+                    // anchor pocket — the group's latest
+                    // member's last pocket in this section.
+                    // Display-only; the pocket flow, order,
+                    // and totals are exactly as before.
+                    const sceneByAnchor = new Map(
+                      (sectionData.data.scenes ?? []).map((s) => [
+                        `${s.anchorCardId}:${s.anchorPocket}`,
+                        s,
+                      ]),
+                    );
+                    const items: ReactNode[] = [];
+                    for (const card of sectionData.data.cards.slice(
+                      0,
+                      visibleCount,
+                    )) {
+                      items.push(
+                        <Pocket
+                          key={`${card.id}:${card.pocket}`}
+                          card={card}
+                          onOpen={openCard}
+                        />,
+                      );
+                      const scene = sceneByAnchor.get(
+                        `${card.id}:${card.pocket}`,
+                      );
+                      if (scene) {
+                        items.push(
+                          <div
+                            key={`scene:${card.id}:${card.pocket}`}
+                            className="col-span-full"
+                          >
+                            <SceneDisplayCard
+                              scene={scene}
+                              onOpen={openCard}
+                            />
+                          </div>,
+                        );
+                      }
+                    }
+                    return items;
+                  })()}
                 </div>
                 <div ref={sentinelRef} aria-hidden="true" />
                 <p className="mt-4 text-center font-album text-sm text-[var(--dim)]">
@@ -36304,6 +37041,26 @@ export function App() {
                         <span>
                           <span className="block text-sm text-[var(--text)]">
                             {result.fullName}
+                            {result.artLinked ? (
+                              <span
+                                className="ml-1.5 inline-block align-[-2px] text-[var(--gold-soft)]"
+                                title="Artwork joins a larger scene"
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.4"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M10 14a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 5.43" />
+                                  <path d="M14 10a5 5 0 0 0-7.07 0L4.1 12.83a5 5 0 0 0 7.07 7.07l1.33-1.33" />
+                                </svg>
+                              </span>
+                            ) : null}
                           </span>
                           <span className="block text-xs text-[var(--dim)]">
                             {result.groupName} · #{result.printed}

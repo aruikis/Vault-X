@@ -2,6 +2,22 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.111.0
+
+- Hyperia City's Full Puzzle Art is fixed at last — and we found the real reason it kept looking broken: Hyperia's nine puzzle pieces are sideways (landscape) cards, and the app was squeezing each sideways picture into an upright slot, cutting the middle out of every piece, so the joined scene never lined up. The Full Puzzle Art now shows the photo you supplied: Miguel with his white guitar, the nine pieces laid out as nine separate cards in a 3-by-3 grid with their gaps and rounded corners, exactly like cards in a book — in the set page's Puzzle section, in the binder view, and big on the card's own page. Every other set's Full Puzzle Art was checked too: Chapter One's Mickey Mouse (the one you verified) and the Floodborn, Ursula's Return, Azurite Sea, Fabled, Winterspell, Wilds Unknown and Attack of the Vine! full pictures all show their real assembled photos as before; Shimmering Skies, Archazia's Island, Reign of Jafar and Whispers in the Well honestly have no assembled picture anywhere to show, so theirs keep the clean name plate.
+
+## v1.110.0
+
+- The joined scene now sits right in the set grid: on every set page, immediately below a connecting-art group's cards, a separate full-width display card shows the complete connected artwork — the regular scene first and the foil scene right below it, both visible at once, no swiping. The Enchanted and Iconic scenes show their one finish, labeled plainly. The display card is not a collectible — no stepper, no count, and it never changes set totals or any card's pocket. It carries the link insignia, names every card in the scene (including one that lives in another set, like Mickey Mouse from The First Chapter in the Shimmering Skies scene), and shows the group's completion per finish. The card detail page stacks the same regular and foil scenes in its 'Pairs with' strip. Your pockets, counts, and totals are exactly as before.
+
+## v1.109.0
+
+- Connecting artwork is here: Lorcana cards whose pictures join into one bigger scene — like Carl and Ellie Fredricksen from Attack of the Vine! — now carry a small link insignia on the card in the set grid and the flip-through binder, and their card page shows a 'Pairs with' strip with the artworks joined into the full scene, each card's owned finishes, and whether the pair is complete in Regular or Foil. 29 joined scenes (75 cards, sets 2-13) were verified card-by-card from the real artwork, including the Seven Dwarfs panoramas, the three good fairies (twice), the Huey-Dewey-Louie trio, the Iconic Mickey and Minnie carousel, and the big 8-card Wilds Unknown panorama. Also in this version: the plus/minus stepper colors are softer on the eyes — plus went from bright #3ddc74 to a muted #5cb87f green and minus from #ff5147 to a muted #e0655c red, and the bold red '0 owned' counts softened to match.
+
+## v1.108.0
+
+- Cloud backup, set to the habit you approved: every change you make is backed up the moment you make it — and that now covers everything, including your Pokémon, Magic, Star Wars, Funko, Lego, and Topps items and your graded slabs, which were not in the cloud backup before. About 30 seconds after you finish making changes, the app runs one full check that the whole backup matches; closing the app runs that check right away instead of waiting; and a new daily safety check every morning at 8:15 (Chicago time) catches anything that ever missed. Settings > Your data & backups now shows when the last full check and the last daily check ran.
+
 ## v1.107.0
 
 - Funko and Lego photos load faster: their pictures now start preparing the moment your shelves load (before you even open the Library), the ready-made copy and the fresh cut are prepared at the same time instead of one after the other, and a photo source that stalls gives up in about half the time so the app's own copy steps in sooner. Nothing about the shelves themselves changed — same Classic Mahogany bookcase, same signs, same boards.

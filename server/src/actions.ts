@@ -288,6 +288,20 @@ const cardLite = z.object({
   composite: z
     .object({ cols: z.number(), pieceIds: z.array(z.number()) })
     .nullable(),
+  /** Connecting-art marker (Nov 9, 2026): this printing's
+      artwork joins a verified multi-card scene — the group
+      size and this card's position in it (0-based, left to
+      right). Null for ordinary cards. The client draws a
+      small insignia on the pocket; it changes no layout. */
+  artLink: z
+    .object({ size: z.number(), position: z.number() })
+    .nullable(),
+  /** Owner-supplied bundled display art key (Nov 9, 2026):
+      names an image shipped inside the client for an entry
+      whose correct picture exists in no fetchable source
+      (see BUNDLED_ART_BY_UID). Outranks the entry's own art
+      and its composite. Null everywhere else. */
+  bundledArt: z.string().nullable(),
 });
 
 type CardLite = z.infer<typeof cardLite>;
@@ -461,6 +475,200 @@ function compositeForRow(
   return { cols: spec.cols, pieceIds };
 }
 
+/** Owner-supplied display artwork bundled with the app, for
+    the rare entry whose correct picture exists in NO fetchable
+    source. The key names a client-side bundled image, which
+    outranks the entry's own art and the assembled-from-pieces
+    composite on every surface.
+    puzzle:14:full — Hyperia City Full Puzzle Art (Anthony,
+    Nov 9, 2026). DIAGNOSIS, verified in the rendered app that
+    day: the entry carries no photo (TCGplayer's only "Set of
+    9" picture is a different product's photo), so it rendered
+    the from-pieces composite — but Hyperia's nine pieces are
+    LANDSCAPE cards (their scans are 1000x716), and the
+    composite squeezed each landscape scan into a PORTRAIT
+    cell with object-cover, center-cropping every slice, so
+    the joined picture never lined up and read as broken
+    on-device through three fix attempts. Anthony supplied
+    his own photo of the nine physical pieces laid out 3x3 —
+    separate cards, thin gaps, rounded corners, clean light
+    background, like cards in a book — and directed that
+    exact presentation; his enhanced final file (workspace
+    lorcana/hyperia-full-puzzle-art-final.png) is the bundled
+    art, shipped as a webp in the client's puzzle assets. */
+const BUNDLED_ART_BY_UID: ReadonlyMap<string, string> = new Map([
+  ["puzzle:14:full", "hyperia-full"],
+]);
+
+function bundledArtForRow(row: { uid: string }): string | null {
+  return BUNDLED_ART_BY_UID.get(row.uid) ?? null;
+}
+
+/** Connecting-art groups ("conjoined art" / panorama cards):
+    printings whose artwork joins into one wider scene when the
+    physical cards are placed side by side, in left-to-right
+    order. Every group below was VERIFIED from the actual
+    Ravensburger artwork on Nov 9, 2026 - the member scans were
+    downloaded and joined edge-to-edge and the scene checked
+    seam by seam (research spine: Mushu Report's Conjoined Art
+    catalogue; full report in the lorcana-connecting-art-cards
+    research notes of Nov 9, 2026). Candidates the research
+    left UNVERIFIED (Inklands Flotsam/Jetsam "Riffraff", Reign
+    of Jafar Chaca/Tipo, Wilds Unknown Ariel/Prince Eric) are
+    deliberately NOT linked. The two chase-only scenes are
+    keyed to their Enchanted / Iconic printings only - the
+    regular printings carry different, non-connecting art and
+    stay unlinked. The Mickey/Pete pair crosses sets (First
+    Chapter + Shimmering Skies). Keyed by catalog uid, the
+    stable printing key. */
+const ART_GROUPS: readonly (readonly string[])[] = [
+  ["2:217", "2:221", "2:222", "2:226", "2:227", "2:237", "2:238"], // S2 Dwarfs panorama
+  ["3:650", "3:651"], // S3 Hook+Pan ENCHANTED
+  ["4:734", "4:737"], // S4 Flotsam+Jetsam
+  ["4:764", "4:768"], // S4 Gus+Jaq
+  ["4:772", "4:773"], // S4 Pain+Panic
+  ["4:869", "4:874", "4:885"], // S4 Imperial trio
+  ["1:89", "5:1072"], // S5 Mickey(S1)+Pete
+  ["5:960", "5:963"], // S5 Rutt+Tuke
+  ["5:1031", "5:1032", "5:1034"], // S5 Fairies trio
+  ["5:1007", "5:1045", "5:1097", "5:1140"], // S5 Rejected four
+  ["7:1441", "7:1465"], // S7 Suzy+Perla
+  ["7:1518", "7:1546"], // S7 Stepsisters
+  ["7:1606", "7:1630"], // S7 Jasmine+Aladdin
+  ["8:1665", "8:1666", "8:1667"], // S8 Nephews trio
+  ["8:1789", "8:1729"], // S8 Brutus+Nero
+  ["9:2177", "9:2178"], // S9 Minnie+Mickey ICONIC
+  ["11:2576", "11:2577"], // S11 Iduna+Agnarr
+  ["11:2600", "11:2601"], // S11 Roo+Kanga
+  ["12:2752", "12:2753", "12:2754", "12:2755", "12:2756", "12:2757", "12:2758", "12:2759"], // S12 Dwarfs panorama 8
+  ["12:2721", "12:2739"], // S12 Agustin+Julieta
+  ["12:2796", "12:2821"], // S12 Pan+Pegasus
+  ["12:2854", "12:2855", "12:2856"], // S12 Fairies trio
+  ["12:2899", "12:2900"], // S12 Omnidroid+MrIncredible
+  ["12:2786", "12:2793"], // S12 Brave MacGuffin
+  ["12:2891", "12:2901"], // S12 Brave Dingwall
+  ["12:2895", "12:2896"], // S12 Brave Macintosh
+  ["13:3045", "13:3046"], // S13 Carl+Ellie
+  ["13:3081", "13:3082"], // S13 Yzma+Kuzco
+  ["13:3129", "13:3130"], // S13 Marian+Robin
+];
+
+interface ArtGroupInfo {
+  size: number;
+  position: number;
+  members: readonly string[];
+}
+
+const ART_GROUP_BY_UID = ((): Map<string, ArtGroupInfo> => {
+  const map = new Map<string, ArtGroupInfo>();
+  for (const members of ART_GROUPS) {
+    members.forEach((uid, position) => {
+      map.set(uid, { size: members.length, position, members });
+    });
+  }
+  return map;
+})();
+
+/** This printing's connecting-art marker for pocket payloads:
+    the group's size and this card's position in the scene, or
+    null when the printing is not part of a verified group. */
+function artLinkForRow(row: { uid: string }): {
+  size: number;
+  position: number;
+} | null {
+  const g = ART_GROUP_BY_UID.get(row.uid);
+  return g ? { size: g.size, position: g.position } : null;
+}
+
+type ArtGroupData = NonNullable<
+  z.infer<typeof cardDetailResponse>["artGroup"]
+>;
+
+/** Resolves one verified connecting-art group from its member
+    uids: every member printing in scene order with its owned
+    finishes, plus per-finish-family completion across the
+    group. A member counts toward Regular when it owns any
+    non-foil finish and toward the foil family when it owns
+    any foil-family finish (cold/epic/promo foil, Enchanted,
+    Iconic). Foil-only printings (Enchanted / Iconic / Epic)
+    have no Regular version, so the Regular line is scored
+    only when at least one member could own one; the foil
+    line is labeled Enchanted / Iconic for those chase-only
+    scenes. Shared by the card detail page and the set grid's
+    joined-scene display cards. */
+async function computeArtGroup(
+  ctx: Ctx,
+  memberUids: readonly string[],
+  selfUid: string | null,
+): Promise<ArtGroupData | null> {
+  const db = ctx.db<typeof schema>();
+  const memberRows = await db
+    .select()
+    .from(schema.cards)
+    .where(inArray(schema.cards.uid, [...memberUids]));
+  const byUid = new Map(memberRows.map((r) => [r.uid, r]));
+  const members: ArtGroupData["members"] = [];
+  let regOwned = 0;
+  let foilOwned = 0;
+  let anyRegularPossible = false;
+  const memberRarities: (string | null)[] = [];
+  for (const uid of memberUids) {
+    const m = byUid.get(uid);
+    if (!m) return null;
+    memberRarities.push(m.rarity);
+    const mFinishes = parseFinishes(m.finishes);
+    const entries = Object.entries(mFinishes).filter(([, q]) => q > 0);
+    const foilOnlyPrinting =
+      m.rarity === "Enchanted" || m.rarity === "Iconic" || m.rarity === "Epic";
+    if (!foilOnlyPrinting) anyRegularPossible = true;
+    const hasRegular = entries.some(
+      ([f]) => !isFoilFinish(f) && f !== "Iconic",
+    );
+    const hasFoil = entries.some(([f]) => isFoilFinish(f) || f === "Iconic");
+    if (hasRegular) regOwned += 1;
+    if (hasFoil) foilOwned += 1;
+    members.push({
+      id: m.id,
+      fullName: m.fullName,
+      printed: m.printed,
+      groupName: m.groupName,
+      ownedQty: m.ownedQty,
+      finishes: mFinishes,
+      isSelf: selfUid != null && m.uid === selfUid,
+    });
+  }
+  const total = memberUids.length;
+  const foilLabel = memberRarities.every((r) => r === "Enchanted")
+    ? "Enchanted"
+    : memberRarities.every((r) => r === "Iconic")
+      ? "Iconic"
+      : "Foil";
+  const finishStatus: ArtGroupData["finishStatus"] = [];
+  if (anyRegularPossible) {
+    finishStatus.push({
+      key: "regular",
+      label: "Regular",
+      owned: regOwned,
+      total,
+      complete: regOwned === total,
+    });
+  }
+  finishStatus.push({
+    key: "foil",
+    label: foilLabel,
+    owned: foilOwned,
+    total,
+    complete: foilOwned === total,
+  });
+  const selfIndex = selfUid != null ? memberUids.indexOf(selfUid) : -1;
+  return {
+    size: total,
+    myPosition: selfIndex >= 0 ? selfIndex : 0,
+    members,
+    finishStatus,
+  };
+}
+
 function toLite(
   row: typeof schema.cards.$inferSelect,
   pocket: Pocket,
@@ -477,6 +685,8 @@ function toLite(
     pocket: pocket.kind,
     pocketLabel: pocket.label,
     composite,
+    artLink: artLinkForRow(row),
+    bundledArt: bundledArtForRow(row),
   };
 }
 
@@ -1071,6 +1281,43 @@ const pageResponse = z.object({
 const sectionResponse = z.object({
   cards: z.array(cardLite),
   total: z.number(),
+  /** Joined-scene display cards for this section (Nov 9,
+      2026): one per verified connecting-art group represented
+      in the section's (filtered) pockets, anchored to the
+      LAST pocket of the group's latest member in this section
+      — the client renders the display card immediately after
+      that pocket. Display-only data: the scenes never count
+      as pockets and never enter the section total. */
+  scenes: z.array(
+    z.object({
+      anchorCardId: z.number(),
+      anchorPocket: z.enum(["regular", "foil", "single"]),
+      size: z.number(),
+      members: z.array(
+        z.object({
+          id: z.number(),
+          fullName: z.string(),
+          printed: z.string(),
+          groupName: z.string(),
+          ownedQty: z.number(),
+          finishes: z.record(z.string(), z.number()),
+          isSelf: z.boolean(),
+          /** False for members that live in another section
+              (the cross-set pair) — noted on the display. */
+          inThisSection: z.boolean(),
+        }),
+      ),
+      finishStatus: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          owned: z.number(),
+          total: z.number(),
+          complete: z.boolean(),
+        }),
+      ),
+    }),
+  ),
 });
 
 const cardDetailResponse = z.object({
@@ -1097,6 +1344,40 @@ const cardDetailResponse = z.object({
       FULL_PUZZLE_COMPOSITES). Null everywhere else. */
   composite: z
     .object({ cols: z.number(), pieceIds: z.array(z.number()) })
+    .nullable(),
+  /** Owner-supplied bundled display art key (Nov 9, 2026):
+      see BUNDLED_ART_BY_UID. Null everywhere else. */
+  bundledArt: z.string().nullable(),
+  /** Connecting-art group (Nov 9, 2026): when this printing's
+      artwork joins a verified multi-card scene, every member
+      in scene order with its owned finishes, plus per-finish-
+      family completion across the whole group. Null for
+      ordinary cards. */
+  artGroup: z
+    .object({
+      size: z.number(),
+      myPosition: z.number(),
+      members: z.array(
+        z.object({
+          id: z.number(),
+          fullName: z.string(),
+          printed: z.string(),
+          groupName: z.string(),
+          ownedQty: z.number(),
+          finishes: z.record(z.string(), z.number()),
+          isSelf: z.boolean(),
+        }),
+      ),
+      finishStatus: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          owned: z.number(),
+          total: z.number(),
+          complete: z.boolean(),
+        }),
+      ),
+    })
     .nullable(),
   /** TCGplayer product id for the Best Offer link, when known. */
   tcgplayerId: z.string().nullable(),
@@ -1387,6 +1668,10 @@ const searchResponse = z.object({
       finishes: z.record(z.string(), z.number()),
       marketValue: z.number().nullable(),
       suggestedFinish: z.string(),
+      /** True when this printing's artwork joins a verified
+          connecting-art scene (Nov 9, 2026), so search rows
+          can carry the same link marker as the pockets. */
+      artLinked: z.boolean(),
     }),
   ),
 });
@@ -2042,11 +2327,22 @@ async function upsertRegistryProfile(profile: {
     project's collection_items table under the owner's collector
     code (rows: owner_collector_id, item_key, display_name, qty,
     kind, meta; unique on owner + item_key, owner-only RLS, written
-    with the publishable key only). Kept current three ways: a full
-    sync action (also the initial upload and the post-publish run),
-    an incremental push inside the two quantity editors
-    (updateOwnership / setSealedQty), and a restore action that
-    loads the backup back when the local collection is empty. */
+    with the publishable key only). Kept current by the backup
+    habit Anthony approved Nov 9, 2026: (1) an incremental push
+    inside EVERY collection-changing editor the moment a change
+    saves — Lorcana quantity editors, the sealed stepper, the
+    other games' owned stepper, and the graded-slab writes;
+    (2) a full sync the app runs about 30 seconds after he
+    finishes making changes (debounced in the client) and again
+    when the app is closed or backgrounded; (3) a daily safety
+    check (dailyBackupCheck) that runs a full sync whenever a
+    recorded change is newer than the last full sync or the last
+    full sync is over a day old. A restore action loads the
+    backup back when the local collection is empty. Every
+    collection change stamps backup_meta.last_change_at and
+    every completed full sync stamps last_full_sync_at, so
+    Settings can show honestly when the last change and the
+    last verified backup happened. */
 
 /** The graded comics, mirrored from the client catalog
     (client/src/comics.tsx COMICS) so the server sync can include
@@ -2141,20 +2437,104 @@ async function buildLocalCloudItems(
       meta: { cert: comic.cert, label: comic.label },
     });
   }
+  // Every OTHER collection (Pokémon, Magic, Star Wars Unlimited,
+  // Funko, Lego, the Topps families…): one row per owned catalog
+  // item, plus a separate row for a Lego set's sealed copies —
+  // sealed-vs-opened is a real distinction Lego value turns on,
+  // so the two counts never merge into one number. The owned
+  // filter is applied in the query itself: the game catalogs
+  // hold hundreds of thousands of rows, and reading them all to
+  // find the owned handful made every backup status / sync call
+  // heavy enough to time out under load.
+  const gameRows = await db
+    .select()
+    .from(schema.gameCards)
+    .where(
+      or(
+        gt(schema.gameCards.ownedQty, 0),
+        gt(schema.gameCards.ownedSealedQty, 0),
+      ),
+    );
+  for (const row of gameRows) {
+    if (row.ownedQty > 0) {
+      rows.push({
+        owner_collector_id: owner,
+        item_key: `game:${row.id}`,
+        display_name: row.name,
+        qty: row.ownedQty,
+        kind: "game",
+        meta: {
+          gameCardId: row.id,
+          game: row.game,
+          printed: row.printed,
+          section: row.sectionName,
+          sealed: false,
+        },
+      });
+    }
+    if (row.ownedSealedQty > 0) {
+      rows.push({
+        owner_collector_id: owner,
+        item_key: `game:${row.id}:sealed`,
+        display_name: `${row.name} (Sealed)`,
+        qty: row.ownedSealedQty,
+        kind: "game",
+        meta: {
+          gameCardId: row.id,
+          game: row.game,
+          printed: row.printed,
+          section: row.sectionName,
+          sealed: true,
+        },
+      });
+    }
+  }
+  // Graded slabs: the slab record itself (company, cert, grade,
+  // what was paid) is collection data the game row alone cannot
+  // rebuild, so each slab backs up as its own row.
+  const slabRows = await db.select().from(schema.gradedSlabs);
+  const gameById = new Map(gameRows.map((r) => [r.id, r]));
+  for (const slab of slabRows) {
+    if (slab.qty <= 0) continue;
+    const card = gameById.get(slab.gameCardId);
+    rows.push({
+      owner_collector_id: owner,
+      item_key: `slab:${slab.company}:${slab.cert}`,
+      display_name: card
+        ? `${card.name} — ${slab.company} ${slab.grade}`
+        : `${slab.company} ${slab.cert} — ${slab.grade}`,
+      qty: slab.qty,
+      kind: "slab",
+      meta: {
+        gameCardId: slab.gameCardId,
+        company: slab.company,
+        cert: slab.cert,
+        grade: slab.grade,
+        paid: slab.paid,
+      },
+    });
+  }
   return rows;
 }
 
 /** Reads every collection_items row for one owner, paged (the
     server caps a single response, so loop until a short page). */
+type CloudItemFetched = {
+  item_key: string;
+  qty: number;
+  kind: string;
+  display_name: string | null;
+  meta: Record<string, unknown> | null;
+};
+
 async function fetchCloudItems(
   owner: string,
-): Promise<Array<{ item_key: string; qty: number; kind: string }> | null> {
-  const out: Array<{ item_key: string; qty: number; kind: string }> =
-    [];
+): Promise<CloudItemFetched[] | null> {
+  const out: CloudItemFetched[] = [];
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     const res = await supabaseRest(
-      `collection_items?select=item_key,qty,kind&owner_collector_id=eq.${encodeURIComponent(owner)}&order=item_key.asc&limit=${PAGE}&offset=${offset}`,
+      `collection_items?select=item_key,qty,kind,display_name,meta&owner_collector_id=eq.${encodeURIComponent(owner)}&order=item_key.asc&limit=${PAGE}&offset=${offset}`,
     );
     if (!res.ok || !Array.isArray(res.json)) return null;
     for (const raw of res.json) {
@@ -2165,6 +2545,12 @@ async function fetchCloudItems(
           item_key: r.item_key,
           qty: typeof r.qty === "number" ? r.qty : 0,
           kind: typeof r.kind === "string" ? r.kind : "card",
+          display_name:
+            typeof r.display_name === "string" ? r.display_name : null,
+          meta:
+            typeof r.meta === "object" && r.meta !== null
+              ? (r.meta as Record<string, unknown>)
+              : null,
         });
       }
     }
@@ -2204,6 +2590,66 @@ async function deleteCloudItems(
   return true;
 }
 
+/** ----- Backup bookkeeping (backup_meta, single row id = 1) -----
+    last_change_at is stamped by every collection-changing write
+    (markBackupDirty); last_full_sync_at only by a full sync that
+    completed and verified by read-back. The gap between the two
+    is exactly "a full check is still owed" — the signal the
+    daily check and the client's open-time catch-up act on. */
+
+type BackupMetaRow = typeof schema.backupMeta.$inferSelect;
+
+async function readBackupMeta(ctx: Ctx): Promise<BackupMetaRow | null> {
+  try {
+    const db = ctx.db<typeof schema>();
+    const rows = await db
+      .select()
+      .from(schema.backupMeta)
+      .where(eq(schema.backupMeta.id, 1));
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeBackupMeta(
+  ctx: Ctx,
+  patch: Partial<Omit<BackupMetaRow, "id">>,
+): Promise<void> {
+  try {
+    const db = ctx.db<typeof schema>();
+    await db
+      .insert(schema.backupMeta)
+      .values({ id: 1, ...patch })
+      .onConflictDoUpdate({
+        target: schema.backupMeta.id,
+        set: patch,
+      });
+  } catch {
+    // Bookkeeping is best-effort: a failed stamp never breaks
+    // the collection write it rode along with. The next full
+    // sync still reconciles the cloud itself.
+  }
+}
+
+/** Stamps "a collection change just landed" (Anthony, Nov 9,
+    2026 backup habit). Called by every collection-changing
+    action alongside its incremental cloud push. */
+async function markBackupDirty(ctx: Ctx): Promise<void> {
+  await writeBackupMeta(ctx, {
+    lastChangeAt: new Date().toISOString(),
+  });
+}
+
+/** True when a full check is owed: a recorded change is newer
+    than the last completed full sync (or no full sync has ever
+    completed while changes exist). */
+function backupNeedsFullCheck(meta: BackupMetaRow | null): boolean {
+  if (!meta?.lastChangeAt) return false;
+  if (!meta.lastFullSyncAt) return true;
+  return meta.lastChangeAt > meta.lastFullSyncAt;
+}
+
 /** Full sync: upsert every local row, delete server rows that no
     longer exist locally, and confirm by reading the owner's rows
     back. Returns null when the server can't be reached/written. */
@@ -2233,11 +2679,20 @@ async function fullCloudSync(
   }
   const after = await fetchCloudItems(owner);
   if (after == null) return null;
-  return {
+  const verified = {
     owner,
     items: after.length,
     copies: after.reduce((s, r) => s + r.qty, 0),
   };
+  // The full check has landed and verified: stamp it, so the
+  // daily check and Settings can tell a checked backup from a
+  // merely-pushed one.
+  await writeBackupMeta(ctx, {
+    lastFullSyncAt: new Date().toISOString(),
+    lastSyncItems: verified.items,
+    lastSyncCopies: verified.copies,
+  });
+  return verified;
 }
 
 /** Incremental push for one card after its ownership changes:
@@ -2330,6 +2785,102 @@ async function syncSealedToCloud(
         },
       ]);
     }
+  } catch {
+    // Backup push is best-effort; the edit itself already saved.
+  }
+}
+
+/** Incremental push for one OTHER-games catalog item after its
+    owned counts change — the item's opened row, its sealed row
+    (Lego), and every graded slab recorded against it. Mirrors
+    buildLocalCloudItems' game/slab row shapes exactly, and
+    deletes cloud rows whose local count hit zero. Best-effort,
+    same rule as syncCardToCloud. */
+async function syncGameCardToCloud(
+  ctx: Ctx,
+  gameCardId: number,
+): Promise<void> {
+  try {
+    const db = ctx.db<typeof schema>();
+    const profile = await ensureCollectorProfile(ctx);
+    const owner = profile.collectorCode;
+    const cardRows = await db
+      .select()
+      .from(schema.gameCards)
+      .where(eq(schema.gameCards.id, gameCardId));
+    const card = cardRows[0];
+    if (!card) return;
+    const desired: CloudItemRow[] = [];
+    if (card.ownedQty > 0) {
+      desired.push({
+        owner_collector_id: owner,
+        item_key: `game:${card.id}`,
+        display_name: card.name,
+        qty: card.ownedQty,
+        kind: "game",
+        meta: {
+          gameCardId: card.id,
+          game: card.game,
+          printed: card.printed,
+          section: card.sectionName,
+          sealed: false,
+        },
+      });
+    }
+    if (card.ownedSealedQty > 0) {
+      desired.push({
+        owner_collector_id: owner,
+        item_key: `game:${card.id}:sealed`,
+        display_name: `${card.name} (Sealed)`,
+        qty: card.ownedSealedQty,
+        kind: "game",
+        meta: {
+          gameCardId: card.id,
+          game: card.game,
+          printed: card.printed,
+          section: card.sectionName,
+          sealed: true,
+        },
+      });
+    }
+    const slabs = await db
+      .select()
+      .from(schema.gradedSlabs)
+      .where(eq(schema.gradedSlabs.gameCardId, gameCardId));
+    for (const slab of slabs) {
+      if (slab.qty <= 0) continue;
+      desired.push({
+        owner_collector_id: owner,
+        item_key: `slab:${slab.company}:${slab.cert}`,
+        display_name: `${card.name} — ${slab.company} ${slab.grade}`,
+        qty: slab.qty,
+        kind: "slab",
+        meta: {
+          gameCardId: slab.gameCardId,
+          company: slab.company,
+          cert: slab.cert,
+          grade: slab.grade,
+          paid: slab.paid,
+        },
+      });
+    }
+    // Existing cloud rows for this item: its two game keys plus
+    // any slab keys the server already holds for this card —
+    // slab keys embed company+cert, so match them via meta.
+    const remote = await fetchCloudItems(owner);
+    const stale: string[] = [];
+    if (remote != null) {
+      const desiredKeys = new Set(desired.map((r) => r.item_key));
+      for (const r of remote) {
+        const mine =
+          r.item_key === `game:${card.id}` ||
+          r.item_key === `game:${card.id}:sealed` ||
+          (r.kind === "slab" && r.meta?.gameCardId === card.id);
+        if (mine && !desiredKeys.has(r.item_key)) stale.push(r.item_key);
+      }
+    }
+    if (desired.length > 0) await upsertCloudItems(desired);
+    if (stale.length > 0) await deleteCloudItems(owner, stale);
   } catch {
     // Backup push is best-effort; the edit itself already saved.
   }
@@ -2597,6 +3148,7 @@ async function applySettlementPlan(
   await db.batch(
     stmts as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
   );
+  if (plan.localCards.length > 0) await markBackupDirty(ctx);
   for (const t of plan.localCards) {
     const rows = await db
       .select()
@@ -3291,6 +3843,31 @@ const backupStatusResponse = z.object({
   cloudItems: z.number(),
   cloudCopies: z.number(),
   inSync: z.boolean(),
+  /** ISO instant of the most recent recorded collection change
+      (Nov 9, 2026 backup habit); null = no change recorded yet. */
+  lastChangeAt: z.string().nullable(),
+  /** ISO instant of the most recent completed, verified full
+      sync; null = no full sync has completed yet. */
+  lastFullSyncAt: z.string().nullable(),
+  /** ISO instant the daily backup check last ran; null = it
+      has not run yet. */
+  lastDailyCheckAt: z.string().nullable(),
+  /** True when a recorded change is newer than the last full
+      sync — a full check (debounced, on-close, or daily) is
+      still owed even if the per-change pushes already landed. */
+  needsFullCheck: z.boolean(),
+});
+
+const dailyBackupCheckResponse = z.object({
+  /** ISO instant this check ran. */
+  checkedAt: z.string(),
+  /** True when the check ran a full sync (one was owed, or the
+      last full sync was over a day old). */
+  synced: z.boolean(),
+  /** True when the cloud server answered during the check. */
+  reachable: z.boolean(),
+  items: z.number(),
+  copies: z.number(),
 });
 
 const restoreResponse = z.object({
@@ -8032,6 +8609,7 @@ export const Actions = {
         });
       // Cloud backup stays current on every quantity change
       // (best-effort push of just this item's row).
+      await markBackupDirty(ctx);
       await syncSealedToCloud(ctx, args.name, args.qty);
       return { ok: true, qty: args.qty };
     },
@@ -8082,9 +8660,44 @@ export const Actions = {
         .where(eq(schema.cards.groupKey, args.groupKey))
         .orderBy(asc(schema.cards.slotSort));
       const pockets = toPockets(rows, args.filter);
+      // Joined-scene display cards (Nov 9, 2026): for every
+      // verified connecting-art group with at least one pocket
+      // in this (filtered) list, anchor the scene to the last
+      // such pocket in list order — the latest member's final
+      // pocket in this section. A group whose members are all
+      // filtered out shows no display card in that view.
+      const scenes: z.infer<typeof sectionResponse>["scenes"] = [];
+      const seenGroups = new Set<string>();
+      for (const row of rows) {
+        const info = ART_GROUP_BY_UID.get(row.uid);
+        if (!info) continue;
+        const groupKey = info.members.join("|");
+        if (seenGroups.has(groupKey)) continue;
+        seenGroups.add(groupKey);
+        const data = await computeArtGroup(ctx, info.members, null);
+        if (!data) continue;
+        const memberIds = new Set(data.members.map((m) => m.id));
+        let anchor: CardLite | undefined;
+        for (const pk of pockets) {
+          if (memberIds.has(pk.id)) anchor = pk;
+        }
+        if (!anchor) continue;
+        const sectionIds = new Set(rows.map((r) => r.id));
+        scenes.push({
+          anchorCardId: anchor.id,
+          anchorPocket: anchor.pocket,
+          size: data.size,
+          members: data.members.map((m) => ({
+            ...m,
+            inThisSection: sectionIds.has(m.id),
+          })),
+          finishStatus: data.finishStatus,
+        });
+      }
       return {
         cards: pockets,
         total: pockets.length,
+        scenes,
       };
     },
   }),
@@ -8104,6 +8717,13 @@ export const Actions = {
       const row = rows[0];
       if (!row) throw new Error("Card not found");
       const finishes = parseFinishes(row.finishes);
+      // Connecting-art group (Nov 9, 2026): this printing's
+      // verified joined scene, resolved and scored per finish
+      // family by the shared helper.
+      const artGroupInfo = ART_GROUP_BY_UID.get(row.uid);
+      const artGroup = artGroupInfo
+        ? await computeArtGroup(ctx, artGroupInfo.members, row.uid)
+        : null;
       const prices = parseFinance(row.financeJson);
       const money = cardMoney(row);
       const byFinish = Object.entries(finishes).map(([finish, qty]) => {
@@ -8184,6 +8804,8 @@ export const Actions = {
             .from(schema.cards)
             .where(eq(schema.cards.groupKey, row.groupKey)),
         ),
+        bundledArt: bundledArtForRow(row),
+        artGroup,
         tcgplayerId: tcgIdOf(row),
         finance: {
           byFinish,
@@ -10993,7 +11615,9 @@ export const Actions = {
       );
       ctx.invalidateQueries();
       // Cloud backup stays current on every quantity change
-      // (best-effort push of just this card's rows).
+      // (best-effort push of just this card's rows), and the
+      // change is stamped for the backup bookkeeping.
+      await markBackupDirty(ctx);
       const updated = await db
         .select()
         .from(schema.cards)
@@ -11060,6 +11684,7 @@ export const Actions = {
         .where(eq(schema.cards.id, args.cardId));
       await recordRecentAddition(ctx, args.cardId, total - row.ownedQty);
       ctx.invalidateQueries();
+      await markBackupDirty(ctx);
       const updated = await db
         .select()
         .from(schema.cards)
@@ -13372,7 +13997,7 @@ export const Actions = {
 
   syncCollectionBackup: defineAction({
     description:
-      "Full cloud backup sync: writes the signed-in collector's entire collection (cards in every finish, sealed products, graded comics, with quantities) to the Vault X Supabase project's collection_items table under their collector code, removes server rows that no longer exist locally, and verifies by reading the rows back. Also refreshes the collector's own row in the server profiles registry.",
+      "Full cloud backup sync: writes the signed-in collector's entire collection (Lorcana cards in every finish, sealed products, graded comics, every other game's owned items including Lego sealed copies, and graded slab records, with quantities) to the Vault X Supabase project's collection_items table under their collector code, removes server rows that no longer exist locally, and verifies by reading the rows back. Also refreshes the collector's own row in the server profiles registry. This is the full check the Nov 9, 2026 backup habit runs about 30 seconds after changes finish, when the app closes, and from the daily safety check.",
     request: z.object({}),
     response: cloudSyncResponse,
     async handler(ctx): Promise<z.infer<typeof cloudSyncResponse>> {
@@ -13391,7 +14016,7 @@ export const Actions = {
 
   getBackupStatus: defineAction({
     description:
-      "Compares the local collection against the cloud backup on Supabase (row counts and copy counts for the signed-in collector) so Settings can show whether the backup is in sync.",
+      "Compares the local collection against the cloud backup on Supabase (row counts and copy counts for the signed-in collector) so Settings can show whether the backup is in sync, and reports the backup bookkeeping: when the last collection change was recorded, when the last full sync completed, when the daily check last ran, and whether a full check is still owed.",
     request: z.object({}),
     response: backupStatusResponse,
     async handler(ctx): Promise<z.infer<typeof backupStatusResponse>> {
@@ -13401,6 +14026,13 @@ export const Actions = {
         profile.collectorCode,
       );
       const localCopies = local.reduce((s, r) => s + r.qty, 0);
+      const meta = await readBackupMeta(ctx);
+      const stamps = {
+        lastChangeAt: meta?.lastChangeAt ?? null,
+        lastFullSyncAt: meta?.lastFullSyncAt ?? null,
+        lastDailyCheckAt: meta?.lastDailyCheckAt ?? null,
+        needsFullCheck: backupNeedsFullCheck(meta),
+      };
       const remote = await fetchCloudItems(profile.collectorCode);
       if (remote == null) {
         return {
@@ -13410,6 +14042,7 @@ export const Actions = {
           cloudItems: 0,
           cloudCopies: 0,
           inSync: false,
+          ...stamps,
         };
       }
       const cloudCopies = remote.reduce((s, r) => s + r.qty, 0);
@@ -13432,13 +14065,61 @@ export const Actions = {
         cloudItems: remote.length,
         cloudCopies,
         inSync,
+        ...stamps,
+      };
+    },
+  }),
+
+  dailyBackupCheck: defineAction({
+    description:
+      "The daily safety check of the Nov 9, 2026 backup habit (Anthony approved: back up on every change, a batched full check ~30 seconds after changes finish, a sync when the app closes, and one daily check): records that the check ran, and runs a full cloud sync whenever a recorded collection change is newer than the last completed full sync or the last full sync is over a day old — so a per-change push that ever failed is healed within a day even if the app was never reopened. A check that finds nothing owed does not rewrite the cloud.",
+    request: z.object({}),
+    response: dailyBackupCheckResponse,
+    async handler(
+      ctx,
+    ): Promise<z.infer<typeof dailyBackupCheckResponse>> {
+      const checkedAt = new Date().toISOString();
+      const meta = await readBackupMeta(ctx);
+      const lastSyncMs = meta?.lastFullSyncAt
+        ? Date.parse(meta.lastFullSyncAt)
+        : NaN;
+      const syncStale =
+        !Number.isFinite(lastSyncMs) ||
+        Date.now() - lastSyncMs > 23 * 60 * 60 * 1000;
+      const owed = backupNeedsFullCheck(meta) || syncStale;
+      await writeBackupMeta(ctx, { lastDailyCheckAt: checkedAt });
+      if (!owed) {
+        return {
+          checkedAt,
+          synced: false,
+          reachable: true,
+          items: meta?.lastSyncItems ?? 0,
+          copies: meta?.lastSyncCopies ?? 0,
+        };
+      }
+      const result = await fullCloudSync(ctx);
+      if (result == null) {
+        return {
+          checkedAt,
+          synced: false,
+          reachable: false,
+          items: 0,
+          copies: 0,
+        };
+      }
+      return {
+        checkedAt,
+        synced: true,
+        reachable: true,
+        items: result.items,
+        copies: result.copies,
       };
     },
   }),
 
   restoreCollectionFromCloud: defineAction({
     description:
-      "Restore direction of the cloud backup: when the local collection has no owned items (fresh device/sign-in), loads the collector's backed-up items from Supabase collection_items back into the local binder (card finishes and sealed quantities). Does nothing when local data already exists, so a restore can never overwrite a live collection.",
+      "Restore direction of the cloud backup: when the local collection has no owned items (fresh device/sign-in), loads the collector's backed-up items from Supabase collection_items back into the local binder (Lorcana card finishes, sealed quantities, other games' owned/sealed counts, and graded slab records). Does nothing when local data already exists, so a restore can never overwrite a live collection.",
     request: z.object({}),
     response: restoreResponse,
     async handler(ctx): Promise<z.infer<typeof restoreResponse>> {
@@ -13514,6 +14195,78 @@ export const Actions = {
               set: { qty: row.qty },
             });
           sealedApplied += 1;
+        } else if (
+          row.kind === "game" &&
+          row.item_key.startsWith("game:")
+        ) {
+          // Other-games rows (Nov 9, 2026): key game:{id} for
+          // opened copies, game:{id}:sealed for sealed copies.
+          // Applied only onto a catalog row that owns nothing —
+          // restore fills gaps, it never overwrites.
+          const meta = row.meta ?? {};
+          const gameCardId =
+            typeof meta.gameCardId === "number" ? meta.gameCardId : null;
+          if (gameCardId == null || row.qty <= 0) continue;
+          const cardRows = await db
+            .select()
+            .from(schema.gameCards)
+            .where(eq(schema.gameCards.id, gameCardId));
+          const card = cardRows[0];
+          if (!card) continue;
+          if (row.item_key.endsWith(":sealed")) {
+            if (card.ownedSealedQty > 0) continue;
+            await db
+              .update(schema.gameCards)
+              .set({ ownedSealedQty: row.qty })
+              .where(eq(schema.gameCards.id, gameCardId));
+          } else {
+            if (card.ownedQty > 0) continue;
+            await db
+              .update(schema.gameCards)
+              .set({ ownedQty: row.qty })
+              .where(eq(schema.gameCards.id, gameCardId));
+          }
+          cardsApplied += 1;
+        } else if (
+          row.kind === "slab" &&
+          row.item_key.startsWith("slab:")
+        ) {
+          // Graded slab records (Nov 9, 2026): re-created from
+          // their backed-up meta when no slab with that
+          // company+cert exists locally. The slab's copies are
+          // already counted in the item's game row above, so
+          // ownedQty is NOT stepped again here.
+          const meta = row.meta ?? {};
+          const company =
+            typeof meta.company === "string" ? meta.company : null;
+          const cert = typeof meta.cert === "string" ? meta.cert : null;
+          const grade =
+            typeof meta.grade === "string" ? meta.grade : null;
+          const gameCardId =
+            typeof meta.gameCardId === "number" ? meta.gameCardId : null;
+          if (!company || !cert || !grade || gameCardId == null) {
+            continue;
+          }
+          const existing = await db
+            .select()
+            .from(schema.gradedSlabs)
+            .where(
+              and(
+                eq(schema.gradedSlabs.company, company),
+                eq(schema.gradedSlabs.cert, cert),
+              ),
+            );
+          if (existing.length > 0) continue;
+          await db.insert(schema.gradedSlabs).values({
+            gameCardId,
+            company,
+            cert,
+            grade,
+            paid: typeof meta.paid === "number" ? meta.paid : null,
+            qty: row.qty > 0 ? row.qty : 1,
+            createdAt: Date.now(),
+          });
+          cardsApplied += 1;
         }
         // kind "comic": the graded comics are a static catalog in
         // the app itself — nothing local to restore into.
@@ -16268,6 +17021,11 @@ export const Actions = {
         }
       }
       ctx.invalidateQueries();
+      // Cloud backup on every change (Nov 9, 2026 habit): stamp
+      // the change and push this item's rows (opened, sealed,
+      // and its slabs) right away, best-effort.
+      await markBackupDirty(ctx);
+      await syncGameCardToCloud(ctx, args.id);
       return {
         ok: true as const,
         ownedQty: rows[0]?.ownedQty ?? args.ownedQty,
@@ -16588,6 +17346,8 @@ export const Actions = {
         })
         .where(eq(schema.gameCards.id, card.id));
       ctx.invalidateQueries();
+      await markBackupDirty(ctx);
+      await syncGameCardToCloud(ctx, card.id);
       const row = inserted[0];
       return {
         added: true,
@@ -16620,6 +17380,8 @@ export const Actions = {
             ownedQty: sql`max(0, ${schema.gameCards.ownedQty} - ${slab.qty})`,
           })
           .where(eq(schema.gameCards.id, slab.gameCardId));
+        await markBackupDirty(ctx);
+        await syncGameCardToCloud(ctx, slab.gameCardId);
       }
       ctx.invalidateQueries();
       return { ok: true as const };
@@ -17012,6 +17774,10 @@ export const Actions = {
           })
           .where(eq(schema.gameCards.id, slab.gameCardId));
       }
+      if (delta !== 0 || args.qty === 0) {
+        await markBackupDirty(ctx);
+        await syncGameCardToCloud(ctx, slab.gameCardId);
+      }
       ctx.invalidateQueries();
       return {
         ok: true as const,
@@ -17041,6 +17807,16 @@ export const Actions = {
         })
         .where(eq(schema.gradedSlabs.id, args.id));
       ctx.invalidateQueries();
+      // Paid rides in the slab's cloud backup row — keep it
+      // current like every other collection change.
+      const slabRows = await db
+        .select()
+        .from(schema.gradedSlabs)
+        .where(eq(schema.gradedSlabs.id, args.id));
+      if (slabRows[0]) {
+        await markBackupDirty(ctx);
+        await syncGameCardToCloud(ctx, slabRows[0].gameCardId);
+      }
       return { ok: true as const };
     },
   }),
@@ -21290,6 +22066,7 @@ export const Actions = {
               pockets.find((pk) => pk.kind === "regular")?.label ?? "Regular"
             );
           })(),
+          artLinked: ART_GROUP_BY_UID.has(row.uid),
         })),
       };
     },
