@@ -1289,6 +1289,33 @@ What changed (client only; no schema, no server changes, no data touched, the No
   it. Server probes: Set 13 returns its 3 scenes anchored at each group's
   last foil pocket; getCard regression-checked after the refactor.
 
+## v1.112.0 — Scene steppers + standout scene header bar (Anthony, Nov 9, 2026, live call)
+
+AMENDMENT (overrides the "joined scene is display-only, no stepper" rule
+above): Anthony looked at the Carl/Ellie scene and directed that copies
+must be addable FROM the scene itself. `JoinedSceneRows` now renders a
+standard stepper (StepperButton rings, long-press SidewaysCountDial, pick
+saves at once) under EVERY member in EVERY finish row, on both surfaces
+(set-page SceneDisplayCard and detail-page ArtGroupStrip). The Regular
+row's steppers write the member's Regular finish; the Foil row's write
+its Cold Foil — or the member's actual foil-family finish (Epic Foil /
+Enchanted / Iconic on chase printings; `sceneRowFinishKey`). Writes go
+through `updateOwnership` with the member's full finishes record (the
+detail editor's own write; a shared records ref in JoinedSceneRows makes
+Regular and Foil taps for the same member compose), then invalidate
+binder/section/finance/card so pockets, the completion lines, set
+totals, and Portfolio update together. The scene itself still owns
+nothing and adds no pocket or total. Panorama scenes (7- and 8-card
+Dwarfs) get full-width labeled stepper rows under the scene instead of
+in-column steppers — a ~45px column cannot hold a stepper. Ellie
+Fredricksen #75 (Set 13, pairs with Carl #74) is Anthony's test case.
+HEADER BAR (same call): the scene window's header is now a standout
+full-bleed bar in the insignia's accent family — the active theme's
+--gold at 20% tint, --gold/60 bottom border, --gold-soft bold title —
+in both SceneDisplayCard and ArtGroupStrip (whose frame border also
+moved to --gold/45), so the block reads as special against the app's
+plain section headers in every theme.
+
 ## NEXT (queued): Hyperia City Full Puzzle Art fix — ground truth on file
 
 - Correct scene (Jarvis web check + Anthony-supplied photo): Miguel Rivera
@@ -1355,3 +1382,105 @@ pictures live on the Lore cards' BACKS and only front scans exist; S10
 Whispers in the Well — no scans anywhere: those four Full entries honestly
 keep the clean name-plate placeholder. S3 Into the Inklands has no puzzle
 inserts at all (no section, by design).
+
+MATTE DARKENED (Anthony, Nov 9, 2026, on-device review of v1.111.0): in the
+two-across grid the landscape photo sits in a portrait pocket, and the
+letterbox bands above and below it rendered on the near-white cream
+#F5F1E8 — he found the glare too bright against the dark theme and asked
+for it darkened, kept a touch lighter than black. All three bundled-art
+surfaces (set-grid Pocket, FlipPocket, card-detail frame) now use the dark
+matte #2E2B28 behind the photo. The photo bytes themselves are unchanged.
+
+## v1.113.0 — Scene gold standout, Hyperia back fix, chapter percentages (Nov 9, 2026)
+
+Requested by Anthony (voice, Nov 9, 2026): (1) the connected-artwork
+two-card scene's inner window must stand out — gold border and gold
+verbiage, applied to every chapter, app-wide; (2) Back from Hyperia City
+landed on the TCG Universe instead of the chapters list; (3) add a
+completion percentage next to the owned/total counts on the Disney
+Lorcana chapters page tiles (his example: Hyperia City 350 of 446).
+
+Implementation: theme.css gains FIXED-gold classes (every theme, like
+.set-complete-label — the default theme's --gold token is periwinkle,
+not gold): .scene-standout (2px gold border + glow on the outer card),
+.scene-standout-bar (filled gold gradient band, dark lettering) on both
+scene surfaces (SceneDisplayCard on set pages, ArtGroupStrip on card
+detail), .scene-frame (2px glowing gold border on the joined artwork
+window itself inside the shared JoinedSceneRows, so every chapter/set
+gets it from one render site), .scene-row-label (gold Regular/Foil
+scene labels; darker gold under the light theme). Back fix: pickGroup
+now PUSHES the set's entry (marked vxSetPush, preserving the entry
+underneath) over the chapters grid entry instead of replacing it, so
+one device Back lands on the grid via the central popstate listener;
+the on-screen "← All sets" button consumes that pushed entry when
+present, else flips locally and scrubs mcBinder; the root "‹ TCG
+Universe" pill is hidden while a set is open (its one-Back landing
+there is the grid; the pill remains on the grid and the other games).
+SetTile now prints the rounded percent beside the counts (350/446 ·
+78%) and includes it in the progressbar aria-label.
+
+ADDENDUM (same session, v1.114.0): Anthony added two directions after
+the v1.113.0 asks. (1) Sealed-section steppers: every sealed item in
+the in-chapter Sealed section (top of each set page) now carries the
+standard +/− stepper (new shared SealedQtyStepper component in
+App.tsx: local synced count, long-press SidewaysCountDial, tight
+variant on the 3-across grid) writing through setSealedQty with the
+detail sheet's invalidations (["sealed"], ["finance"],
+["sealedItem", name]); tiles restructured from one big button into
+open-button + stepper row (no nested buttons). The Quest pages'
+sealed-box banner carries the same stepper. (2) Visible stepper
+shrink: span.stepper-ring { transform: scale(0.88) } in theme.css
+shrinks only the visible ring+glyph app-wide; every hit box is
+untouched (StepperButton's ~56px/52px boxes, whereItLives' 56px box).
+The bare ring-buttons in games.tsx (6) and gradedScan.tsx (2) were
+restructured to hit-box button + inner ring span at their old size
+classes so the same rule reaches them with identical hit areas;
+gradedScan's spans deliberately keep no data-dir so their accent
+coloring is unchanged. Also recorded: Anthony CONFIRMED ON-DEVICE
+that the Hyperia City Full Puzzle Art matte background fix
+(v1.111.0/v1.112.0) is good — do not regress it; this build does not
+touch it.
+
+ADDENDUM (same session): two more fixes landed together. (1) Sealed
+tile stepper alignment: in the in-chapter Sealed grid, tiles are now
+flex-column full-height with the stepper wrapper pinned by mt-auto,
+so every tile's +/− row shares one baseline regardless of how the
+name/price lines wrap (the Attack of the Vine! pack sat higher than
+the Illumineer's Quest: The Great Hunny Rescue box beside it).
+(2) SEPARATE SCENE TALLIES (Anthony, Nov 9, 2026, final design,
+confirmed "Correct" on the call): connecting-art scene counts are
+their own per-finish tally, stored in cards.scene_finishes
+(migration 0078), written ONLY by the scene steppers through the new
+updateSceneOwnership action; pocket steppers write only
+cards.finishes. Scene tallies start at 0 and are never inherited
+from pockets. The "Regular scene / Foil scene" completion lines
+score from scene tallies alone (computeArtGroup). Everything else
+combines the tallies server-side: master-set owned/missing (a
+scene-only copy fills its pocket — pocketsOf carries sceneQty per
+pocket; toPockets, missingPocketsOf, getBinder, getSetCompletion
+all test qty + sceneQty), total copies = pocket + scene
+(tallyTotal; pocket badges, search results), and Portfolio value
+counts each tallied copy once at its finish price while paid stays
+pocket-only (cardMoney). Scene counts show in the scene stepper as
+"{qty} owned" with the pockets' zero-owned styling. Cloud backup
+round-trips scene rows under `card:{uid}:__scene__{finish}` keys
+(buildLocalCloudItems, syncCardToCloud, restoreCollectionFromCloud).
+Verified in the sandbox on Ellie Fredricksen #75/207 (set 13):
+scene Regular 1 + Cold Foil 1 left her pocket finishes untouched at
+{Regular: 11}, scored the scene lines 1/2 + 1/2, filled her empty
+foil pocket out of the missing list, and reported 13 total copies.
+
+
+## Private usage journal (v1.115.0, Nov 9, 2026 — Anthony approved after Jarvis proposed it; he also asked Jarvis to audit it daily)
+
+- **What it is**: the app quietly records how the signed-in collector actually moves through it, so Jarvis can audit the trail daily and propose more intuitive flows from real friction evidence. Events: screens/pages visited in order with timestamps (main views, binder chapter grid vs. open set by name, card-detail, Search), taps on labeled controls (aria-label / tab text only), actions (ownership steppers, sealed/game/slab steppers, trade/cash/marketplace steps — via a mutation-cache watcher modeled on BackupAutoSync), Back presses (popstate, with the dwell of the screen left), searches typed with their total result counts (debounced + deduped), and job runs — "add-card" (card page open → stepper steps → completed when a stepper landed) and "find-item" (Search open → searches typed → completed on a result pick) — each with step count, duration, and completion.
+- **Storage**: own table `usage_journal` (migration 0079; collector_code, session_id, kind, label, detail_json, at), written by `logUsageEvents` in batches from the client logger (`client/src/usageJournal.ts`: in-memory queue, flush at 25 events / 12s / background / close; failures swallowed; queue capped). Server-side sanitizer: known kinds only, labels capped at 120 chars, detail reduced to small scalars, and detail keys that could carry content (message/body/text/comment/password/zelle/payment/…) are dropped even if a client sent them. Retention 90 days, pruned on write (local + cloud copies).
+- **Privacy**: a user can only ever see their own journal — `getUsageJournal({days})` takes NO identity parameter and always returns the journal of the collector who owns the app copy; nothing reads the table for profiles, friends, or any social surface. The one in-app reader is the owner-only Admin view (`AdminUsageJournal` inside AdminDashboard): summary tiles (sessions, backs, quick exits, zero-result searches), per-job step stats, a quick-exits list, and session timelines with per-screen dwell. Never logged: passwords, payment details, message text — navigation and actions only (the Search query text is the one deliberate exception, per the approved brief).
+- **Cloud backup sync**: journal rows ride the collection backup as Supabase `collection_items` rows of kind `journal` (item_key `journal:<id>`, full event in meta), pushed incrementally behind a watermark (`marketplace_meta` key `usage_journal_synced_through`) by `pushUsageJournalToCloud` — called from every full collection sync and from the standalone `syncUsageJournal` action (the client calls it when the app backgrounds/closes). Every existing reader of that table excludes the journal kind: fullCloudSync's stale-row deletion and verified counts, getBackupStatus's in-sync comparison, restore (ignores unknown kinds), and getAdminStats's item aggregation — verified live in the sandbox (6 test events pushed, read back, watermark no-op on second push, test rows deleted from the real backup afterward).
+- **External audit**: Jarvis fetches the trail via the published `getUsageJournal` action (day range 1–31, events capped at the most recent 2,000 with a truncated flag) whose summary carries sessions, quick exits (screens left < 4s), zero-result searches, per-job averages, top screens, and Back counts.
+
+
+## Admin roster simplification + scroll-arrow/checkout-bar fix (v1.115.1, Nov 9, 2026 — Anthony, from his on-device look at Admin and a friend profile)
+
+- **Roster simplification**: every per-user roster entry in Admin — the Registered Users page rows and the Admin Users-detail table — now shows only name, Collector ID, joined date, and ONE number: total copies (the roster's `itemsOwned` field was already a qty sum; it is now labeled "total copies"). Deleted entirely: the "Logged items" (`activity.totalRows`) and "Cards logged" (`activity.cardsLogged`) counters — their Admin tiles are gone, the Activity hub tile no longer carries the stored-entries cue, and the server no longer change-tracks them (removed from the `getAdminStats` metrics map and `adminMetricLabel`), so they also stop appearing in the What-changed panel. The roster change readout now reads "N total copies" (the stored metric value is still `copies|trust` so a trust move still flags the row). Trust Score and connections were also removed from the roster row's stat line; the per-user AdminUserTrustBlock (verified-badge record, owner Verify/Revoke) is unchanged below the entry. No last-active field exists in the registry, so none was added.
+- **Checkout bar vs. scroll arrows**: the floating scroll up/down arrows (ScrollArrows, rendered once at the App root) used to overlap the fixed green cash/trade cart bar on friend profiles (Trade Match), covering its ends. The docked cart bar now carries a `data-checkout-bar` marker; ScrollArrows watches the DOM with a MutationObserver and renders nothing while any `[data-checkout-bar]` element is present, returning when it unmounts. Any future checkout bar that carries the marker gets the same behavior; the bar itself is untouched and renders full-width.

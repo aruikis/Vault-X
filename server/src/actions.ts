@@ -33,7 +33,7 @@ z,
 type ActionsModule,
 type Ctx,
 } from "@hatch/space-sdk";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "./schema";
 import { catalog } from "./data/catalog";
@@ -267,6 +267,29 @@ function parseFinishes(raw: string): Record<string, number> {
   return {};
 }
 
+/** A card's joined-scene tally (Anthony, Nov 9, 2026): copies held
+    as part of a connecting-art scene, counted SEPARATELY from the
+    pocket finishes — its own record, starting at 0, written only
+    by the scene steppers. */
+function sceneFinishesOf(row: {
+  sceneFinishes: string;
+}): Record<string, number> {
+  return parseFinishes(row.sceneFinishes);
+}
+
+function tallySum(finishes: Record<string, number>): number {
+  return Object.values(finishes).reduce((s, q) => s + q, 0);
+}
+
+/** Total copies across both tallies: pocket count + scene count,
+    each tally counted once (Anthony, Nov 9, 2026). */
+function tallyTotal(row: {
+  ownedQty: number;
+  sceneFinishes: string;
+}): number {
+  return row.ownedQty + tallySum(sceneFinishesOf(row));
+}
+
 const cardLite = z.object({
   id: z.number(),
   fullName: z.string(),
@@ -275,6 +298,12 @@ const cardLite = z.object({
   ink: z.string().nullable(),
   ownedQty: z.number(),
   finishes: z.record(z.string(), z.number()),
+  /** Copies of this pocket's finish family held in the joined
+      connecting-art scene tally (Anthony, Nov 9, 2026): separate
+      from ownedQty — the pocket counts as filled (not ghosted,
+      not missing) when either tally has a copy, and total copies
+      are ownedQty + sceneQty. 0 for ordinary cards. */
+  sceneQty: z.number(),
   /** Which pocket of the card number this is: regular, foil, or single. */
   pocket: z.enum(["regular", "foil", "single"]),
   /** Pocket display label, e.g. "Regular", "Cold Foil", "Promo Foil". */
@@ -334,6 +363,9 @@ interface Pocket {
   label: string;
   qty: number;
   finishes: Record<string, number>;
+  /** Scene-tally copies in this pocket's finish family (see the
+      cardLite sceneQty note). */
+  sceneQty: number;
 }
 
 /** Splits one printing into binder pockets the way Anthony's physical
@@ -342,6 +374,19 @@ interface Pocket {
     has in one version family keep a single pocket. */
 function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
   const finishes = parseFinishes(row.finishes);
+  // The joined-scene tally splits into the same finish families
+  // as the pocket finishes (Anthony, Nov 9, 2026): scene copies
+  // of a non-foil finish ride the regular pocket, foil-family
+  // scene copies the foil pocket, everything the single pocket
+  // on one-pocket printings.
+  const scene = sceneFinishesOf(row);
+  let sceneRegQty = 0;
+  let sceneFoilQty = 0;
+  for (const [finish, qty] of Object.entries(scene)) {
+    if (isFoilFinish(finish) || finish === "Iconic") sceneFoilQty += qty;
+    else sceneRegQty += qty;
+  }
+  const sceneTotal = sceneRegQty + sceneFoilQty;
   // Puzzle / lore insert cards (Anthony, Nov 3, 2026): a single
   // pocket each — they are one-per-pack inserts with no regular /
   // foil split, owned and ghosted like any other slot.
@@ -357,6 +402,7 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
               : "Puzzle",
         qty: row.ownedQty,
         finishes,
+        sceneQty: sceneTotal,
       },
     ];
   }
@@ -388,14 +434,27 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
           (row.rarity === "Epic" ? "Epic Foil" : (row.rarity ?? "Foil")),
         qty: row.ownedQty,
         finishes,
+        sceneQty: sceneTotal,
       },
     ];
   }
   const baseSetCard = row.grp === "set";
   if (baseSetCard || (regQty > 0 && foilQty > 0)) {
     return [
-      { kind: "regular", label: regLabel, qty: regQty, finishes: regFinishes },
-      { kind: "foil", label: foilLabel, qty: foilQty, finishes: foilFinishes },
+      {
+        kind: "regular",
+        label: regLabel,
+        qty: regQty,
+        finishes: regFinishes,
+        sceneQty: sceneRegQty,
+      },
+      {
+        kind: "foil",
+        label: foilLabel,
+        qty: foilQty,
+        finishes: foilFinishes,
+        sceneQty: sceneFoilQty,
+      },
     ];
   }
   return [
@@ -404,6 +463,7 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
       label: foilQty > 0 ? foilLabel : regLabel,
       qty: row.ownedQty,
       finishes,
+      sceneQty: sceneTotal,
     },
   ];
 }
@@ -585,17 +645,23 @@ type ArtGroupData = NonNullable<
 >;
 
 /** Resolves one verified connecting-art group from its member
-    uids: every member printing in scene order with its owned
-    finishes, plus per-finish-family completion across the
-    group. A member counts toward Regular when it owns any
-    non-foil finish and toward the foil family when it owns
-    any foil-family finish (cold/epic/promo foil, Enchanted,
-    Iconic). Foil-only printings (Enchanted / Iconic / Epic)
-    have no Regular version, so the Regular line is scored
-    only when at least one member could own one; the foil
-    line is labeled Enchanted / Iconic for those chase-only
-    scenes. Shared by the card detail page and the set grid's
-    joined-scene display cards. */
+    uids: every member printing in scene order with its pocket
+    finishes AND its separate joined-scene tally, plus
+    per-finish-family scene completion across the group. The
+    completion lines are scored from the SCENE tallies alone
+    (Anthony, Nov 9, 2026): a member counts toward Regular when
+    its scene tally holds any non-foil finish and toward the
+    foil family when its scene tally holds any foil-family
+    finish (cold/epic/promo foil, Enchanted, Iconic) — pocket
+    copies never inflate the scene lines. Foil-only printings
+    (Enchanted / Iconic / Epic) have no Regular version, so
+    the Regular line is scored only when at least one member
+    could own one; the foil line is labeled Enchanted / Iconic
+    for those chase-only scenes. A member's ownedQty here is
+    the combined total (pocket + scene), so a scene-only copy
+    still reads as owned wherever the group is listed. Shared
+    by the card detail page and the set grid's joined-scene
+    display cards. */
 async function computeArtGroup(
   ctx: Ctx,
   memberUids: readonly string[],
@@ -617,14 +683,17 @@ async function computeArtGroup(
     if (!m) return null;
     memberRarities.push(m.rarity);
     const mFinishes = parseFinishes(m.finishes);
-    const entries = Object.entries(mFinishes).filter(([, q]) => q > 0);
+    const mScene = sceneFinishesOf(m);
+    const sceneEntries = Object.entries(mScene).filter(([, q]) => q > 0);
     const foilOnlyPrinting =
       m.rarity === "Enchanted" || m.rarity === "Iconic" || m.rarity === "Epic";
     if (!foilOnlyPrinting) anyRegularPossible = true;
-    const hasRegular = entries.some(
+    const hasRegular = sceneEntries.some(
       ([f]) => !isFoilFinish(f) && f !== "Iconic",
     );
-    const hasFoil = entries.some(([f]) => isFoilFinish(f) || f === "Iconic");
+    const hasFoil = sceneEntries.some(
+      ([f]) => isFoilFinish(f) || f === "Iconic",
+    );
     if (hasRegular) regOwned += 1;
     if (hasFoil) foilOwned += 1;
     members.push({
@@ -632,8 +701,9 @@ async function computeArtGroup(
       fullName: m.fullName,
       printed: m.printed,
       groupName: m.groupName,
-      ownedQty: m.ownedQty,
+      ownedQty: tallyTotal(m),
       finishes: mFinishes,
+      sceneFinishes: mScene,
       isSelf: selfUid != null && m.uid === selfUid,
     });
   }
@@ -682,6 +752,7 @@ function toLite(
     ink: row.ink,
     ownedQty: pocket.qty,
     finishes: pocket.finishes,
+    sceneQty: pocket.sceneQty,
     pocket: pocket.kind,
     pocketLabel: pocket.label,
     composite,
@@ -700,8 +771,12 @@ function toPockets(
   for (const row of rows) {
     const composite = compositeForRow(row, rows);
     for (const pocket of pocketsOf(row)) {
-      if (filter === "owned" && pocket.qty <= 0) continue;
-      if (filter === "missing" && pocket.qty > 0) continue;
+      // Master-set owned/missing (Anthony, Nov 9, 2026): a
+      // pocket is owned when EITHER tally — pocket or joined
+      // scene — holds a copy of its finish family.
+      const tally = pocket.qty + pocket.sceneQty;
+      if (filter === "owned" && tally <= 0) continue;
+      if (filter === "missing" && tally > 0) continue;
       out.push(toLite(row, pocket, composite));
     }
   }
@@ -865,29 +940,50 @@ async function insertMissingCatalogEntries(
 
 /** Exact value/paid for a card from its per-finish prices and current
     finish counts; falls back to the stored per-unit averages for any
-    finish without a recorded price. */
+    finish without a recorded price. VALUE counts every tallied copy
+    once — pocket copies plus joined-scene copies (Anthony, Nov 9,
+    2026) — each at its finish's per-unit value. PAID stays
+    pocket-only: scene copies carry no recorded purchase price, so
+    they add nothing to what was paid. */
 function cardMoney(row: typeof schema.cards.$inferSelect): {
   value: number;
   paid: number;
 } {
-  if (row.ownedQty <= 0) return { value: 0, paid: 0 };
+  const total = tallyTotal(row);
+  if (total <= 0) return { value: 0, paid: 0 };
   const finishes = parseFinishes(row.finishes);
+  const scene = sceneFinishesOf(row);
   const prices = parseFinance(row.financeJson);
   let value = 0;
-  let paid = 0;
   let pricedQty = 0;
-  for (const [finish, qty] of Object.entries(finishes)) {
+  const allFinishes = new Set([
+    ...Object.keys(finishes),
+    ...Object.keys(scene),
+  ]);
+  for (const finish of allFinishes) {
+    const qty = (finishes[finish] ?? 0) + (scene[finish] ?? 0);
     const price = prices[finish];
-    if (price) {
+    if (price && qty > 0) {
       value += price.value * qty;
-      paid += price.paid * qty;
       pricedQty += qty;
     }
   }
-  const rest = row.ownedQty - pricedQty;
+  const rest = total - pricedQty;
   if (rest > 0) {
     value += (row.marketValue ?? 0) * rest;
-    paid += (row.paidValue ?? 0) * rest;
+  }
+  let paid = 0;
+  let paidPricedQty = 0;
+  for (const [finish, qty] of Object.entries(finishes)) {
+    const price = prices[finish];
+    if (price) {
+      paid += price.paid * qty;
+      paidPricedQty += qty;
+    }
+  }
+  const paidRest = row.ownedQty - paidPricedQty;
+  if (paidRest > 0) {
+    paid += (row.paidValue ?? 0) * paidRest;
   }
   return { value, paid };
 }
@@ -912,21 +1008,6 @@ function isImplausiblePriceJump(prev: number, next: number): boolean {
   if (Math.abs(next - prev) < 5) return false;
   const ratio = next / prev;
   return ratio >= 4 || ratio <= 0.25;
-}
-
-/** Current per-copy value of a card row: the quantity-weighted
-    average across its finishes (what its price-history points
-    track), falling back to the stored market value for rows
-    with no priced finishes. Null when the card has never
-    carried a value. */
-function currentUnitValue(
-  row: typeof schema.cards.$inferSelect,
-): number | null {
-  if (row.ownedQty > 0) {
-    const money = cardMoney(row);
-    if (money.value > 0) return money.value / row.ownedQty;
-  }
-  return row.marketValue ?? null;
 }
 
 /** Recently Added log (Nov 6, 2026): record an in-app ownership
@@ -1204,7 +1285,9 @@ function missingPocketsOf(
   const missing: MissingPocket[] = [];
   for (const row of rows) {
     for (const pocket of pocketsOf(row)) {
-      if (pocket.qty > 0) continue;
+      // A pocket filled by a joined-scene copy is not missing
+      // (Anthony, Nov 9, 2026): either tally fills it.
+      if (pocket.qty + pocket.sceneQty > 0) continue;
       const price = pocketPrice(row, pocket);
       const attribution = ebayAttribution(row, pocket, price);
       missing.push({
@@ -1299,8 +1382,12 @@ const sectionResponse = z.object({
           fullName: z.string(),
           printed: z.string(),
           groupName: z.string(),
+          /** Total copies across both tallies (pocket + scene). */
           ownedQty: z.number(),
           finishes: z.record(z.string(), z.number()),
+          /** The member's joined-scene tally alone — what the
+              scene steppers read and write. */
+          sceneFinishes: z.record(z.string(), z.number()),
           isSelf: z.boolean(),
           /** False for members that live in another section
               (the cross-set pair) — noted on the display. */
@@ -1338,6 +1425,10 @@ const cardDetailResponse = z.object({
   cardText: z.string().nullable(),
   ownedQty: z.number(),
   finishes: z.record(z.string(), z.number()),
+  /** This printing's joined-scene tally (Anthony, Nov 9, 2026):
+      separate from the pocket finishes — the detail hero treats
+      the card as owned when either tally holds a copy. */
+  sceneFinishes: z.record(z.string(), z.number()),
   marketValue: z.number().nullable(),
   /** Assembled-from-pieces artwork for a Full Puzzle Art
       entry with no published assembled image (see
@@ -1363,8 +1454,13 @@ const cardDetailResponse = z.object({
           fullName: z.string(),
           printed: z.string(),
           groupName: z.string(),
+          /** Total copies across both tallies (pocket + scene). */
           ownedQty: z.number(),
           finishes: z.record(z.string(), z.number()),
+          /** The member's joined-scene tally alone (Anthony,
+              Nov 9, 2026): what the scene steppers read and
+              write — separate from the pocket finishes. */
+          sceneFinishes: z.record(z.string(), z.number()),
           isSelf: z.boolean(),
         }),
       ),
@@ -2069,8 +2165,6 @@ function adminMetricLabel(
     "users.avgTrustScore": "Average Trust Score",
     "users.collectorsWithItems": "Collectors with items",
     "activity.totalCopies": "Total copies logged",
-    "activity.totalRows": "Logged items",
-    "activity.cardsLogged": "Cards logged",
     "activity.avgPerCollector": "Average items per collector",
     "activity.largest": "Largest collection",
     "social.connections": "Connections",
@@ -2105,7 +2199,11 @@ function adminMetricValue(key: string, raw: string): string {
   const p = (i: number) => parts[i] ?? "";
   switch (key.split(":")[0]) {
     case "roster":
-      return `${p(0)} items · trust ${p(1)}`;
+      // The stored value is still "copies|trust" (either
+      // moving flags the row changed), but the readout
+      // shows the one number the simplified roster shows
+      // (Anthony, Nov 9, 2026).
+      return `${p(0)} total copies`;
     case "mostOwned":
       return `${p(0)} copies · ${p(1)} owners`;
     default:
@@ -2377,6 +2475,17 @@ function cloudCardItemKey(uid: string, finish: string): string {
   return `card:${uid}:${finish}`;
 }
 
+/** Cloud key segment for a joined-scene tally entry (Anthony,
+    Nov 9, 2026): the finish name rides behind a `__scene__`
+    marker inside the same last key segment, so the restore
+    parser (which splits at the last colon, the uid itself
+    containing one) can route these rows to the scene tally
+    instead of the pocket finishes. */
+const CLOUD_SCENE_PREFIX = "__scene__";
+function cloudSceneItemKey(uid: string, finish: string): string {
+  return `card:${uid}:${CLOUD_SCENE_PREFIX}${finish}`;
+}
+
 /** Builds the full cloud-backup row set for the local collection:
     one row per owned card printing + finish, per sealed product
     at its effective quantity, and per graded comic. */
@@ -2388,26 +2497,49 @@ async function buildLocalCloudItems(
   const rows: CloudItemRow[] = [];
   const cardRows = await db.select().from(schema.cards);
   for (const row of cardRows) {
-    if (row.ownedQty <= 0) continue;
-    const finishes = parseFinishes(row.finishes);
-    const entries =
-      Object.keys(finishes).length > 0
-        ? Object.entries(finishes)
-        : [["Regular", row.ownedQty] as [string, number]];
-    for (const [finish, qty] of entries) {
-      if (qty <= 0) continue;
+    const scene = sceneFinishesOf(row);
+    const sceneEntries = Object.entries(scene).filter(([, q]) => q > 0);
+    // A scene-only card (no pocket copies) still backs up: its
+    // scene rows below are its whole cloud record.
+    if (row.ownedQty <= 0 && sceneEntries.length === 0) continue;
+    if (row.ownedQty > 0) {
+      const finishes = parseFinishes(row.finishes);
+      const entries =
+        Object.keys(finishes).length > 0
+          ? Object.entries(finishes)
+          : [["Regular", row.ownedQty] as [string, number]];
+      for (const [finish, qty] of entries) {
+        if (qty <= 0) continue;
+        rows.push({
+          owner_collector_id: owner,
+          item_key: cloudCardItemKey(row.uid, finish),
+          display_name:
+            finish === "Regular"
+              ? row.fullName
+              : `${row.fullName} (${finish})`,
+          qty,
+          kind: "card",
+          meta: {
+            uid: row.uid,
+            finish,
+            set: row.groupName,
+            number: row.printed,
+            rarity: row.rarity ?? null,
+          },
+        });
+      }
+    }
+    for (const [finish, qty] of sceneEntries) {
       rows.push({
         owner_collector_id: owner,
-        item_key: cloudCardItemKey(row.uid, finish),
-        display_name:
-          finish === "Regular"
-            ? row.fullName
-            : `${row.fullName} (${finish})`,
+        item_key: cloudSceneItemKey(row.uid, finish),
+        display_name: `${row.fullName} (${finish} · joining scene)`,
         qty,
         kind: "card",
         meta: {
           uid: row.uid,
           finish,
+          scene: true,
           set: row.groupName,
           number: row.printed,
           rarity: row.rarity ?? null,
@@ -2673,16 +2805,23 @@ async function fullCloudSync(
   const localKeys = new Set(local.map((r) => r.item_key));
   const stale = remote
     .map((r) => r.item_key)
-    .filter((k) => !localKeys.has(k));
+    // Usage-journal backup rows (kind "journal") are managed
+    // by the journal's own incremental push below — the
+    // collection reconcile never deletes them.
+    .filter((k) => !localKeys.has(k) && !k.startsWith("journal:"));
   if (stale.length > 0) {
     if (!(await deleteCloudItems(owner, stale))) return null;
   }
   const after = await fetchCloudItems(owner);
   if (after == null) return null;
+  // Journal rows ride the same table; the verified collection
+  // counts exclude them so Settings' backup numbers stay about
+  // the collection itself.
+  const collectionAfter = after.filter((r) => r.kind !== "journal");
   const verified = {
     owner,
-    items: after.length,
-    copies: after.reduce((s, r) => s + r.qty, 0),
+    items: collectionAfter.length,
+    copies: collectionAfter.reduce((s, r) => s + r.qty, 0),
   };
   // The full check has landed and verified: stamp it, so the
   // daily check and Settings can tell a checked backup from a
@@ -2692,8 +2831,297 @@ async function fullCloudSync(
     lastSyncItems: verified.items,
     lastSyncCopies: verified.copies,
   });
+  // The private usage journal backs up in the same pass
+  // (best-effort: a failed journal push never fails the
+  // collection sync — the watermark simply doesn't advance
+  // and the next sync retries the same rows).
+  await pushUsageJournalToCloud(ctx, owner).catch(() => 0);
   return verified;
 }
+
+/** ----- Private usage journal (Anthony, Nov 9, 2026) -----
+    The journal records how the signed-in collector moves
+    through the app: screens in order, taps/actions, Back use,
+    searches and their result counts, and step counts for
+    common jobs. It is PRIVATE by construction: rows are keyed
+    to the collector who owns this app copy, the only reader
+    (getUsageJournal) always reads that same collector's rows
+    and takes no parameter that could name anyone else, and no
+    profile/friends/social surface reads the table at all.
+    Content rule: navigation and actions ONLY — the client
+    logger never sends passwords, payment details, or message
+    text, and the sanitizer below drops any detail key that
+    even looks like content (message/body/text/password/…)
+    as a second line of defense. Retention: 90 days locally;
+    older rows are pruned on write. Cloud backup: rows ride
+    the collection backup as collection_items rows of kind
+    "journal" (item_key journal:<id>), pushed incrementally
+    behind a watermark by pushUsageJournalToCloud — every
+    reader of that table (backup status, restore, Admin
+    stats) excludes the journal kind, so the collection
+    numbers never move because of it. */
+
+const JOURNAL_KINDS: ReadonlySet<string> = new Set([
+  "screen",
+  "tap",
+  "action",
+  "back",
+  "search",
+  "job",
+]);
+
+/** Detail keys that must never be stored — anything that could
+    carry message text, credentials, or payment data. */
+const JOURNAL_FORBIDDEN_DETAIL_KEYS: ReadonlySet<string> = new Set([
+  "message",
+  "body",
+  "text",
+  "comment",
+  "note",
+  "password",
+  "passcode",
+  "pin",
+  "card",
+  "cardnumber",
+  "zelle",
+  "payment",
+  "secret",
+  "token",
+]);
+
+const JOURNAL_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const JOURNAL_SYNC_WATERMARK_KEY = "usage_journal_synced_through";
+
+type JournalEventIn = {
+  sessionId: string;
+  kind: string;
+  label: string;
+  detail?: Record<string, unknown> | null;
+  at: string;
+};
+
+/** Cleans one incoming event: known kinds only, labels capped,
+    detail reduced to small scalar values under innocent keys. */
+function sanitizeJournalEvent(
+  raw: JournalEventIn,
+): JournalEventIn | null {
+  if (!JOURNAL_KINDS.has(raw.kind)) return null;
+  const label = String(raw.label ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  if (!label) return null;
+  const sessionId = String(raw.sessionId ?? "")
+    .trim()
+    .slice(0, 64);
+  if (!sessionId) return null;
+  const atMs = Date.parse(raw.at);
+  if (!Number.isFinite(atMs)) return null;
+  // Device clocks can drift; keep the stamp within a sane
+  // window around now rather than trusting it blindly.
+  const now = Date.now();
+  const at = new Date(
+    Math.min(Math.max(atMs, now - 30 * 24 * 60 * 60 * 1000), now + 5 * 60 * 1000),
+  ).toISOString();
+  let detail: Record<string, unknown> | null = null;
+  if (raw.detail && typeof raw.detail === "object") {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw.detail).slice(0, 12)) {
+      if (JOURNAL_FORBIDDEN_DETAIL_KEYS.has(k.toLowerCase())) continue;
+      if (
+        typeof v === "number" ||
+        typeof v === "boolean" ||
+        (typeof v === "string" && v.length <= 80)
+      ) {
+        clean[k.slice(0, 40)] = v;
+      }
+    }
+    if (Object.keys(clean).length > 0) detail = clean;
+  }
+  return { sessionId, kind: raw.kind, label, detail, at };
+}
+
+async function readJournalWatermark(ctx: Ctx): Promise<number> {
+  try {
+    const db = ctx.db<typeof schema>();
+    const rows = await db
+      .select()
+      .from(schema.marketplaceMeta)
+      .where(eq(schema.marketplaceMeta.key, JOURNAL_SYNC_WATERMARK_KEY));
+    const n = Number(rows[0]?.value ?? 0);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeJournalWatermark(
+  ctx: Ctx,
+  throughId: number,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  await db
+    .insert(schema.marketplaceMeta)
+    .values({ key: JOURNAL_SYNC_WATERMARK_KEY, value: String(throughId) })
+    .onConflictDoUpdate({
+      target: schema.marketplaceMeta.key,
+      set: { value: String(throughId) },
+    });
+}
+
+/** Incremental cloud push of journal rows not yet backed up:
+    upserts them as kind "journal" collection_items rows and
+    advances the watermark only over rows that landed. Returns
+    how many rows were pushed. Best-effort by contract — the
+    caller swallows failures and the next sync retries. */
+async function pushUsageJournalToCloud(
+  ctx: Ctx,
+  owner: string,
+): Promise<number> {
+  const db = ctx.db<typeof schema>();
+  const through = await readJournalWatermark(ctx);
+  const rows = await db
+    .select()
+    .from(schema.usageJournal)
+    .where(
+      and(
+        eq(schema.usageJournal.collectorCode, owner),
+        gt(schema.usageJournal.id, through),
+      ),
+    )
+    .orderBy(asc(schema.usageJournal.id))
+    .limit(2000);
+  if (rows.length === 0) return 0;
+  const cloudRows: CloudItemRow[] = rows.map((r) => {
+    let detail: Record<string, unknown> | null = null;
+    if (r.detailJson) {
+      try {
+        const parsed: unknown = JSON.parse(r.detailJson);
+        if (parsed && typeof parsed === "object") {
+          detail = parsed as Record<string, unknown>;
+        }
+      } catch {
+        detail = null;
+      }
+    }
+    return {
+      owner_collector_id: owner,
+      item_key: `journal:${r.id}`,
+      display_name: `${r.kind}: ${r.label}`.slice(0, 200),
+      qty: 1,
+      kind: "journal",
+      meta: {
+        journalId: r.id,
+        sessionId: r.sessionId,
+        kind: r.kind,
+        label: r.label,
+        detail,
+        at: r.at,
+      },
+    };
+  });
+  if (!(await upsertCloudItems(cloudRows))) return 0;
+  const last = rows[rows.length - 1];
+  if (last) await writeJournalWatermark(ctx, last.id);
+  return rows.length;
+}
+
+/** Deletes this collector's cloud journal rows whose local
+    rows were pruned past retention, so the backup doesn't
+    keep what the journal itself let go. Best-effort. */
+async function pruneUsageJournal(ctx: Ctx, owner: string): Promise<void> {
+  try {
+    const db = ctx.db<typeof schema>();
+    const cutoff = new Date(
+      Date.now() - JOURNAL_RETENTION_MS,
+    ).toISOString();
+    const old = await db
+      .select({ id: schema.usageJournal.id })
+      .from(schema.usageJournal)
+      .where(
+        and(
+          eq(schema.usageJournal.collectorCode, owner),
+          lt(schema.usageJournal.at, cutoff),
+        ),
+      )
+      .limit(5000);
+    if (old.length === 0) return;
+    await db
+      .delete(schema.usageJournal)
+      .where(
+        and(
+          eq(schema.usageJournal.collectorCode, owner),
+          lt(schema.usageJournal.at, cutoff),
+        ),
+      );
+    await deleteCloudItems(
+      owner,
+      old.map((r) => `journal:${r.id}`),
+    ).catch(() => false);
+  } catch {
+    // Pruning is housekeeping; a failure just retries on the
+    // next journal write.
+  }
+}
+
+const logUsageEventsResponse = z.object({
+  ok: z.literal(true),
+  /** How many of the submitted events were stored. */
+  saved: z.number(),
+});
+
+const usageJournalEventOut = z.object({
+  id: z.number(),
+  sessionId: z.string(),
+  /** "screen" | "tap" | "action" | "back" | "search" | "job" */
+  kind: z.string(),
+  label: z.string(),
+  detail: z.record(z.string(), z.unknown()).nullable(),
+  /** ISO instant the step happened. */
+  at: z.string(),
+});
+
+const usageJournalResponse = z.object({
+  /** The collector this journal belongs to — always the
+      signed-in owner of this app copy; the action takes no
+      parameter that could name anyone else. */
+  collectorCode: z.string(),
+  username: z.string(),
+  /** ISO instant the returned window starts / ends. */
+  from: z.string(),
+  to: z.string(),
+  /** Events in the window, oldest first, capped at the most
+      recent 2,000 (truncated says when the cap bit). */
+  truncated: z.boolean(),
+  events: z.array(usageJournalEventOut),
+  summary: z.object({
+    totalEvents: z.number(),
+    sessions: z.number(),
+    screensVisited: z.number(),
+    /** Screens left within 4 seconds of opening them. */
+    quickExits: z.array(
+      z.object({ screen: z.string(), dwellMs: z.number(), at: z.string() }),
+    ),
+    /** Searches that returned nothing, newest first. */
+    zeroResultSearches: z.array(
+      z.object({ query: z.string(), at: z.string() }),
+    ),
+    /** Per-job step stats for the window. */
+    jobs: z.array(
+      z.object({
+        job: z.string(),
+        runs: z.number(),
+        completed: z.number(),
+        avgSteps: z.number(),
+        avgMs: z.number(),
+      }),
+    ),
+    /** Most-visited screens in the window. */
+    topScreens: z.array(z.object({ screen: z.string(), visits: z.number() })),
+    /** Back presses recorded in the window. */
+    backs: z.number(),
+  }),
+});
 
 /** Incremental push for one card after its ownership changes:
     upsert its current finish rows and delete finishes that are
@@ -2733,6 +3161,29 @@ async function syncCardToCloud(
           rarity: cardRow.rarity ?? null,
         },
       }));
+    // The joined-scene tally rides the same per-card push under
+    // its marked keys, so a scene edit backs up (and a stale
+    // scene row deletes) exactly like a pocket finish.
+    for (const [finish, qty] of Object.entries(
+      sceneFinishesOf(cardRow),
+    )) {
+      if (qty <= 0) continue;
+      desired.push({
+        owner_collector_id: owner,
+        item_key: cloudSceneItemKey(cardRow.uid, finish),
+        display_name: `${cardRow.fullName} (${finish} · joining scene)`,
+        qty,
+        kind: "card",
+        meta: {
+          uid: cardRow.uid,
+          finish,
+          scene: true,
+          set: cardRow.groupName,
+          number: cardRow.printed,
+          rarity: cardRow.rarity ?? null,
+        },
+      });
+    }
     const existing = await supabaseRest(
       `collection_items?select=item_key&owner_collector_id=eq.${encodeURIComponent(owner)}&item_key=like.${encodeURIComponent(`${prefix}*`)}`,
     );
@@ -7899,7 +8350,8 @@ export const Actions = {
       let ownedQty = 0;
       let totalPockets = 0;
       for (const row of rows) {
-        ownedQty += row.ownedQty;
+        // Total copies across both tallies (pocket + scene).
+        ownedQty += tallyTotal(row);
         const pockets = pocketsOf(row);
         totalPockets += pockets.length;
         const group = groupsMap.get(row.groupKey) ?? {
@@ -7916,7 +8368,9 @@ export const Actions = {
         };
         for (const pocket of pockets) {
           group.total += 1;
-          if (pocket.qty > 0) {
+          // A scene-only copy fills the pocket (Anthony,
+          // Nov 9, 2026): owned when either tally has one.
+          if (pocket.qty + pocket.sceneQty > 0) {
             group.owned += 1;
             ownedSlots += 1;
           } else {
@@ -8726,7 +9180,20 @@ export const Actions = {
         : null;
       const prices = parseFinance(row.financeJson);
       const money = cardMoney(row);
-      const byFinish = Object.entries(finishes).map(([finish, qty]) => {
+      // Per-finish money rows tally BOTH counts (Anthony, Nov 9,
+      // 2026): qty and valueTotal cover pocket + scene copies so
+      // the rows sum to the cardMoney totals above; paidTotal
+      // stays on pocket copies only, since scene copies carry
+      // no recorded purchase price.
+      const sceneFin = sceneFinishesOf(row);
+      const byFinish = [
+        ...new Set([
+          ...Object.keys(finishes),
+          ...Object.keys(sceneFin),
+        ]),
+      ].map((finish) => {
+        const pocketQty = finishes[finish] ?? 0;
+        const qty = pocketQty + (sceneFin[finish] ?? 0);
         const price = prices[finish];
         const unitValue = price?.value ?? row.marketValue ?? null;
         const unitPaid = price?.paid ?? row.paidValue ?? null;
@@ -8736,7 +9203,7 @@ export const Actions = {
           valuePerUnit: unitValue,
           paidPerUnit: unitPaid,
           valueTotal: Math.round((unitValue ?? 0) * qty * 100) / 100,
-          paidTotal: Math.round((unitPaid ?? 0) * qty * 100) / 100,
+          paidTotal: Math.round((unitPaid ?? 0) * pocketQty * 100) / 100,
         };
       });
       const histRows = await db
@@ -8789,6 +9256,7 @@ export const Actions = {
         cardText: row.cardText,
         ownedQty: row.ownedQty,
         finishes,
+        sceneFinishes: sceneFinishesOf(row),
         // Fall back to the Lorcast snapshot (via the shared
         // chain) when the database carries no price for this
         // printing — a friend's profile prices his cards
@@ -8870,7 +9338,7 @@ export const Actions = {
       for (const row of rows) {
         for (const pocket of pocketsOf(row)) {
           totalPockets += 1;
-          if (pocket.qty > 0) ownedPockets += 1;
+          if (pocket.qty + pocket.sceneQty > 0) ownedPockets += 1;
         }
       }
       const completion = completionOf(rows);
@@ -10676,7 +11144,8 @@ export const Actions = {
         // Movers: owned printings with a tracked baseline point.
         const movers: Mover[] = [];
         for (const row of rows) {
-          if (row.ownedQty <= 0) continue;
+          const tally = tallyTotal(row);
+          if (tally <= 0) continue;
           const pts = histByUid.get(row.uid);
           if (!pts || pts.length === 0) continue;
           let base = pts[0];
@@ -10686,9 +11155,9 @@ export const Actions = {
             }
           }
           if (base == null || base.unitValue <= 0) continue;
-          const unitNow = cardMoney(row).value / row.ownedQty;
+          const unitNow = cardMoney(row).value / tally;
           if (unitNow <= 0) continue;
-          const deltaTotal = round2((unitNow - base.unitValue) * row.ownedQty);
+          const deltaTotal = round2((unitNow - base.unitValue) * tally);
           if (deltaTotal === 0) continue;
           movers.push({
             cardId: row.id,
@@ -10696,7 +11165,7 @@ export const Actions = {
             groupName: row.groupName,
             printed: row.printed,
             rarity: row.rarity,
-            qty: row.ownedQty,
+            qty: tally,
             unitNow: round2(unitNow),
             deltaTotal,
             pct: Math.round(((unitNow - base.unitValue) / base.unitValue) * 10000) / 100,
@@ -10731,7 +11200,8 @@ export const Actions = {
       // size of the move across owned copies.
       const movers24hAll: Mover[] = [];
       for (const row of rows) {
-        if (row.ownedQty <= 0) continue;
+        const tally = tallyTotal(row);
+        if (tally <= 0) continue;
         const pts = histByUid.get(row.uid);
         if (!pts || pts.length === 0) continue;
         const latestDate = pts[pts.length - 1]?.date;
@@ -10746,11 +11216,9 @@ export const Actions = {
           if (p.date <= cutoff) base = p;
         }
         if (!base || base.unitValue <= 0) continue;
-        const unitNow = cardMoney(row).value / row.ownedQty;
+        const unitNow = cardMoney(row).value / tally;
         if (unitNow <= 0) continue;
-        const deltaTotal = round2(
-          (unitNow - base.unitValue) * row.ownedQty,
-        );
+        const deltaTotal = round2((unitNow - base.unitValue) * tally);
         if (deltaTotal === 0) continue;
         movers24hAll.push({
           cardId: row.id,
@@ -10758,7 +11226,7 @@ export const Actions = {
           groupName: row.groupName,
           printed: row.printed,
           rarity: row.rarity,
-          qty: row.ownedQty,
+          qty: tally,
           unitNow: round2(unitNow),
           deltaTotal,
           pct:
@@ -11624,6 +12092,51 @@ export const Actions = {
         .where(eq(schema.cards.id, args.cardId));
       if (updated[0]) await syncCardToCloud(ctx, updated[0]);
       return { ownedQty: total };
+    },
+  }),
+
+  updateSceneOwnership: defineAction({
+    description:
+      "Updates how many copies of a connecting-art card Anthony holds in its joined scene, broken down by finish — a tally fully separate from the binder pocket finishes (Anthony, Nov 9, 2026): scene steppers write only here, pocket steppers only to finishes, and the scene tally starts at 0 for every card. Master-set owned/missing and portfolio value combine the two tallies server-side; this write touches nothing else.",
+    request: z.object({
+      cardId: z.number().int().positive(),
+      finishes: z.record(z.string(), z.number().int().min(0).max(999)),
+    }),
+    response: z.object({ sceneQty: z.number() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ sceneQty: number }> {
+      const db = ctx.db<typeof schema>();
+      const clean: Record<string, number> = {};
+      let total = 0;
+      for (const [finish, qty] of Object.entries(args.finishes)) {
+        if (qty > 0) {
+          clean[finish] = qty;
+          total += qty;
+        }
+      }
+      const before = await db
+        .select({ sceneFinishes: schema.cards.sceneFinishes })
+        .from(schema.cards)
+        .where(eq(schema.cards.id, args.cardId))
+        .limit(1);
+      const beforeTotal = before[0]
+        ? tallySum(parseFinishes(before[0].sceneFinishes))
+        : 0;
+      await db
+        .update(schema.cards)
+        .set({ sceneFinishes: JSON.stringify(clean) })
+        .where(eq(schema.cards.id, args.cardId));
+      await recordRecentAddition(ctx, args.cardId, total - beforeTotal);
+      ctx.invalidateQueries();
+      await markBackupDirty(ctx);
+      const updated = await db
+        .select()
+        .from(schema.cards)
+        .where(eq(schema.cards.id, args.cardId));
+      if (updated[0]) await syncCardToCloud(ctx, updated[0]);
+      return { sceneQty: total };
     },
   }),
 
@@ -14033,7 +14546,14 @@ export const Actions = {
         lastDailyCheckAt: meta?.lastDailyCheckAt ?? null,
         needsFullCheck: backupNeedsFullCheck(meta),
       };
-      const remote = await fetchCloudItems(profile.collectorCode);
+      const remoteAll = await fetchCloudItems(profile.collectorCode);
+      // Journal backup rows share the table but are not
+      // collection items; the in-sync comparison is about the
+      // collection only.
+      const remote =
+        remoteAll == null
+          ? null
+          : remoteAll.filter((r) => r.kind !== "journal");
       if (remote == null) {
         return {
           reachable: false,
@@ -14165,6 +14685,7 @@ export const Actions = {
       }
       const byUid = new Map(cardRows.map((r) => [r.uid, r]));
       const finishesByUid = new Map<string, Record<string, number>>();
+      const sceneByUid = new Map<string, Record<string, number>>();
       let cardsApplied = 0;
       let sealedApplied = 0;
       for (const row of remote) {
@@ -14177,6 +14698,18 @@ export const Actions = {
           const uid = rest.slice(0, cut);
           const finish = rest.slice(cut + 1);
           if (!byUid.has(uid) || row.qty <= 0) continue;
+          // Scene-tally rows carry the __scene__ marker in the
+          // finish segment: they restore into scene_finishes,
+          // never into the pocket finishes.
+          if (finish.startsWith(CLOUD_SCENE_PREFIX)) {
+            const sceneFinish = finish.slice(CLOUD_SCENE_PREFIX.length);
+            if (!sceneFinish) continue;
+            const entry = sceneByUid.get(uid) ?? {};
+            entry[sceneFinish] = row.qty;
+            sceneByUid.set(uid, entry);
+            cardsApplied += 1;
+            continue;
+          }
           const entry = finishesByUid.get(uid) ?? {};
           entry[finish] = row.qty;
           finishesByUid.set(uid, entry);
@@ -14282,6 +14815,12 @@ export const Actions = {
             ownedQty: total,
             finishes: JSON.stringify(finishes),
           })
+          .where(eq(schema.cards.uid, uid));
+      }
+      for (const [uid, scene] of sceneByUid) {
+        await db
+          .update(schema.cards)
+          .set({ sceneFinishes: JSON.stringify(scene) })
           .where(eq(schema.cards.uid, uid));
       }
       ctx.invalidateQueries();
@@ -21442,6 +21981,10 @@ export const Actions = {
       >();
       let totalCopies = 0;
       for (const item of items) {
+        // Usage-journal backup rows (kind "journal") ride the
+        // same table but are not collection items: they never
+        // count toward copies, kinds, rosters, or most-owned.
+        if (item.kind === "journal") continue;
         totalCopies += item.qty;
         itemsByOwner.set(
           item.owner,
@@ -21759,8 +22302,11 @@ export const Actions = {
       }
       if (activity) {
         metrics.set("activity.totalCopies", String(activity.totalCopies));
-        metrics.set("activity.totalRows", String(activity.totalRows));
-        metrics.set("activity.cardsLogged", String(activity.cardsLogged));
+        // "Logged items" (totalRows) and "Cards logged"
+        // (cardsLogged) are no longer tracked or shown
+        // (Anthony, Nov 9, 2026): they overlapped the one
+        // total-copies stat, so the redundant counters
+        // were deleted entirely.
         metrics.set(
           "activity.avgPerCollector",
           String(activity.avgPerCollector),
@@ -22054,7 +22600,8 @@ export const Actions = {
           groupKey: row.groupKey,
           groupName: row.groupName,
           printed: row.printed,
-          ownedQty: row.ownedQty,
+          // Total copies across both tallies (pocket + scene).
+          ownedQty: tallyTotal(row),
           position: positionOf.get(row.id) ?? 0,
           rarity: row.rarity,
           finishes: parseFinishes(row.finishes),
@@ -22069,6 +22616,216 @@ export const Actions = {
           artLinked: ART_GROUP_BY_UID.has(row.uid),
         })),
       };
+    },
+  }),
+  logUsageEvents: defineAction({
+    description:
+      "Appends a batch of usage-journal events for the signed-in collector (screens visited, taps/actions, Back use, searches with result counts, job step counts — navigation and actions only, never message text, passwords, or payment details). Events are sanitized server-side, stored in the private usage_journal table under the collector's own code, pruned past 90 days, and backed up to the cloud with the collection sync. Fire-and-forget from the client logger; a failed batch never affects the app.",
+    request: z.object({
+      events: z
+        .array(
+          z.object({
+            sessionId: z.string().min(1).max(64),
+            kind: z.string().min(1).max(16),
+            label: z.string().min(1).max(200),
+            detail: z
+              .record(z.string(), z.unknown())
+              .nullable()
+              .optional(),
+            at: z.string().min(1).max(40),
+          }),
+        )
+        .min(1)
+        .max(100),
+    }),
+    response: logUsageEventsResponse,
+    async handler(ctx, args): Promise<z.infer<typeof logUsageEventsResponse>> {
+      const profile = await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const clean: (typeof schema.usageJournal.$inferInsert)[] = [];
+      for (const raw of args.events) {
+        const e = sanitizeJournalEvent(raw);
+        if (!e) continue;
+        clean.push({
+          collectorCode: profile.collectorCode,
+          sessionId: e.sessionId,
+          kind: e.kind,
+          label: e.label,
+          detailJson: e.detail ? JSON.stringify(e.detail) : null,
+          at: e.at,
+        });
+      }
+      if (clean.length > 0) {
+        await db.insert(schema.usageJournal).values(clean);
+      }
+      // Retention housekeeping rides the write path so no
+      // separate schedule is needed.
+      await pruneUsageJournal(ctx, profile.collectorCode);
+      return { ok: true as const, saved: clean.length };
+    },
+  }),
+
+  getUsageJournal: defineAction({
+    description:
+      "Fetches the signed-in collector's OWN private usage journal for the last N days (default 1, max 31): the ordered events (screens, taps/actions, Back use, searches, job runs) plus a friction summary — sessions, quick exits (screens left within 4 seconds), zero-result searches, per-job step/duration averages, top screens, and Back counts. There is deliberately no parameter for whose journal: it always returns the journal of the collector who owns this app copy, so Jarvis's daily audit reads Anthony's trail and no one can ever read another user's. Never exposed on any profile or social surface.",
+    request: z.object({
+      days: z.number().int().min(1).max(31).optional(),
+    }),
+    response: usageJournalResponse,
+    async handler(ctx, args): Promise<z.infer<typeof usageJournalResponse>> {
+      const profile = await ensureCollectorProfile(ctx);
+      const days = args.days ?? 1;
+      const to = new Date();
+      const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.usageJournal)
+        .where(
+          and(
+            eq(schema.usageJournal.collectorCode, profile.collectorCode),
+            gte(schema.usageJournal.at, from.toISOString()),
+          ),
+        )
+        .orderBy(desc(schema.usageJournal.at))
+        .limit(2001);
+      const truncated = rows.length > 2000;
+      const kept = (truncated ? rows.slice(0, 2000) : rows).reverse();
+      const events = kept.map((r) => {
+        let detail: Record<string, unknown> | null = null;
+        if (r.detailJson) {
+          try {
+            const parsed: unknown = JSON.parse(r.detailJson);
+            if (parsed && typeof parsed === "object") {
+              detail = parsed as Record<string, unknown>;
+            }
+          } catch {
+            detail = null;
+          }
+        }
+        return {
+          id: r.id,
+          sessionId: r.sessionId,
+          kind: r.kind,
+          label: r.label,
+          detail,
+          at: r.at,
+        };
+      });
+      // Friction summary, computed from the same window.
+      const sessions = new Set(events.map((e) => e.sessionId));
+      const screenCounts = new Map<string, number>();
+      const quickExits: { screen: string; dwellMs: number; at: string }[] =
+        [];
+      let screensVisited = 0;
+      let backs = 0;
+      // Dwell of a screen = gap to the NEXT screen event in
+      // the same session (or to a Back that left it).
+      const lastScreenBySession = new Map<
+        string,
+        { label: string; atMs: number; at: string }
+      >();
+      for (const e of events) {
+        if (e.kind === "back") backs += 1;
+        if (e.kind !== "screen") continue;
+        screensVisited += 1;
+        screenCounts.set(e.label, (screenCounts.get(e.label) ?? 0) + 1);
+        const prev = lastScreenBySession.get(e.sessionId);
+        const atMs = Date.parse(e.at);
+        if (prev && Number.isFinite(atMs)) {
+          const dwell = atMs - prev.atMs;
+          if (dwell >= 0 && dwell < 4000) {
+            quickExits.push({
+              screen: prev.label,
+              dwellMs: dwell,
+              at: prev.at,
+            });
+          }
+        }
+        if (Number.isFinite(atMs)) {
+          lastScreenBySession.set(e.sessionId, {
+            label: e.label,
+            atMs,
+            at: e.at,
+          });
+        }
+      }
+      const zeroResultSearches = events
+        .filter(
+          (e) =>
+            e.kind === "search" &&
+            typeof e.detail?.results === "number" &&
+            e.detail.results === 0,
+        )
+        .map((e) => ({ query: e.label, at: e.at }))
+        .reverse()
+        .slice(0, 50);
+      const jobAgg = new Map<
+        string,
+        { runs: number; completed: number; steps: number; ms: number }
+      >();
+      for (const e of events) {
+        if (e.kind !== "job") continue;
+        const agg =
+          jobAgg.get(e.label) ?? { runs: 0, completed: 0, steps: 0, ms: 0 };
+        agg.runs += 1;
+        if (e.detail?.completed === true) agg.completed += 1;
+        if (typeof e.detail?.steps === "number") agg.steps += e.detail.steps;
+        if (typeof e.detail?.ms === "number") agg.ms += e.detail.ms;
+        jobAgg.set(e.label, agg);
+      }
+      const jobs = [...jobAgg.entries()].map(([job, a]) => ({
+        job,
+        runs: a.runs,
+        completed: a.completed,
+        avgSteps: a.runs > 0 ? Math.round((a.steps / a.runs) * 10) / 10 : 0,
+        avgMs: a.runs > 0 ? Math.round(a.ms / a.runs) : 0,
+      }));
+      const topScreens = [...screenCounts.entries()]
+        .map(([screen, visits]) => ({ screen, visits }))
+        .sort((a, b) => b.visits - a.visits)
+        .slice(0, 12);
+      return {
+        collectorCode: profile.collectorCode,
+        username: profile.username,
+        from: from.toISOString(),
+        to: to.toISOString(),
+        truncated,
+        events,
+        summary: {
+          totalEvents: events.length,
+          sessions: sessions.size,
+          screensVisited,
+          quickExits: quickExits.slice(-50).reverse(),
+          zeroResultSearches,
+          jobs,
+          topScreens,
+          backs,
+        },
+      };
+    },
+  }),
+
+  syncUsageJournal: defineAction({
+    description:
+      "Pushes any usage-journal rows not yet backed up to the cloud backup (Supabase collection_items, kind \"journal\", under the signed-in collector's own code) and advances the sync watermark. The same push also rides every full collection sync; this standalone action lets the app flush the journal to the cloud when it closes or backgrounds without waiting for a collection change. Best-effort: unreachable cloud returns pushed 0 and the rows retry next time.",
+    request: z.object({}),
+    response: z.object({
+      ok: z.boolean(),
+      /** Journal rows pushed to the cloud by this call. */
+      pushed: z.number(),
+    }),
+    async handler(ctx): Promise<{ ok: boolean; pushed: number }> {
+      const profile = await ensureCollectorProfile(ctx);
+      try {
+        const pushed = await pushUsageJournalToCloud(
+          ctx,
+          profile.collectorCode,
+        );
+        return { ok: true, pushed };
+      } catch {
+        return { ok: false, pushed: 0 };
+      }
     },
   }),
 } satisfies ActionsModule;

@@ -56,6 +56,15 @@ export const cards = sqliteTable("cards", {
   ownedQty: integer("owned_qty").notNull().default(0),
   /** JSON object: finish label -> copies, e.g. {"Regular":2,"Cold Foil":1}. */
   finishes: text("finishes").notNull().default("{}"),
+  /** JSON object: finish label -> copies held as part of a joined
+      connecting-art scene (Anthony, Nov 9, 2026): a SEPARATE tally
+      from the pocket finishes above — scene steppers write only
+      here, pocket steppers only above, both start independent
+      (scene counts start at 0, never inherited from pockets). For
+      master-set owned/missing a finish counts as owned when either
+      tally has a copy, and total copies = pocket + scene. Only
+      printings in a verified connecting-art group ever carry any. */
+  sceneFinishes: text("scene_finishes").notNull().default("{}"),
   /** Quantity-weighted average market value per unit, USD. Starts as the
       Nov 1 2026 Shiny export price; the daily re-pricing refresh updates it. */
   marketValue: real("market_value"),
@@ -1482,6 +1491,42 @@ export const libraryOrders = sqliteTable("library_orders", {
     the daily check and the app's open-time catch-up know there
     is something to verify. Nulls are honest: no row / null
     stamp = that event has never been recorded. */
+/** The private usage journal (Anthony, Nov 9, 2026 — approved
+    after Jarvis proposed it): one row per recorded step of how
+    the signed-in collector actually moves through the app —
+    screens visited in order, taps and actions taken, Back use,
+    searches and whether they found anything, and how many
+    steps common jobs (adding a card, finding an item, a trade
+    step) take. Written in batches by the logUsageEvents action
+    from the client's lightweight logger; read ONLY by
+    getUsageJournal, which returns the journal of the collector
+    who owns this app copy and no one else's — there is no way
+    to ask for another collector's journal, and no profile,
+    friends, or social surface ever reads this table. PRIVACY:
+    navigation and actions only — the client never sends, and
+    the server never stores, passwords, payment details, or
+    message text. Rows ride the cloud backup as collection_items
+    rows of kind "journal" under the owner's code (see the
+    journal sync in actions.ts), pruned locally past the
+    retention window. */
+export const usageJournal = sqliteTable("usage_journal", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** The collector this journal belongs to (the local profile). */
+  collectorCode: text("collector_code").notNull(),
+  /** One app-open session's id (client-generated per open). */
+  sessionId: text("session_id").notNull(),
+  /** "screen" | "tap" | "action" | "back" | "search" | "job" */
+  kind: text("kind").notNull(),
+  /** Screen name, control label, search text, or job name. */
+  label: text("label").notNull(),
+  /** Small JSON detail object (dwell ms, result counts, step
+      counts) — never free text from the user beyond the search
+      terms the journal exists to study. */
+  detailJson: text("detail_json"),
+  /** ISO instant the step happened on the device. */
+  at: text("at").notNull(),
+});
+
 export const backupMeta = sqliteTable("backup_meta", {
   id: integer("id").primaryKey(),
   /** ISO instant of the most recent collection change. */

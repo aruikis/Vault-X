@@ -2,6 +2,33 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.115.1
+
+- Admin is simpler: each user's entry on the Registered Users list now shows just their name, Collector ID, joined date, and one number — total copies. The overlapping counters that crowded it before (logged items, cards logged, and the extra tallies beside them) are gone for good, on every user's entry.
+- Fixed the floating scroll arrows sitting on top of the checkout bar: on a friend's page, the up and down arrow circles used to cover the ends of the green cash cart bar and clip the Checkout button. Now the arrows hide themselves whenever a checkout bar is on screen and come back the moment it's gone, so the bar always shows clean and full-width.
+
+## v1.115.0
+
+- New, just for the owner: Vault X now keeps a private usage journal. As you move through the app it quietly notes the screens you visit and in what order, the buttons and steppers you tap, when you back out of a screen seconds after opening it, what you search for and whether the search found anything, and how many steps jobs like adding a card or finding an item take. Jarvis reads the journal to spot friction and suggest smoother ways to do things.
+- Your journal is yours alone: only you can ever see it, it never shows on your profile or to friends, and it records navigation and taps only — never message text, passwords, or payment details. You can read your own trail any time in Admin, under ‘Usage journal’, as a plain session timeline. The journal backs up to the cloud together with your collection.
+
+## v1.114.0
+
+- Quick-add for sealed products: every sealed item at the top of a set page — booster boxes, prerelease boxes, Troves, packs, gift sets, starter decks, in every chapter — now has its own plus and minus stepper right on the tile, so you can add a copy without opening each product first. The Quest pages' sealed box has one too. The steppers write the same owned counts as the sealed items' own pages (hold the plus to pick a count), so the tile, the detail page, and your totals always agree.
+- The plus and minus buttons everywhere are a little smaller to look at — the glowing circle and its +/− are slightly shrunk — but the part your thumb lands on is exactly the same size as before: the big invisible touch area around each button did not shrink at all. Same hollow glowing ring, same softer red and green.
+
+## v1.113.0
+
+- The connected artwork scene now stands out in gold, everywhere it appears — every chapter, every set, and on a card's own page. The joined artwork window itself wears a thick glowing gold border, the 'Connected artwork' header is now a filled gold band with dark lettering, and the Regular and Foil scene labels print in gold too.
+- Back from a set page is fixed: opening a set from the chapters list (Hyperia City, for example) now takes you back to the full chapters list with one Back, instead of skipping past it to the TCG Universe. The on-screen 'All sets' button lands in the same place.
+- Every chapter tile on the Disney Lorcana chapters page now shows its completion percentage right beside the owned count — for example, 350/446 now reads 350/446 · 78%.
+
+## v1.112.0
+
+- You can now add cards right from the joined artwork scene: every card in a connected-art scene — on the set page and on a card's own page — has its own plus and minus stepper under it. The regular scene's steppers count regular copies, the foil scene's steppers count cold foil copies, and the Enchanted and Iconic scenes count those finishes. Anything you add there shows up in the card's pocket, the scene's completion line, the set totals, and your Portfolio, exactly as if you had added it from the pocket itself.
+- The connected-artwork window now wears a bright accent header bar in the link insignia's color family, matched to your theme, so the scene block stands out from the ordinary sections while you scroll a set page.
+- The bright bands above and below the Hyperia City Full Puzzle Art photo are now a soft dark matte instead of near-white, so the picture sits easier against the dark theme. The photo itself is unchanged.
+
 ## v1.111.0
 
 - Hyperia City's Full Puzzle Art is fixed at last — and we found the real reason it kept looking broken: Hyperia's nine puzzle pieces are sideways (landscape) cards, and the app was squeezing each sideways picture into an upright slot, cutting the middle out of every piece, so the joined scene never lined up. The Full Puzzle Art now shows the photo you supplied: Miguel with his white guitar, the nine pieces laid out as nine separate cards in a 3-by-3 grid with their gaps and rounded corners, exactly like cards in a book — in the set page's Puzzle section, in the binder view, and big on the card's own page. Every other set's Full Puzzle Art was checked too: Chapter One's Mickey Mouse (the one you verified) and the Floodborn, Ursula's Return, Azurite Sea, Fabled, Winterspell, Wilds Unknown and Attack of the Vine! full pictures all show their real assembled photos as before; Shimmering Skies, Archazia's Island, Reign of Jafar and Whispers in the Well honestly have no assembled picture anywhere to show, so theirs keep the clean name plate.

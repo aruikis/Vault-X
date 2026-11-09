@@ -119,6 +119,16 @@ scrubWindowKeys,
 useOwnEntryWindow,
 useWindowHistory,
 } from "./historyNav";
+import {
+  installJournalListeners,
+  journalEvent,
+  journalJobEnd,
+  journalJobOpen,
+  journalJobStart,
+  journalJobStep,
+  journalJobSteps,
+  journalScreen,
+} from "./usageJournal";
 import { LetterAvatar } from "./letterAvatar";
 import { CutoutImg, warmGameCutouts } from "./cutoutImg";
 import {
@@ -563,7 +573,12 @@ function hasFoil(finishes: Record<string, number>): boolean {
     directed — because the composite center-crops that set's
     LANDSCAPE pieces into portrait cells and the joined
     picture never lines up (the three-time-reported bug this
-    replaces). */
+    replaces). The photo is landscape inside portrait pockets,
+    so the letterbox bands above and below it render on a
+    dark matte (#2e2b28 — Anthony, Nov 9, 2026: the original
+    near-white cream ground glared against the dark theme;
+    he asked for it darkened, kept a touch lighter than
+    black). The photo itself is untouched. */
 const BUNDLED_ART_IMAGES: Record<string, string> = {
   "hyperia-full": hyperiaFullPuzzleArt,
 };
@@ -740,11 +755,16 @@ const Pocket = memo(function Pocket({
     adjust.mutate({ delta });
   };
   const shownQty = cols === 2 ? qty : card.ownedQty;
-  const owned = shownQty > 0;
+  // Total copies and filled state span both tallies (Anthony,
+  // Nov 9, 2026): a copy held in the joined scene fills this
+  // pocket — not ghosted, not missing — while the stepper
+  // below still edits the pocket count alone.
+  const tallyQty = shownQty + card.sceneQty;
+  const owned = tallyQty > 0;
   const isFoilPocket = card.pocket === "foil" || hasFoil(card.finishes);
   const pocketAria = `${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
     isFoilPocket ? ", foil" : ""
-  }, ${owned ? `owned, ${shownQty} copies` : "missing"}${
+  }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
     card.artLink ? ", artwork joins a larger scene" : ""
   }`;
   const cardButton = (
@@ -765,7 +785,7 @@ const Pocket = memo(function Pocket({
             alt={owned ? card.fullName : `${card.fullName} (missing)`}
             loading="lazy"
             decoding="async"
-            className={`h-full w-full bg-[#f5f1e8] object-contain ${
+            className={`h-full w-full bg-[#2e2b28] object-contain ${
               owned ? "" : "ghost-img"
             }`}
           />
@@ -814,7 +834,7 @@ const Pocket = memo(function Pocket({
         ) : null}
         {owned ? (
           <span className="absolute right-1 top-1 rounded-full bg-[var(--gold)] px-1.5 py-px text-[10px] font-bold text-black shadow">
-            ×{shownQty}
+            ×{tallyQty}
           </span>
         ) : (
           <span className="absolute left-1 top-1 rounded-full bg-black/55 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-[var(--ghost)]">
@@ -1014,8 +1034,12 @@ type SceneMember = {
   fullName: string;
   printed: string;
   groupName: string;
+  /** Total copies across both tallies (pocket + scene). */
   ownedQty: number;
   finishes: Record<string, number>;
+  /** The member's joined-scene tally alone — what the scene
+      steppers read and write (Anthony, Nov 9, 2026). */
+  sceneFinishes: Record<string, number>;
   isSelf: boolean;
 };
 type SceneFinishStatus = {
@@ -1026,6 +1050,131 @@ type SceneFinishStatus = {
   complete: boolean;
 };
 
+/** Foil-family finish names for scene rows, mirroring the
+    server's foil family (plus Iconic, which the server
+    scores into the foil family for scenes): a Foil-row
+    stepper controls the member's first owned finish from
+    this list. */
+const SCENE_FOIL_FINISHES = [
+  "Cold Foil",
+  "Epic Foil",
+  "Enchanted",
+  "Enchanted Foil",
+  "Promo Foil",
+  "Promo Cold Foil",
+  "Foil",
+  "Iconic",
+];
+
+/** Which finish one scene row's steppers control for one
+    member: the Regular row controls the member's non-foil
+    finish (Regular, or Promo on promo printings); the Foil
+    row controls its foil-family finish (Cold Foil on set
+    cards, the Epic Foil / Enchanted / Iconic of chase
+    printings). The key is picked from the finishes the member
+    holds in EITHER tally (pocket or scene), so a scene-only
+    chase copy keeps its real finish name. An unowned member
+    defaults to the finish the row exists for — Regular, Cold
+    Foil, or the chase label itself on Enchanted / Iconic-only
+    scenes. */
+function sceneRowFinishKey(
+  member: SceneMember,
+  row: SceneFinishStatus,
+): string {
+  const held: Record<string, number> = { ...member.sceneFinishes };
+  for (const [f, q] of Object.entries(member.finishes)) {
+    held[f] = (held[f] ?? 0) + q;
+  }
+  const ownedKeys = Object.entries(held)
+    .filter(([, q]) => q > 0)
+    .map(([f]) => f);
+  if (row.key === "regular") {
+    return (
+      ownedKeys.find((f) => !SCENE_FOIL_FINISHES.includes(f)) ?? "Regular"
+    );
+  }
+  const foil = ownedKeys.find((f) => SCENE_FOIL_FINISHES.includes(f));
+  if (foil) return foil;
+  return row.label === "Enchanted" || row.label === "Iconic"
+    ? row.label
+    : "Cold Foil";
+}
+
+/** One member's stepper under a joined scene (Anthony,
+    Nov 9, 2026 amendment): the app's standard stepper —
+    hollow glowing ring, softened red minus / green plus,
+    large touch area, long-press count dial whose pick saves
+    at once — bound to the finish its scene row shows. The
+    count is the member's SCENE tally for that finish
+    (Anthony, Nov 9, 2026, final design): its own number,
+    starting at 0, fully separate from the pocket count —
+    this stepper never moves the pocket count, and pocket
+    steppers never move this one. The number is local state
+    synced from the member's scene record, so it follows the
+    tap instantly; the save itself lands through the parent
+    rows' shared write (see JoinedSceneRows). */
+function SceneFinishStepper({
+  member,
+  row,
+  onApply,
+}: {
+  member: SceneMember;
+  row: SceneFinishStatus;
+  onApply: (member: SceneMember, finishKey: string, n: number) => void;
+}) {
+  const finishKey = sceneRowFinishKey(member, row);
+  const propQty = member.sceneFinishes[finishKey] ?? 0;
+  const [qty, setQty] = useState(propQty);
+  useEffect(() => {
+    setQty(propQty);
+  }, [propQty]);
+  const [dialOpen, setDialOpen] = useState(false);
+  const apply = (n: number) => {
+    const clamped = Math.max(0, Math.min(999, n));
+    setQty(clamped);
+    onApply(member, finishKey, clamped);
+  };
+  return (
+    <div className="px-0.5">
+      {dialOpen ? (
+        <SidewaysCountDial
+          overlay
+          label={`Pick how many ${finishKey} copies of ${member.fullName} you own`}
+          current={qty}
+          onPick={(n) => {
+            apply(n);
+            setDialOpen(false);
+          }}
+          onClose={() => setDialOpen(false)}
+        />
+      ) : null}
+      <div className="flex items-center justify-between">
+        <StepperButton
+          label={`Remove one ${finishKey} copy of ${member.fullName}`}
+          disabled={qty <= 0}
+          onClick={() => apply(qty - 1)}
+          glyph="−"
+          circleClass="h-7 w-7 text-sm"
+        />
+        <span
+          className={`text-sm font-semibold tabular-nums text-[var(--text)] ${
+            qty === 0 ? "zero-owned" : ""
+          }`}
+        >
+          {qty} owned
+        </span>
+        <StepperButton
+          label={`Add one ${finishKey} copy of ${member.fullName} — hold to pick a count`}
+          onClick={() => apply(qty + 1)}
+          onLongPress={() => setDialOpen((v) => !v)}
+          glyph="+"
+          circleClass="h-7 w-7 text-sm"
+        />
+      </div>
+    </div>
+  );
+}
+
 /** The joined artwork rows of a connecting-art scene
     (Anthony, Nov 9, 2026, locked layout): the members' arts
     edge-to-edge in scene order, the non-foil scene first and
@@ -1035,7 +1184,23 @@ type SceneFinishStatus = {
     member with no sourced art keeps a clean placeholder
     slot, and once every slot has settled the scene labels
     itself artwork-incomplete instead of ever showing a
-    broken image. Tapping a member opens its detail. */
+    broken image. Tapping a member opens its detail.
+    STEPPERS (Anthony, Nov 9, 2026, live-call amendment —
+    this OVERRIDES the earlier "joined scene is display-only,
+    no stepper" rule): a standard stepper sits under every
+    member in every finish row, bound to that row's finish —
+    Regular steppers move the member's Regular scene count,
+    Foil steppers its Cold Foil scene count (or the chase
+    finish on Enchanted / Iconic-only scenes). FINAL DESIGN
+    (Anthony, Nov 9, 2026, confirmed on the same call): the
+    scene counts are their OWN tally, separate from the
+    pocket counts — they start at 0, are never inherited from
+    the pockets, and these steppers write only the scene
+    tally while pocket steppers write only the pockets. The
+    scene completion lines above the rows score from the
+    scene tallies; master-set owned/missing, total copies,
+    and Portfolio value combine the two tallies server-side
+    (a scene-only copy fills its pocket and counts once). */
 function JoinedSceneRows({
   members,
   finishStatus,
@@ -1054,16 +1219,63 @@ function JoinedSceneRows({
   const allSettled = members.every((m) => artState[m.id] != null);
   const incomplete =
     allSettled && members.some((m) => artState[m.id] === false);
+  // Scene-stepper writes (see STEPPERS in the doc comment
+  // above): the latest SCENE record per member lives in this
+  // ref so a Regular tap and a Foil tap for the same member
+  // compose instead of overwriting each other; each tap saves
+  // the member's whole scene record through
+  // updateSceneOwnership — the pocket finishes are never in
+  // this payload — and the invalidations re-sync the scene
+  // lines, the pockets' filled/ghost state, set totals, and
+  // Portfolio, which all combine the tallies server-side.
+  const queryClient = useQueryClient();
+  const recordsRef = useRef<Record<number, Record<string, number>>>({});
+  const pendingRef = useRef(0);
+  useEffect(() => {
+    if (pendingRef.current > 0) return;
+    const next: Record<number, Record<string, number>> = {};
+    for (const m of members) next[m.id] = m.sceneFinishes;
+    recordsRef.current = next;
+  }, [members]);
+  const saveFinishes = useMutation({
+    mutationFn: (a: { cardId: number; finishes: Record<string, number> }) =>
+      api.updateSceneOwnership({ cardId: a.cardId, finishes: a.finishes }),
+    onMutate: () => {
+      pendingRef.current += 1;
+    },
+    onSettled: () => {
+      pendingRef.current = Math.max(0, pendingRef.current - 1);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["binder"] });
+      void queryClient.invalidateQueries({ queryKey: ["section"] });
+      void queryClient.invalidateQueries({ queryKey: ["finance"] });
+      void queryClient.invalidateQueries({ queryKey: ["card"] });
+    },
+  });
+  const applyMemberQty = (
+    member: SceneMember,
+    finishKey: string,
+    n: number,
+  ) => {
+    const clamped = Math.max(0, Math.min(999, n));
+    const rec = {
+      ...(recordsRef.current[member.id] ?? member.sceneFinishes),
+      [finishKey]: clamped,
+    };
+    recordsRef.current = { ...recordsRef.current, [member.id]: rec };
+    saveFinishes.mutate({ cardId: member.id, finishes: rec });
+  };
   return (
     <div>
       {finishStatus.map((s) => {
         const foilRow = s.key === "foil";
         return (
           <div key={s.key} className="mt-2.5 first:mt-0">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--dim)]">
+            <p className="scene-row-label mb-1 text-[10px] font-semibold uppercase tracking-wide">
               {s.label} scene
             </p>
-            <div className="relative flex overflow-hidden rounded-lg border border-white/10">
+            <div className="scene-frame relative flex overflow-hidden rounded-lg">
               {members.map((m) => {
                 const art = (
                   <ArtGroupMemberArt
@@ -1099,6 +1311,42 @@ function JoinedSceneRows({
                 <span aria-hidden="true" className="foil-overlay" />
               ) : null}
             </div>
+            {members.length > 4 ? (
+              // Panorama scenes (the 7- and 8-card Dwarfs
+              // scenes): a member column is too narrow to
+              // hold a stepper, so each member gets a
+              // full-width stepper row under the scene
+              // instead — same steppers, same finishes.
+              <div className="mt-1.5 space-y-0.5">
+                {members.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--dim)]">
+                      {m.fullName} · #{m.printed}
+                    </span>
+                    <SceneFinishStepper
+                      member={m}
+                      row={s}
+                      onApply={applyMemberQty}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex">
+                {members.map((m) => (
+                  <div key={m.id} className="min-w-0 flex-1">
+                    <SceneFinishStepper
+                      member={m}
+                      row={s}
+                      onApply={applyMemberQty}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
@@ -1135,11 +1383,13 @@ function ArtGroupStrip({
   return (
     <section
       aria-label="Connecting artwork"
-      className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
+      className="scene-standout mt-4 rounded-xl bg-[var(--surface)] px-3.5 py-3"
     >
-      <div className="flex items-center gap-2">
+      {/* Standout header bar — same treatment as the
+          set-page scene card (see SceneDisplayCard). */}
+      <div className="scene-standout-bar -mx-3.5 -mt-3 flex items-center gap-2 rounded-t-[9px] px-3.5 py-2">
         <ArtLinkInsignia px={20} />
-        <h3 className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">
+        <h3 className="min-w-0 flex-1 text-sm font-bold">
           {partner
             ? `Pairs with ${partner.fullName} · #${partner.printed}`
             : `Artwork joins a ${group.size}-card scene`}
@@ -1154,7 +1404,15 @@ function ArtGroupStrip({
       </div>
       <ul className="mt-3 space-y-1.5">
         {group.members.map((m) => {
-          const finishBits = Object.entries(m.finishes)
+          // Tallied across both counts (pocket + scene), so a
+          // scene-only copy lists its finish here too.
+          const tallied: Record<string, number> = {
+            ...m.sceneFinishes,
+          };
+          for (const [f, q] of Object.entries(m.finishes)) {
+            tallied[f] = (tallied[f] ?? 0) + q;
+          }
+          const finishBits = Object.entries(tallied)
             .filter(([, q]) => q > 0)
             .map(([f, q]) => `${f} ×${q}`)
             .join(" · ");
@@ -1226,14 +1484,17 @@ function ArtGroupStrip({
     full-width display card rendered immediately after the
     group's latest member's last pocket in the section —
     right in front of your face, impossible to miss when
-    hunting a master set. It is display-only: no stepper, no
-    owned count of its own, never a collectible pocket and
-    never counted in set totals. The members' own pockets
-    above it are untouched. Shows the non-foil scene first
-    and the foil scene below it (JoinedSceneRows), the
-    connector insignia, the members by name and number —
-    noting any member that lives in another set — and the
-    group's per-finish completion. */
+    hunting a master set. The display itself is never a
+    collectible pocket — but (Anthony, Nov 9, 2026
+    amendment) every member shown carries a stepper under
+    its art (see JoinedSceneRows), so scene copies can be
+    added from the scene itself; those steppers write the
+    members' separate scene tallies, which fill their
+    pockets for master-set purposes server-side. Shows the
+    non-foil scene first and the foil scene below it
+    (JoinedSceneRows), the connector insignia, the members
+    by name and number — noting any member that lives in
+    another set — and the group's per-finish completion. */
 function SceneDisplayCard({
   scene,
   onOpen,
@@ -1247,11 +1508,21 @@ function SceneDisplayCard({
       aria-label={`Connected artwork, ${scene.size}-card scene: ${scene.members
         .map((m) => m.fullName)
         .join(", ")}`}
-      className="rounded-xl border border-[var(--gold)]/45 bg-[var(--bg)] p-2.5 sm:p-3"
+      className="scene-standout rounded-xl bg-[var(--bg)] p-2.5 sm:p-3"
     >
-      <div className="flex items-center gap-2">
+      {/* Standout header bar (Anthony, Nov 9, 2026): a
+          filled FIXED-gold band with dark lettering (the
+          .scene-standout-bar treatment in theme.css), so
+          the words "Connected artwork" and the block itself
+          stand out at a glance in every theme, unlike the
+          app's plain section headers — and the joined
+          artwork frame inside wears its own thick glowing
+          gold border (.scene-frame, in JoinedSceneRows).
+          Same treatment on the detail page's scene strip
+          (ArtGroupStrip), so every chapter and set matches. */}
+      <div className="scene-standout-bar -mx-2.5 -mt-2.5 flex items-center gap-2 rounded-t-[9px] px-3 py-2 sm:-mx-3 sm:-mt-3">
         <ArtLinkInsignia px={20} />
-        <h3 className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">
+        <h3 className="min-w-0 flex-1 text-sm font-bold">
           Connected artwork — {scene.size}-card scene
         </h3>
       </div>
@@ -1494,6 +1765,13 @@ function CardSheet({
   const card: CardDetail | undefined = detail.data;
   const current = finishes ?? card?.finishes ?? {};
   const total = finishTotal(current);
+  // Owned for display (hero ghosting, foil sheen): either
+  // tally — pocket or joined scene — holding a copy counts
+  // (Anthony, Nov 9, 2026). The finish editor below still
+  // works on the pocket finishes alone.
+  const ownedAny =
+    card != null &&
+    card.ownedQty + finishTotal(card.sceneFinishes) > 0;
   const dirty =
     card != null &&
     finishes != null &&
@@ -1609,12 +1887,12 @@ function CardSheet({
 
             <div className="mt-2">
               {bundledArtSrc(card.bundledArt) ? (
-                <div className="mx-auto w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 bg-[#f5f1e8] shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
+                <div className="mx-auto w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 bg-[#2e2b28] shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
                   <img
                     src={bundledArtSrc(card.bundledArt) ?? ""}
                     alt={card.fullName}
                     className={`block h-auto w-full ${
-                      card.ownedQty === 0 ? "ghost-img" : ""
+                      ownedAny ? "" : "ghost-img"
                     }`}
                   />
                 </div>
@@ -1622,8 +1900,12 @@ function CardSheet({
                 <HoverCard
                   url={url}
                   alt={card.fullName}
-                  foil={card.ownedQty > 0 && hasFoil(card.finishes)}
-                  ghost={card.ownedQty === 0}
+                  foil={
+                    ownedAny &&
+                    (hasFoil(card.finishes) ||
+                      hasFoil(card.sceneFinishes))
+                  }
+                  ghost={!ownedAny}
                 />
               ) : card.composite ? (
                 <div className="mx-auto aspect-[63/88] w-72 max-w-full overflow-hidden rounded-xl border border-white/15 bg-black/40">
@@ -1632,7 +1914,7 @@ function CardSheet({
                     cols={card.composite.cols}
                     kind="full"
                     enabled
-                    ghost={card.ownedQty === 0}
+                    ghost={!ownedAny}
                   />
                 </div>
               ) : (
@@ -3820,7 +4102,7 @@ function SetTile({
             aria-valuemin={0}
             aria-valuemax={group.total}
             aria-valuenow={group.owned}
-            aria-label={`${group.name}: ${group.owned} of ${group.total} cards owned`}
+            aria-label={`${group.name}: ${group.owned} of ${group.total} cards owned, ${Math.round((group.owned / group.total) * 100)} percent`}
             className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--border)]"
           >
             <div
@@ -3832,6 +4114,14 @@ function SetTile({
           </div>
           <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--dim)]">
             {group.owned}/{group.total}
+          </span>
+          {/* Completion percentage beside the counts
+              (Anthony, Nov 9, 2026): the same rounded
+              percent the bar itself is drawn with, printed
+              right next to "350/446" on every chapter (and
+              promo) tile on the chapters page. */}
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--dim)]">
+            {Math.round((group.owned / group.total) * 100)}%
           </span>
         </div>
       ) : null}
@@ -4035,8 +4325,10 @@ function CollectorQr({ payload }: { payload: string }) {
 /** Quantity stepper button (− / +) with a much bigger touch
     target — Anthony's fix for his biggest aggravation with Shiny
     ("when I try to hit the plus button my thumb just never hits
-    it"). The visible circle keeps its neat size; the tappable box
-    is ~56px square (52px on the narrow sealed tiles), and negative
+    it"). The visible circle renders slightly smaller than its
+    layout size (the span.stepper-ring scale in theme.css,
+    Anthony, Nov 9, 2026) while the tappable box stays exactly
+    ~56px square (52px on the narrow sealed tiles), and negative
     margins keep the layout box at the circle's old footprint, so
     rows, tiles, and the Owned-label alignment stay exactly as
     they were — only the hit area grows. The two buttons of a
@@ -11819,6 +12111,97 @@ function ScanPanel({
   );
 }
 
+/** Quick-add stepper for one sealed product on a set page's
+    Sealed section (Anthony, Nov 9, 2026): the in-chapter
+    Sealed tiles used to be tap-to-open only, so adding a
+    copy meant opening every product's detail page. This is
+    the app's standard stepper — hollow glowing ring, softened
+    red minus / green plus, big invisible touch area,
+    long-press count dial whose pick saves at once — writing
+    through setSealedQty, the sealed detail sheet's own save,
+    with the same invalidations (["sealed"], ["finance"],
+    ["sealedItem", name]), so the tile, the detail page, the
+    Sealed totals, and Portfolio all move together. The count
+    is local state synced from the item's record so it follows
+    the tap instantly. Used by every chapter's Sealed grid
+    and the Quest pages' sealed-box banner — one component,
+    every set. */
+function SealedQtyStepper({
+  name,
+  qty,
+  tight = false,
+}: {
+  name: string;
+  qty: number;
+  /** Narrow-tile variant (the 3-across Sealed grid): the
+      52px hit box on a 28px footprint. */
+  tight?: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [shown, setShown] = useState(qty);
+  useEffect(() => {
+    setShown(qty);
+  }, [qty]);
+  const [dialOpen, setDialOpen] = useState(false);
+  const setQty = useMutation({
+    mutationFn: (n: number) => api.setSealedQty({ name, qty: n }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sealed"] });
+      void queryClient.invalidateQueries({ queryKey: ["finance"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["sealedItem", name],
+      });
+    },
+  });
+  const apply = (n: number) => {
+    const clamped = Math.max(0, Math.min(999, n));
+    setShown(clamped);
+    setQty.mutate(clamped);
+  };
+  const shortName = name.replace(/^Disney Lorcana: /, "");
+  return (
+    <div>
+      {dialOpen ? (
+        <SidewaysCountDial
+          overlay
+          label={`Pick how many copies of ${shortName} you own, sealed`}
+          current={shown}
+          onPick={(n) => {
+            apply(n);
+            setDialOpen(false);
+          }}
+          onClose={() => setDialOpen(false)}
+        />
+      ) : null}
+      <div className="flex items-center justify-between">
+        <StepperButton
+          label={`Remove one sealed copy of ${shortName}`}
+          disabled={shown <= 0}
+          onClick={() => apply(shown - 1)}
+          glyph="−"
+          circleClass="h-7 w-7 text-sm"
+          tight={tight}
+        />
+        <span
+          className={`text-sm font-semibold tabular-nums text-[var(--text)] ${
+            shown === 0 ? "zero-owned" : ""
+          }`}
+        >
+          {shown}
+        </span>
+        <StepperButton
+          label={`Add one sealed copy of ${shortName} — hold to pick a count`}
+          onClick={() => apply(shown + 1)}
+          onLongPress={() => setDialOpen((v) => !v)}
+          glyph="+"
+          circleClass="h-7 w-7 text-sm"
+          tight={tight}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Sealed product detail sheet: one sealed item honed in on, exactly
     like tapping a card — its photo in the acrylic case, set / type /
     owned attributes, a quantity stepper, and its performance: value
@@ -17521,7 +17904,7 @@ function AdminDashboard({
                     ? s.activity.totalCopies.toLocaleString()
                     : "—",
                   cue: s.activity
-                    ? `${s.activity.totalRows.toLocaleString()} stored entries, app-wide`
+                    ? "Across every collector"
                     : "Items logged",
                   changed: [...changedSet].some(
                     (k) =>
@@ -17748,10 +18131,7 @@ function AdminDashboard({
                   User
                 </th>
                 <th scope="col" className="px-2 py-2 text-right font-medium">
-                  Trust
-                </th>
-                <th scope="col" className="px-2 py-2 text-right font-medium">
-                  Items
+                  Total copies
                 </th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">
                   Joined
@@ -17799,9 +18179,6 @@ function AdminDashboard({
                     </span>
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-[var(--text)]">
-                    {m.trustScore.toLocaleString()}
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-[var(--text)]">
                     {m.itemsOwned.toLocaleString()}
                   </td>
                   <td className="px-3 py-2 text-right text-xs tabular-nums text-[var(--dim)]">
@@ -17838,12 +18215,7 @@ function AdminDashboard({
           }))}
         />
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <AdminStat
-          label="Cards logged"
-          value={s.activity ? s.activity.cardsLogged.toLocaleString() : "—"}
-          {...ackProps("activity.cardsLogged")}
-        />
+      <div className="mt-2 grid grid-cols-1 gap-2">
         <AdminStat
           label="Largest collection"
           value={
@@ -18152,6 +18524,309 @@ function AdminDashboard({
       </div>
         </>
       ) : null}
+      <AdminUsageJournal />
+    </div>
+  );
+}
+
+/** Admin — the private usage journal's owner view (Anthony,
+    Nov 9, 2026): Anthony reads HIS OWN trail here as a session
+    timeline — where he went, in order, how long each screen
+    held him, where he backed out within seconds, what he
+    searched and whether it found anything, and how many steps
+    the common jobs took. It renders only inside AdminDashboard
+    (owner-only), reads only through getUsageJournal (which can
+    only ever return the journal of the collector who owns this
+    app copy), and exists nowhere else in the app — no profile,
+    no friends view, nothing social ever shows it. */
+function AdminUsageJournal() {
+  const [days, setDays] = useState(1);
+  const journal = useQuery({
+    queryKey: ["usageJournal", days],
+    queryFn: () => api.getUsageJournal({ days }),
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const data = journal.data;
+  const fmtClock = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  const fmtDwell = (ms: number) =>
+    ms < 1000
+      ? `${ms}ms`
+      : ms < 60_000
+        ? `${Math.round(ms / 100) / 10}s`
+        : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  // Group the ordered events into sessions, newest first, and
+  // work out each screen's dwell from the next screen event in
+  // the same session.
+  const sessions = (() => {
+    if (!data) return [];
+    const bySession = new Map<string, typeof data.events>();
+    for (const e of data.events) {
+      const list = bySession.get(e.sessionId) ?? [];
+      list.push(e);
+      bySession.set(e.sessionId, list);
+    }
+    return [...bySession.entries()]
+      .map(([sessionId, events]) => {
+        const dwellById = new Map<number, number>();
+        let lastScreen: (typeof events)[number] | null = null;
+        for (const e of events) {
+          if (e.kind !== "screen") continue;
+          if (lastScreen) {
+            dwellById.set(
+              lastScreen.id,
+              Date.parse(e.at) - Date.parse(lastScreen.at),
+            );
+          }
+          lastScreen = e;
+        }
+        return { sessionId, events, dwellById };
+      })
+      .sort((a, b) =>
+        (b.events[0]?.at ?? "").localeCompare(a.events[0]?.at ?? ""),
+      );
+  })();
+  const kindMark = (kind: string) =>
+    kind === "screen"
+      ? "▸"
+      : kind === "back"
+        ? "↩"
+        : kind === "search"
+          ? "⌕"
+          : kind === "job"
+            ? "✓"
+            : kind === "tap"
+              ? "·"
+              : "•";
+  const detailText = (e: {
+    kind: string;
+    detail: Record<string, unknown> | null;
+  }): string => {
+    const d = e.detail ?? {};
+    if (e.kind === "search") {
+      return typeof d.results === "number"
+        ? d.results === 0
+          ? " — no results"
+          : ` — ${d.results} result${d.results === 1 ? "" : "s"}`
+        : "";
+    }
+    if (e.kind === "job") {
+      const steps = typeof d.steps === "number" ? d.steps : null;
+      const ms = typeof d.ms === "number" ? d.ms : null;
+      return ` — ${d.completed === true ? "completed" : "left unfinished"}${
+        steps != null ? `, ${steps} step${steps === 1 ? "" : "s"}` : ""
+      }${ms != null ? `, ${fmtDwell(ms)}` : ""}`;
+    }
+    if (e.kind === "back" && typeof d.dwellMs === "number") {
+      return ` — after ${fmtDwell(d.dwellMs)}`;
+    }
+    return "";
+  };
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-semibold text-[var(--text)]">
+        Usage journal — your trail through the app
+      </h3>
+      <p className="mt-1 text-xs leading-relaxed text-[var(--dim)]">
+        Private to you: the app records your screens, taps,
+        searches, and job steps (never message text, passwords,
+        or payment details) so Jarvis can spot friction and
+        suggest smoother flows. Nobody else can see this — it
+        never appears on your profile or to friends.
+      </p>
+      <div
+        className="mt-3 flex flex-wrap gap-2"
+        role="group"
+        aria-label="Journal range"
+      >
+        {[1, 7, 14, 30].map((d) => (
+          <button
+            key={d}
+            type="button"
+            aria-pressed={days === d}
+            onClick={() => setDays(d)}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              days === d
+                ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                : "border-[var(--border)] text-[var(--text)]"
+            }`}
+          >
+            {d === 1 ? "Today" : `${d} days`}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => void journal.refetch()}
+          className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text)]"
+        >
+          Refresh
+        </button>
+      </div>
+      {journal.isPending ? (
+        <p className="mt-3 text-sm text-[var(--dim)]">
+          Reading your journal…
+        </p>
+      ) : journal.isError || !data ? (
+        <p className="mt-3 text-sm text-[var(--dim)]">
+          The journal couldn't be read just now.
+        </p>
+      ) : data.events.length === 0 ? (
+        <p className="mt-3 text-sm text-[var(--dim)]">
+          Nothing recorded in this window yet — the journal
+          fills in as you use the app.
+        </p>
+      ) : (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <AdminStat
+              label="Sessions"
+              value={String(data.summary.sessions)}
+              sub={`${data.summary.totalEvents} steps recorded`}
+            />
+            <AdminStat
+              label="Back presses"
+              value={String(data.summary.backs)}
+              sub={`${data.summary.screensVisited} screens visited`}
+            />
+            <AdminStat
+              label="Quick exits"
+              value={String(data.summary.quickExits.length)}
+              sub="Screens left within 4 seconds"
+            />
+            <AdminStat
+              label="Searches with no results"
+              value={String(data.summary.zeroResultSearches.length)}
+              sub={
+                data.summary.zeroResultSearches[0]
+                  ? `Latest: “${data.summary.zeroResultSearches[0].query}”`
+                  : "Every search found something"
+              }
+            />
+          </div>
+          {data.summary.jobs.length > 0 ? (
+            <div className="mt-3 rounded-xl bg-[var(--bg)] px-3 py-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                Job steps
+              </h4>
+              <ul className="mt-2 space-y-1 text-sm text-[var(--text)]">
+                {data.summary.jobs.map((j) => (
+                  <li
+                    key={j.job}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span>{j.job}</span>
+                    <span className="text-right tabular-nums text-[var(--dim)]">
+                      {j.completed}/{j.runs} done · avg {j.avgSteps}{" "}
+                      steps · {fmtDwell(j.avgMs)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {data.summary.quickExits.length > 0 ? (
+            <div className="mt-3 rounded-xl bg-[var(--bg)] px-3 py-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                Quick exits — opened and left fast
+              </h4>
+              <ul className="mt-2 space-y-1 text-sm text-[var(--text)]">
+                {data.summary.quickExits.slice(0, 8).map((q, i) => (
+                  <li
+                    key={`${q.at}-${i}`}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span>{q.screen}</span>
+                    <span className="tabular-nums text-[var(--dim)]">
+                      {fmtDwell(q.dwellMs)} · {fmtClock(q.at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="mt-4 space-y-4">
+            {sessions.slice(0, 6).map((s) => (
+              <div
+                key={s.sessionId}
+                className="rounded-xl bg-[var(--bg)] px-3 py-3"
+              >
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+                  Session ·{" "}
+                  {s.events[0]
+                    ? fmtAdminWhen(s.events[0].at)
+                    : ""}{" "}
+                  · {s.events.length} steps
+                </h4>
+                <ol className="mt-2 space-y-1">
+                  {s.events.map((e) => {
+                    const dwell =
+                      e.kind === "screen"
+                        ? s.dwellById.get(e.id)
+                        : undefined;
+                    const quick =
+                      dwell != null && dwell >= 0 && dwell < 4000;
+                    return (
+                      <li
+                        key={e.id}
+                        className="flex items-baseline gap-2 text-sm"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="w-4 shrink-0 text-center text-[var(--dim)]"
+                        >
+                          {kindMark(e.kind)}
+                        </span>
+                        <span className="tabular-nums text-xs text-[var(--dim)]">
+                          {fmtClock(e.at)}
+                        </span>
+                        <span
+                          className={
+                            e.kind === "screen"
+                              ? "font-medium text-[var(--text)]"
+                              : "text-[var(--text)]"
+                          }
+                        >
+                          {e.kind === "search"
+                            ? `Searched “${e.label}”`
+                            : e.kind === "job"
+                              ? `Job: ${e.label}`
+                              : e.label}
+                          <span className="text-[var(--dim)]">
+                            {detailText(e)}
+                          </span>
+                          {dwell != null && dwell >= 0 ? (
+                            <span
+                              className={
+                                quick
+                                  ? "text-amber-500"
+                                  : "text-[var(--dim)]"
+                              }
+                            >
+                              {" "}
+                              · stayed {fmtDwell(dwell)}
+                              {quick ? " (quick exit)" : ""}
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ))}
+          </div>
+          {data.truncated ? (
+            <p className="mt-3 text-xs text-[var(--dim)]">
+              Showing the most recent 2,000 steps in this window.
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -18430,18 +19105,19 @@ function PhotoReviewScreen({ onClose }: { onClose: () => void }) {
     redesigned to clean list rows later that evening):
     opened from the Admin dashboard's Registered users
     tile — one roomy row per user, all from the live server registry that
-    getAdminStats returns: username, Collector ID, Trust
-    Score, items collected, confirmed connections, and
-    joined date. Owner-only, with the same gating as the
+    getAdminStats returns: username, Collector ID, one
+    total-copies number, and joined date (simplified
+    Nov 9, 2026 at Anthony's direction — the overlapping
+    logging counters that used to ride along, Trust
+    Score and connections among them, were deleted;
+    fewer numbers, bigger meaning). Owner-only, with the same gating as the
     rest of Admin: it renders only inside AdminDashboard
     (which renders nothing for anyone but the owner), and
     the server withholds the roster from every other
     profile. What the profiles data does NOT track is
     labeled as such at the bottom of the page, never
     invented: the registry stores a single username (no
-    separate display name) and no last-active time, and a
-    connection count that couldn't be read shows as
-    unavailable instead of a made-up zero.
+    separate display name) and no last-active time.
     Back: the dashboard gives this page its own history
     entry (the app's sheet pattern), so BOTH the Back
     button below — which goes through history — and the
@@ -18473,7 +19149,6 @@ function RegisteredUsersPage({
   onAck: (key: string) => void;
   onClose: () => void;
 }) {
-  const connectionsUnread = roster.some((m) => m.connections == null);
   // Owner-only trust detail (Anthony, Nov 4, 2026): the
   // verified-badge record and invite lineage per user —
   // served by getAdminUserTrust and shown ONLY on this
@@ -18597,27 +19272,18 @@ function RegisteredUsersPage({
                       <p className="mt-0.5 text-xs tabular-nums text-[var(--dim)]">
                         {m.collectorId}
                       </p>
+                      {/* One number only (Anthony, Nov 9,
+                          2026): the overlapping logging
+                          counters that used to crowd this
+                          line — items collected, Trust
+                          Score, connections — collapsed
+                          into the single total-copies stat.
+                          Fewer numbers, bigger meaning. */}
                       <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--dim)]">
-                        Trust Score{" "}
-                        <span className="font-semibold tabular-nums text-[var(--text)]">
-                          {m.trustScore.toLocaleString()}
-                        </span>
-                        {"  ·  "}
                         <span className="font-semibold tabular-nums text-[var(--text)]">
                           {m.itemsOwned.toLocaleString()}
                         </span>{" "}
-                        items collected
-                        {"  ·  "}
-                        {m.connections != null ? (
-                          <>
-                            <span className="font-semibold tabular-nums text-[var(--text)]">
-                              {m.connections.toLocaleString()}
-                            </span>{" "}
-                            connections
-                          </>
-                        ) : (
-                          "connections not available"
-                        )}
+                        total copies
                         {"  ·  "}
                         Joined{" "}
                         <span className="tabular-nums text-[var(--text)]">
@@ -18645,19 +19311,10 @@ function RegisteredUsersPage({
 
         <div className="mt-4 space-y-1.5 text-xs leading-relaxed text-[var(--dim)]">
           <p>
-            Items collected counts the copies stored on the
+            Total copies counts the copies stored on the
             server for each user — collections back up
             there on their own whenever they change.
-            Connections counts each user&rsquo;s confirmed
-            connections on the server.
           </p>
-          {connectionsUnread ? (
-            <p>
-              Connection counts couldn&rsquo;t be read from the
-              server just now, so they show as not available
-              rather than a made-up number.
-            </p>
-          ) : null}
           <p>
             What isn&rsquo;t tracked isn&rsquo;t shown: the
             registry keeps one name per user — the
@@ -22863,7 +23520,10 @@ function FlipPocket({
   onOpen: (id: number) => void;
 }) {
   const { url, settled: artSettled } = useCachedArt(card.id, "grid", true);
-  const owned = card.ownedQty > 0;
+  // Filled by either tally (pocket or joined scene), badge
+  // shows total copies — same rule as the grid pockets.
+  const tallyQty = card.ownedQty + card.sceneQty;
+  const owned = tallyQty > 0;
   const isFoilPocket = card.pocket === "foil" || hasFoil(card.finishes);
   return (
     <button
@@ -22871,7 +23531,7 @@ function FlipPocket({
       onClick={() => onOpen(card.id)}
       aria-label={`${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
         isFoilPocket ? ", foil" : ""
-      }, ${owned ? `owned, ${card.ownedQty} copies` : "missing"}${
+      }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
         card.artLink ? ", artwork joins a larger scene" : ""
       }`}
       className="group block w-full text-left focus:outline-none"
@@ -22883,7 +23543,7 @@ function FlipPocket({
             alt={owned ? card.fullName : `${card.fullName} (missing)`}
             loading="eager"
             decoding="async"
-            className={`h-full w-full bg-[#f5f1e8] object-contain ${
+            className={`h-full w-full bg-[#2e2b28] object-contain ${
               owned ? "" : "ghost-img"
             }`}
           />
@@ -22922,7 +23582,7 @@ function FlipPocket({
         ) : null}
         {owned ? (
           <span className="absolute right-0.5 top-0.5 rounded-full bg-[var(--gold)] px-1 py-px text-[9px] font-bold text-black shadow">
-            ×{card.ownedQty}
+            ×{tallyQty}
           </span>
         ) : null}
         <span
@@ -23012,7 +23672,9 @@ function FlipBinder({
   );
   const [flipDir, setFlipDir] = useState<"next" | "prev">("next");
   const current = Math.min(page, pageCount - 1);
-  const filled = pockets.filter((p) => p.ownedQty > 0).length;
+  const filled = pockets.filter(
+    (p) => p.ownedQty + p.sceneQty > 0,
+  ).length;
   const pagePockets = pockets.slice(
     current * PAGE_SIZE,
     current * PAGE_SIZE + PAGE_SIZE,
@@ -24296,7 +24958,6 @@ function LibraryPage({
     const prevZ = el.style.zIndex;
     const prevPos = el.style.position;
     const prevShadow = el.style.boxShadow;
-    const prevTransition = el.style.transition;
     const prevTouch = el.style.touchAction;
     el.style.zIndex = "30";
     el.style.position = "relative";
@@ -33615,6 +34276,7 @@ function SocialPanel({
       (tradeCart.length > 0 || cashCart.length > 0) &&
       friendOpen ? (
         <div
+          data-checkout-bar="true"
           className="fixed inset-x-0 z-40 mx-auto w-full max-w-3xl px-3"
           style={{
             bottom:
@@ -33848,6 +34510,27 @@ function findPageScroller(): HTMLElement | null {
     the window-measuring version never appeared on his phone. */
 function ScrollArrows() {
   const [pos, setPos] = useState({ y: 0, max: 0, view: 0 });
+  /** Whether a checkout bar is on screen (Anthony, Nov 9,
+      2026): the floating arrows used to sit ON TOP of the
+      green cash/trade cart bar's left and right ends and
+      clip it. His directed fix: while any checkout bar is
+      visible the arrows hide completely, and they come
+      back the moment it's gone. Any bar that renders with
+      a data-checkout-bar marker counts — the friend
+      profile / Trade Match docked cart bar today, any
+      future one that carries the marker. A MutationObserver
+      catches the bar mounting and unmounting; the check
+      itself is a single querySelector. */
+  const [barUp, setBarUp] = useState(false);
+  useEffect(() => {
+    const check = () =>
+      setBarUp(document.querySelector("[data-checkout-bar]") != null);
+    check();
+    if (typeof MutationObserver === "undefined") return;
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, []);
   /** Follow-mode timer for the down arrow (see the button). */
   const followRef = useRef<number | null>(null);
   const stopFollow = () => {
@@ -33906,6 +34589,7 @@ function ScrollArrows() {
       ro?.disconnect();
     };
   }, []);
+  if (barUp) return null;
   if (pos.max < Math.max(240, pos.view * 0.5)) return null;
   const showUp = pos.y > 240;
   const showDown = pos.y < pos.max - 240;
@@ -34149,6 +34833,100 @@ function BackupAutoSync() {
       }
     };
   }, [queryClient]);
+
+  return null;
+}
+
+/** Private usage journal — the app-side tracker (Anthony,
+    Nov 9, 2026): the passive half of the journal that lives
+    outside any one screen. It watches the mutation cache the
+    same way BackupAutoSync does and turns the actions that
+    matter into journal events — the ownership steppers, the
+    trade/cash/marketplace steps — and it listens (capture
+    phase) for taps on labeled controls and in-app tabs, using
+    the control's aria-label or tab text ONLY: never typed
+    text, never the content around the control. Screen visits,
+    Back, searches, and job boundaries are recorded by the App
+    root itself, which owns that state. Everything routes
+    through usageJournal.ts, which batches — this component
+    renders nothing and adds no per-tap work beyond a map
+    lookup. */
+const JOURNAL_MUTATION_LABELS: Record<string, string> = {
+  updateOwnership: "stepper:card",
+  adjustPocketCount: "stepper:card",
+  setSealedQty: "stepper:sealed",
+  setGameCardOwned: "stepper:game",
+  setGradedSlabQty: "stepper:slab",
+  addGradedSlab: "slab:add",
+  removeGradedSlab: "slab:remove",
+  proposeTrade: "trade:propose",
+  respondTrade: "trade:respond",
+  confirmTradeSide: "trade:confirm",
+  submitTradeFeedback: "trade:feedback",
+  cancelTrade: "trade:cancel",
+  createCashPurchase: "cash:request",
+  createCashOrder: "cash:request",
+  respondCashPurchase: "cash:respond",
+  confirmCashPurchase: "cash:confirm",
+  submitCashFeedback: "cash:feedback",
+  cancelCashPurchase: "cash:cancel",
+  placeClaim: "market:claim",
+  confirmDealSide: "market:confirm",
+  submitFeedback: "market:feedback",
+};
+
+function UsageJournalTracker() {
+  useEffect(() => {
+    installJournalListeners();
+  }, []);
+
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const unsubscribe = queryClient
+      .getMutationCache()
+      .subscribe((event) => {
+        if (event.type !== "updated") return;
+        const mutation = event.mutation;
+        if (!mutation || mutation.state.status !== "success") return;
+        const fn = mutation.options.mutationFn;
+        if (!fn) return;
+        const src = String(fn);
+        for (const [name, label] of Object.entries(
+          JOURNAL_MUTATION_LABELS,
+        )) {
+          if (src.includes(name)) {
+            journalEvent("action", label);
+            if (label === "stepper:card") {
+              journalJobStep("add-card");
+            }
+            break;
+          }
+        }
+      });
+    return unsubscribe;
+  }, [queryClient]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-journal-skip]")) return;
+      const el = target.closest(
+        'button, [role="button"], [role="tab"]',
+      );
+      if (!el) return;
+      const aria = el.getAttribute("aria-label")?.trim();
+      const label =
+        aria ||
+        (el.getAttribute("role") === "tab"
+          ? (el.textContent ?? "").replace(/\s+/g, " ").trim()
+          : "");
+      if (!label) return;
+      journalEvent("tap", label.slice(0, 80));
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
 
   return null;
 }
@@ -35238,15 +36016,109 @@ export function App() {
         ).slice(0, 4)
       : [];
 
+  // ----- Private usage journal: screen trail, jobs, searches
+  // (Anthony, Nov 9, 2026). The effective screen is the topmost
+  // thing showing: an open card over everything, Search over
+  // the view under it, else the view itself — with the binder
+  // naming the chapter grid vs the open set. Every change is
+  // one journal screen event; dwell and quick exits are read
+  // back off the ordered trail (see getUsageJournal).
+  const journalMainLabel =
+    view === "binder"
+      ? showPicker
+        ? "binder:chapters"
+        : `binder:${group?.name ?? groupKey ?? "set"}`
+      : view;
+  const journalScreenLabel =
+    selectedId != null
+      ? "card-detail"
+      : searchOpen
+        ? "search"
+        : journalMainLabel;
+  useEffect(() => {
+    journalScreen(journalScreenLabel);
+  }, [journalScreenLabel]);
+  // Job: adding a card — opens with a card's page, its steps
+  // are the card steppers tapped while it's open (counted by
+  // UsageJournalTracker), and it completes when at least one
+  // stepper landed before the page closed.
+  useEffect(() => {
+    if (selectedId != null) {
+      journalJobStart("add-card");
+    } else if (journalJobOpen("add-card")) {
+      journalJobEnd("add-card", journalJobSteps("add-card") > 0);
+    }
+  }, [selectedId]);
+  // Job: finding an item — opens with Search; picking a result
+  // completes it (the pick handlers close the job themselves);
+  // closing Search with no pick ends it uncompleted.
+  useEffect(() => {
+    if (searchOpen) {
+      journalJobStart("find-item");
+    } else if (journalJobOpen("find-item")) {
+      journalJobEnd("find-item", false);
+    }
+  }, [searchOpen]);
+  // Searches: one journal event per settled query (debounced,
+  // deduped) carrying how many results came back across every
+  // catalog the Search page looks at — the zero-result ones
+  // are the friction the daily audit hunts for.
+  const lastSearchLoggedRef = useRef("");
+  useEffect(() => {
+    const q = searchText.trim();
+    if (!searchOpen || q.length < 1) return;
+    if (!search.data && !universal.data) return;
+    const total =
+      (search.data?.results.length ?? 0) +
+      (universal.data?.games.length ?? 0) +
+      (universal.data?.sealed.length ?? 0) +
+      comicMatches.length;
+    const key = `${q}|${total}`;
+    const t = window.setTimeout(() => {
+      if (lastSearchLoggedRef.current === key) return;
+      lastSearchLoggedRef.current = key;
+      journalEvent("search", q, { results: total });
+      journalJobStep("find-item");
+    }, 900);
+    return () => window.clearTimeout(t);
+  }, [
+    searchOpen,
+    searchText,
+    search.data,
+    universal.data,
+    comicMatches.length,
+  ]);
+
   const pickGroup = (key: string) => {
     setShowPicker(false);
     setGroupKey(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
-    // Drilling into a section is main-flow navigation
-    // (three-back rule, Anthony, Nov 4, 2026): replace the
-    // single app entry — the device Back exits the app, and
-    // the "← All sets" control returns to the grid in place.
-    replaceNavState({ mcView: "binder", mcBinder: key });
+    // Drilling from the chapters grid into one set PUSHES
+    // the set's own history entry over the grid's entry
+    // (Anthony, Nov 9, 2026 — the Hyperia City back bug:
+    // picking a set used to REPLACE the grid's entry, so
+    // one device Back from a set skipped the chapters list
+    // entirely and landed on whatever sat under the grid —
+    // the TCG Universe, when he had come in through it).
+    // The pushed entry is marked vxSetPush so the on-screen
+    // "← All sets" control can consume exactly this entry
+    // through history.back(), and the central popstate
+    // listener restores the grid from the entry underneath
+    // (mcView "binder" with no mcBinder). Re-picking the
+    // set already on top replaces instead of stacking.
+    try {
+      const cur = readNavState() ?? {};
+      if (cur.mcView === "binder" && cur.mcBinder === key) {
+        replaceNavState({ ...cur, mcView: "binder", mcBinder: key });
+      } else {
+        window.history.pushState(
+          { ...cur, mcView: "binder", mcBinder: key, vxSetPush: true },
+          "",
+        );
+      }
+    } catch {
+      replaceNavState({ mcView: "binder", mcBinder: key });
+    }
   };
 
   // Section navigation for the bottom bar and Home's entries: flip
@@ -35286,6 +36158,7 @@ export function App() {
       return;
     }
     hapticTick();
+    journalEvent("action", `go:${next}`);
     if (searchOpen) {
       setSearchOpen(false);
       searchPushedRef.current = false;
@@ -35661,6 +36534,8 @@ export function App() {
   // react-query cache. Back budget: card → Search → the view
   // underneath → exit (three-back rule holds).
   const pickSearchResult = (result: SearchResult) => {
+    // Finding an item ends the moment a result is picked.
+    journalJobEnd("find-item", true);
     try {
       const cur = readNavState() ?? {};
       window.history.pushState(
@@ -35694,6 +36569,9 @@ export function App() {
   // history.back() — so the destination keeps the entry and
   // the back budget stays intact.
   const leaveSearchToMain = (go: () => void) => {
+    // Leaving Search for a picked game/sealed/comic result
+    // completes the find-an-item job too.
+    journalJobEnd("find-item", true);
     go();
     scrubWindowKeys(["lorcanaSearch"]);
     searchPushedRef.current = false;
@@ -35802,6 +36680,7 @@ export function App() {
   return (
     <div className="app-shell min-h-screen">
       <BackupAutoSync />
+      <UsageJournalTracker />
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
       <main className="mx-auto w-full max-w-3xl px-3 pb-28 sm:px-4">
         {/* The pockets-filled collection header USED to render
@@ -35866,7 +36745,15 @@ export function App() {
           view === "pokemon" ||
           view === "magic" ||
           view === "starwars") &&
-        gameOrigin === "tcg" ? (
+        gameOrigin === "tcg" &&
+        // Inside one open set the pill would mislabel its
+        // landing: a set opened from the grid sits on its own
+        // pushed entry, so one Back lands on the chapters
+        // grid, not the Universe (Anthony, Nov 9, 2026). The
+        // pill shows on the grid itself — the binder's top
+        // level — where Back really does return to the
+        // Universe; inside a set, "← All sets" is the back.
+        (view !== "binder" || showPicker) ? (
           <div className="pt-3">
             <button
               type="button"
@@ -36041,10 +36928,30 @@ export function App() {
             <button
               type="button"
               onClick={() => {
-                // Three-back rule (Anthony, Nov 4, 2026): sections
-                // replace the single app entry, so this always
-                // flips state locally — the device Back exits.
+                // Back to the chapters grid (Anthony, Nov 9,
+                // 2026): when this set was opened from the
+                // grid, its entry was PUSHED over the grid's
+                // (see pickGroup), so consume exactly that
+                // entry — the popstate listener restores the
+                // grid, the same landing the device Back
+                // gives. A set reached any other way (profile
+                // rows, a refresh restore) holds no pushed
+                // entry: flip locally and scrub the set key
+                // from the current entry so a refresh stays
+                // on the grid instead of reopening the set.
+                if (readNavState()?.vxSetPush === true) {
+                  window.history.back();
+                  return;
+                }
                 setShowPicker(true);
+                try {
+                  const cur = { ...(readNavState() ?? {}) };
+                  delete cur.mcBinder;
+                  delete cur.vxSetPush;
+                  replaceNavState({ ...cur, mcView: "binder" });
+                } catch {
+                  // History unavailable: the local flip stands.
+                }
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
               aria-label="Back to set selection"
@@ -36106,10 +37013,14 @@ export function App() {
                 Booster box, prerelease box, Trove, packs, gift
                 set, starter decks — owned ones render normally;
                 the ones not in the vault yet are ghosted like
-                missing cards. Tapping any of them opens the
-                sealed item, where the Owned steppers live. The
-                standalone Sealed tab is gone; sealed lives
-                here, inside the sets. */}
+                missing cards. Tapping a tile's picture opens
+                the sealed item; every tile ALSO carries the
+                standard Owned stepper under its name (Anthony,
+                Nov 9, 2026 — quick add without opening each
+                product), writing the same counts as the detail
+                pages through SealedQtyStepper. The standalone
+                Sealed tab is gone; sealed lives here, inside
+                the sets. */}
             {group.kind === "set"
               ? (() => {
                   const setSealed = (
@@ -36128,8 +37039,8 @@ export function App() {
                       <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
                         This set&rsquo;s unopened products — the
                         ones faded like ghost cards aren&rsquo;t in
-                        your vault yet. Tap one to open it and add
-                        your copy.
+                        your vault yet. Tap one to open it, or use
+                        its + and − to add a copy right here.
                       </p>
                       <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4">
                         {setSealed.map((item) => {
@@ -36138,54 +37049,79 @@ export function App() {
                             sealedBoosterFront;
                           const ghosted = item.qty <= 0;
                           return (
-                            <button
+                            <div
                               key={item.name}
-                              type="button"
-                              onClick={() =>
-                                openSealedItem(item.name)
-                              }
-                              aria-label={`${item.name} — sealed product. ${
-                                ghosted
-                                  ? "Not in your vault yet"
-                                  : `Owned ${item.qty}`
-                              }. Tap to open the sealed item.`}
-                              className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left"
+                              className="flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]"
                             >
-                              {SEALED_IN_CASE.has(item.name) ? (
-                                <span className="block aspect-square bg-[var(--bg)]">
-                                  <img
-                                    src={photo}
-                                    alt=""
-                                    className={`h-full w-full object-cover ${ghosted ? "ghost-img" : ""}`}
-                                  />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openSealedItem(item.name)
+                                }
+                                aria-label={`${item.name} — sealed product. ${
+                                  ghosted
+                                    ? "Not in your vault yet"
+                                    : `Owned ${item.qty}`
+                                }. Tap to open the sealed item.`}
+                                className="block w-full text-left"
+                              >
+                                {SEALED_IN_CASE.has(item.name) ? (
+                                  <span className="block aspect-square bg-[var(--bg)]">
+                                    <img
+                                      src={photo}
+                                      alt=""
+                                      className={`h-full w-full object-cover ${ghosted ? "ghost-img" : ""}`}
+                                    />
+                                  </span>
+                                ) : (
+                                  <span className="acrylic-case block">
+                                    <img
+                                      src={photo}
+                                      alt=""
+                                      className={`h-full w-full object-contain px-1.5 pb-5 pt-1.5 ${ghosted ? "ghost-img" : ""}`}
+                                    />
+                                    <span
+                                      className="acrylic-stand"
+                                      aria-hidden="true"
+                                    />
+                                  </span>
+                                )}
+                                <span className="block px-2 pt-2">
+                                  <span className="block text-xs font-semibold leading-snug text-[var(--text)]">
+                                    {item.name.replace(
+                                      /^Disney Lorcana: /,
+                                      "",
+                                    )}
+                                  </span>
+                                  <span className="mt-0.5 block text-[11px] text-[var(--dim)]">
+                                    {ghosted
+                                      ? `${fmtUSD(item.unitValue)} each · not in your vault yet`
+                                      : `${fmtUSD(item.unitValue)} each`}
+                                  </span>
                                 </span>
-                              ) : (
-                                <span className="acrylic-case block">
-                                  <img
-                                    src={photo}
-                                    alt=""
-                                    className={`h-full w-full object-contain px-1.5 pb-5 pt-1.5 ${ghosted ? "ghost-img" : ""}`}
-                                  />
-                                  <span
-                                    className="acrylic-stand"
-                                    aria-hidden="true"
-                                  />
-                                </span>
-                              )}
-                              <span className="block px-2 py-2">
-                                <span className="block text-xs font-semibold leading-snug text-[var(--text)]">
-                                  {item.name.replace(
-                                    /^Disney Lorcana: /,
-                                    "",
-                                  )}
-                                </span>
-                                <span className="mt-0.5 block text-[11px] text-[var(--dim)]">
-                                  {ghosted
-                                    ? `${fmtUSD(item.unitValue)} each · not in your vault yet`
-                                    : `Owned ×${item.qty} · ${fmtUSD(item.unitValue)} each`}
-                                </span>
-                              </span>
-                            </button>
+                              </button>
+                              {/* Quick-add stepper (Anthony,
+                                  Nov 9, 2026): sits under the
+                                  open button — a stepper can't
+                                  nest inside a button — and
+                                  writes the detail page's own
+                                  owned count. Pinned to the tile's
+                                  bottom (mt-auto on a flex-column
+                                  tile) so every tile's +/− row
+                                  lines up across the row even when
+                                  names and price lines wrap to
+                                  different heights — the Attack of
+                                  the Vine! pack sat higher than the
+                                  Illumineer's Quest box beside it
+                                  (Anthony, Nov 9, 2026). */}
+                              <div className="mt-auto px-1 pb-1 pt-0.5">
+                                <SealedQtyStepper
+                                  name={item.name}
+                                  qty={item.qty}
+                                  tight
+                                />
+                              </div>
+                            </div>
                           );
                         })}
                       </div>
@@ -36198,8 +37134,10 @@ export function App() {
                 3 page looking for the option to say he owns an
                 unopened box and it wasn't there). Every Quest
                 set page carries its box as a selectable sealed
-                item — tapping opens the sealed item itself,
-                where the Owned steppers live. */}
+                item — tapping opens the sealed item itself, and
+                the banner carries the same quick-add Owned
+                stepper as the chapter Sealed grids (Anthony,
+                Nov 9, 2026). */}
             {group.kind === "quest"
               ? (() => {
                   const boxName = (
@@ -36218,12 +37156,13 @@ export function App() {
                   if (!boxName || !box) return null;
                   const photo = SEALED_PHOTOS[boxName];
                   return (
-                    <button
-                      type="button"
-                      onClick={() => openSealedItem(boxName)}
-                      aria-label={`${boxName} — sealed box. Owned ${box.qty}. Tap to open the sealed item and set how many unopened boxes you own.`}
-                      className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left"
-                    >
+                    <div className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
+                      <button
+                        type="button"
+                        onClick={() => openSealedItem(boxName)}
+                        aria-label={`${boxName} — sealed box. Owned ${box.qty}. Tap to open the sealed item and set how many unopened boxes you own.`}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
                       {photo ? (
                         boxName && SEALED_IN_CASE.has(boxName) ? (
                           /* Scene photo (the Hunny Rescue box):
@@ -36263,8 +37202,8 @@ export function App() {
                           >
                             Owned ×{box.qty}
                           </span>{" "}
-                          · {fmtUSD(box.unitValue)} each — tap to open and
-                          add your unopened box
+                          · {fmtUSD(box.unitValue)} each — tap to open,
+                          or step the count right here
                         </span>
                       </span>
                       <span
@@ -36273,7 +37212,19 @@ export function App() {
                       >
                         →
                       </span>
-                    </button>
+                      </button>
+                      {/* Quick-add stepper (Anthony, Nov 9,
+                          2026): the same SealedQtyStepper as
+                          the chapter grids, beside the banner's
+                          open area — a stepper can't nest
+                          inside the button. */}
+                      <div className="w-28 shrink-0">
+                        <SealedQtyStepper
+                          name={boxName}
+                          qty={box.qty}
+                        />
+                      </div>
+                    </div>
                   );
                 })()
               : null}
@@ -36336,8 +37287,10 @@ export function App() {
                     // interleaved immediately after their
                     // anchor pocket — the group's latest
                     // member's last pocket in this section.
-                    // Display-only; the pocket flow, order,
-                    // and totals are exactly as before.
+                    // The card adds no pocket or total of its
+                    // own; its member steppers write the
+                    // members' real pockets (Nov 9 amendment).
+                    // Pocket flow and order are as before.
                     const sceneByAnchor = new Map(
                       (sectionData.data.scenes ?? []).map((s) => [
                         `${s.anchorCardId}:${s.anchorPocket}`,

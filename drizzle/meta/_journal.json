@@ -540,6 +540,20 @@
       "when": 1794236065406,
       "tag": "0077_add_backup_meta_table",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1794246200180,
+      "tag": "0078_add_scene_finishes_to_cards",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1794247934831,
+      "tag": "0079_add_usage_journal_table",
+      "breakpoints": true
     }
   ]
 }

@@ -436,9 +436,9 @@ const GameGridTile = memo(function GameGridTile({
           disabled={qty <= 0}
           onClick={() => step(-1)}
           data-dir="minus"
-          className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base leading-none disabled:opacity-35"
+          className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-35"
         >
-          −
+          <span aria-hidden="true" data-dir="minus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base leading-none">−</span>
         </button>
         <span
           className={`text-sm font-semibold tabular-nums text-[var(--text)] ${
@@ -452,9 +452,9 @@ const GameGridTile = memo(function GameGridTile({
           aria-label={`Add one copy of ${c.name}`}
           onClick={() => step(1)}
           data-dir="plus"
-          className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base leading-none"
+          className="flex h-8 w-8 items-center justify-center rounded-full"
         >
-          +
+          <span aria-hidden="true" data-dir="plus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base leading-none">+</span>
         </button>
       </div>
     </div>
@@ -965,9 +965,9 @@ function LegoStepperRow({
           disabled={qty <= 0 || savePending}
           onClick={() => onStep(qty - 1)}
           data-dir="minus"
-          className="stepper-ring flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold disabled:opacity-40"
+          className="flex h-7 w-7 items-center justify-center rounded-full disabled:opacity-40"
         >
-          −
+          <span aria-hidden="true" data-dir="minus" className="stepper-ring flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold">−</span>
         </button>
         <span
           className={`w-6 text-center text-sm font-semibold leading-none tabular-nums text-[var(--text)] ${
@@ -982,9 +982,9 @@ function LegoStepperRow({
           disabled={savePending}
           onClick={() => onStep(qty + 1)}
           data-dir="plus"
-          className="stepper-ring flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold disabled:opacity-40"
+          className="flex h-7 w-7 items-center justify-center rounded-full disabled:opacity-40"
         >
-          +
+          <span aria-hidden="true" data-dir="plus" className="stepper-ring flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold">+</span>
         </button>
       </span>
     </div>
@@ -2840,9 +2840,9 @@ function CardDetailSheet({
               disabled={owned <= 0 || save.isPending}
               onClick={() => step(owned - 1)}
               data-dir="minus"
-              className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold disabled:opacity-40"
+              className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40"
             >
-              −
+              <span aria-hidden="true" data-dir="minus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold">−</span>
             </button>
             <span
               className={`min-w-8 text-center text-lg font-bold tabular-nums text-[var(--text)] ${
@@ -2857,9 +2857,9 @@ function CardDetailSheet({
               disabled={save.isPending}
               onClick={() => step(owned + 1)}
               data-dir="plus"
-              className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold disabled:opacity-40"
+              className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40"
             >
-              +
+              <span aria-hidden="true" data-dir="plus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold">+</span>
             </button>
           </div>
           <p className="mt-2 text-xs text-[var(--dim)]">

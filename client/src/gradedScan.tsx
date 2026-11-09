@@ -2071,9 +2071,9 @@ export function SlabDetailView({
                   onClick={() => stepQty(shownQty - 1)}
                   disabled={shownQty <= 0 || setQtyMut.isPending}
                   aria-label={`Remove one copy of this slab (cert ${slab.cert}) from inventory`}
-                  className="stepper-ring flex h-11 w-11 items-center justify-center rounded-full text-xl font-bold text-[var(--text)] disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center rounded-full disabled:opacity-40"
                 >
-                  −
+                  <span aria-hidden="true" className="stepper-ring flex h-11 w-11 items-center justify-center rounded-full text-xl font-bold text-[var(--text)]">−</span>
                 </button>
                 <span className="text-base font-semibold tabular-nums text-[var(--text)]">
                   {shownQty} owned
@@ -2092,9 +2092,9 @@ export function SlabDetailView({
                   onContextMenu={(e) => e.preventDefault()}
                   disabled={setQtyMut.isPending}
                   aria-label={`Add one copy of this slab (cert ${slab.cert}) to inventory — hold to pick a count`}
-                  className="stepper-ring flex h-11 w-11 items-center justify-center rounded-full text-xl font-bold text-[var(--text)] disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center rounded-full disabled:opacity-40"
                 >
-                  +
+                  <span aria-hidden="true" className="stepper-ring flex h-11 w-11 items-center justify-center rounded-full text-xl font-bold text-[var(--text)]">+</span>
                 </button>
               </div>
               <p className="mt-1 text-center text-[11px] leading-snug text-[var(--dim)]">
