@@ -2,6 +2,14 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.116.3
+
+- Fixed: the search bar on the Lorcana chapters page now suggests cards as you type, exactly like the Search tab. It used to be submit-only — typing a name like Ariel showed nothing at all until you pressed Enter. Now matches start from the very first letter and narrow with every keystroke (A, Ar, Ari… Ariel), each showing its chapter, number, and whether you own it; the list stays on screen while the next letter's results load, so it never vanishes mid-typing. Tap a suggestion to open that card right there; pressing Enter still opens the full Search page as before.
+
+## v1.116.2
+
+- Renamed: Jarvis's username now reads Jarvis (Test) — with Test in parentheses — everywhere his name shows as a profile: his profile page, the Friends rail, trade and marketplace labels, and the Vault X server registry his Collector ID lives in, so anyone who sees his account can tell at a glance it is a test account. Only Jarvis's name changed: his Collector ID (MC-JARVIS), @jarvis handle, Trust Score, verified badge, and cards are the same, and your username is untouched.
+
 ## v1.116.1
 
 - Fixed: Bolt - Superdog #223 and Elsa - Ice Maker #224 (Archazia's Island) no longer show a Regular pocket. Those two printings only ever existed as Cold Foil, so each now has exactly one pocket, labeled Cold Foil — and Archazia's Island counts 428 pockets instead of 430. Your owned Cold Foil copies, prices paid, and values are unchanged.

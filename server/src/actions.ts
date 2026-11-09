@@ -2104,7 +2104,11 @@ const SUPABASE_PUBLISHABLE_KEY =
     app. */
 const JARVIS_REGISTRY_PROFILE = {
   collector_id: "MC-JARVIS",
-  username: "Jarvis",
+  // Renamed Nov 9, 2026 at Anthony's direction: Jarvis's own
+  // username — NOT Anthony's — now carries "(Test)" in
+  // parentheses so anyone who sees this profile (his buddy
+  // included) can tell at a glance it is a test account.
+  username: "Jarvis (Test)",
   trust_score: 5,
 } as const;
 
@@ -4133,10 +4137,28 @@ async function ensureVerifiedRoots(ctx: Ctx): Promise<void> {
   ];
   for (const root of roots) {
     const existing = await db
-      .select({ code: schema.verifiedBadges.collectorCode })
+      .select({
+        code: schema.verifiedBadges.collectorCode,
+        username: schema.verifiedBadges.username,
+      })
       .from(schema.verifiedBadges)
       .where(eq(schema.verifiedBadges.collectorCode, root.code))
       .limit(1);
+    // The built-in friend's badge follows his registry name
+    // (renamed to "Jarvis (Test)" Nov 9, 2026): refresh the
+    // stored label only — status, basis, and proof are never
+    // touched here, and the owner's root row is left alone.
+    if (
+      existing.length > 0 &&
+      root.basis === "builtin" &&
+      existing[0] &&
+      existing[0].username !== root.username
+    ) {
+      await db
+        .update(schema.verifiedBadges)
+        .set({ username: root.username, updatedAt: now })
+        .where(eq(schema.verifiedBadges.collectorCode, root.code));
+    }
     if (existing.length === 0) {
       await db.insert(schema.verifiedBadges).values({
         collectorCode: root.code,

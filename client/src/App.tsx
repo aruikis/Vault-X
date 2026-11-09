@@ -26346,7 +26346,7 @@ async function loadJarvisFriendItems(): Promise<ProfileItemView[]> {
     stats, badges, his items with search/sort/filter, the Trade
     Match tab, and the sharing preview. Jarvis ALSO lives in the
     central registry on Supabase (verified live: MC-JARVIS /
-    "Jarvis" / trust 5) and syncCollectorRegistry re-verifies his
+    "Jarvis (Test)" / trust 5) and syncCollectorRegistry re-verifies his
     row alongside Anthony's, so the Add a Friend lookup resolves
     him from the server; this page falls back to the built-in copy
     of his little collection when the server is unreachable. */
@@ -26688,12 +26688,17 @@ function JarvisFriendProfile({
     Server registration (Nov 2, 2026, Anthony's follow-up): Jarvis
     ALSO lives in the central Vault X registry on Supabase —
     verified live in the profiles table as MC-JARVIS / username
-    "Jarvis" / trust 5 — and the app's syncCollectorRegistry action
+    "Jarvis (Test)" / trust 5 (renamed from plain "Jarvis" on
+    Nov 9, 2026 at Anthony's direction) — and the app's syncCollectorRegistry action
     re-registers and verifies his row alongside Anthony's own, so
     the Add a Friend lookup resolves him from the server, not just
     from this built-in copy. */
 const JARVIS_FRIEND = {
-  displayName: "Jarvis",
+  // Renamed Nov 9, 2026 at Anthony's direction: Jarvis's own
+  // display name — NOT Anthony's username — now reads
+  // "Jarvis (Test)" so the test account is labeled as one
+  // everywhere his name shows. The @handle stays "jarvis".
+  displayName: "Jarvis (Test)",
   username: "jarvis",
   collectorCode: "MC-JARVIS",
   trustScore: 5,
@@ -33760,8 +33765,8 @@ function SocialPanel({
         {friendLookup.status === "jarvis" ? (
           <div className="mt-3" role="status">
             <p className="text-sm font-semibold text-emerald-400">
-              Found — Jarvis (@{JARVIS_FRIEND.username}). Already
-              connected.
+              Found — {JARVIS_FRIEND.displayName} (@
+              {JARVIS_FRIEND.username}). Already connected.
             </p>
             <button
               type="button"
@@ -33770,7 +33775,7 @@ function SocialPanel({
               }}
               className="mt-2 w-full rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-bold text-[var(--gold-soft)]"
             >
-              View Jarvis&rsquo;s collection
+              View {JARVIS_FRIEND.displayName}&rsquo;s collection
             </button>
           </div>
         ) : null}
@@ -33822,7 +33827,10 @@ function SocialPanel({
           </span>
         </div>
         <ul className="mt-2.5 flex gap-3 overflow-x-auto pb-1">
-          <li className="w-16 shrink-0">
+          {/* Rail slot widened Nov 9, 2026 so the renamed
+              "Jarvis (Test)" label fits in full instead of
+              truncating. */}
+          <li className="w-24 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -35793,6 +35801,30 @@ export function App() {
     placeholderData: (prev) => prev,
   });
 
+  // Chapters-page search typeahead (Anthony, Nov 9, 2026 —
+  // bug report: on the all-chapters view he typed "Ariel" and
+  // NO match dropdown came down at all). What was wrong: the
+  // chapters page's own search bar was submit-only — typing
+  // only stored the text in sectionQuery, and nothing queried
+  // or rendered matches until Enter handed the text to the
+  // Search overlay. The bar never got the instant typeahead
+  // the Search overlay itself has. This query gives it the
+  // SAME behavior under his standing search rule: the same
+  // searchCards action (the full catalog, each match carrying
+  // its owned quantity from his collection), the same query
+  // key shape so the cache is shared with the Search tab,
+  // enabled from the FIRST letter, and placeholderData keeps
+  // the previous matches on screen while the next keystroke's
+  // results load — matches start at "A", narrow letter by
+  // letter ("Ar", "Ari", "Ariel"), and never disappear
+  // mid-typing.
+  const sectionSearch = useQuery({
+    queryKey: ["search", sectionQuery.trim()],
+    queryFn: () => api.searchCards({ query: sectionQuery.trim() }),
+    enabled: sectionQuery.trim().length >= 1,
+    placeholderData: (prev) => prev,
+  });
+
   // Universal Search (Anthony, Nov 4, 2026): the Search tab is
   // the ONE place for every search — the same keystrokes also
   // search the other catalogs (games + sealed server-side;
@@ -36707,6 +36739,73 @@ export function App() {
             }}
             onScan={() => openScan()}
           />
+          {/* Instant typeahead under the chapters search bar
+              (Anthony, Nov 9, 2026 — the "Ariel" bug: typing
+              showed no dropdown at all because the bar was
+              submit-only). Same rows as the Search tab's
+              suggestions — full name, chapter · number, and
+              Owned ×N / Missing from his collection — fed by
+              the sectionSearch query above (first letter,
+              narrowing per keystroke, previous matches held
+              on screen while the next load lands). Tapping a
+              suggestion opens that card right here via the
+              binder's own openCard and clears the bar, so
+              Back from the card lands back on the chapters
+              view with no stale dropdown in the way. Enter
+              still hands the text to the full Search overlay
+              exactly as before. */}
+          {sectionQuery.trim().length >= 1 ? (
+            <div
+              className="mt-2 max-h-[42vh] overflow-y-auto rounded-[20px] border border-[var(--border)] bg-[var(--surface)] px-1 py-1"
+              role="listbox"
+              aria-label="Card suggestions for the chapters search"
+            >
+              {sectionSearch.isPending && !sectionSearch.data ? (
+                <p className="px-2 py-2.5 text-sm text-[var(--dim)]">
+                  Searching…
+                </p>
+              ) : sectionSearch.data &&
+                sectionSearch.data.results.length > 0 ? (
+                sectionSearch.data.results.slice(0, 8).map((result) => (
+                  <button
+                    key={result.cardId}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    onClick={() => {
+                      openCard(result.cardId);
+                      setSectionQuery("");
+                    }}
+                    className="flex w-full items-center justify-between gap-2 border-b border-[var(--border)] px-2 py-2.5 text-left last:border-b-0"
+                  >
+                    <span>
+                      <span className="block text-sm text-[var(--text)]">
+                        {result.fullName}
+                      </span>
+                      <span className="block text-xs text-[var(--dim)]">
+                        {result.groupName} · #{result.printed}
+                      </span>
+                    </span>
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${
+                        result.ownedQty > 0
+                          ? "text-[var(--gold-soft)]"
+                          : "text-[var(--ghost)]"
+                      }`}
+                    >
+                      {result.ownedQty > 0
+                        ? `Owned ×${result.ownedQty}`
+                        : "Missing"}
+                    </span>
+                  </button>
+                ))
+              ) : sectionSearch.data ? (
+                <p className="px-2 py-2.5 text-sm text-[var(--dim)]">
+                  No cards match that name.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {/* Set selection — year-grouped tiles with progress bars,
