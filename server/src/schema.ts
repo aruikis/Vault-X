@@ -228,8 +228,8 @@ export const collectorProfile = sqliteTable("collector_profile", {
       its starting line. */
   bio: text("bio"),
   /** The app theme he picked in Settings ("vault" | "light" |
-      "midnight" | "crimson" | "contrast" | "rainbow" | "jarvis");
-      null = never picked, so
+      "midnight" | "crimson" | "contrast" | "rainbow" | "jarvis" |
+      "clubhouse"); null = never picked, so
       the default Vault Dark applies. Presentation only — the theme
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),

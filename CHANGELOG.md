@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.126.0
+
+- A new theme joins the picker in Settings: Clubhouse Brass — the Clubhouse Poker Room look, brought over to Vault X just to see how it wears. Deep slate panels, warm brass lines and highlights (the bottom menu's selected tab glows brass too), letterspaced headings, and a soft warm glow rising from the bottom of cards. It pairs with either layout, Classic or New Vision, your choice saves to your profile like the other themes, and Vault Dark is still the default — every other theme works exactly as before.
+
 ## v1.125.0
 
 - Pokémon, Magic: The Gathering, and Star Wars Unlimited cards are now being linked to their exact TCGplayer product — matched by set, collector number, and finish, never by name alone — a set at a time, running daily until every set is done, so their pricing flows the way Lorcana's does. Linked cards show a market value on their Financial tab with its source and date, gain a value-history point at every daily re-pricing, can carry price alerts that actually trigger, and get the Best Offer button wherever a TCGplayer listing exists. Printings TCGplayer doesn't carry keep saying so plainly instead of borrowing another printing's price, and the linking continues on its own as the catalogs grow.

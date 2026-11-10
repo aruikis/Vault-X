@@ -15,7 +15,8 @@ export type ThemeId =
   | "crimson"
   | "contrast"
   | "rainbow"
-  | "jarvis";
+  | "jarvis"
+  | "clubhouse";
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -71,6 +72,13 @@ export const THEMES: ThemeMeta[] = [
       "The UAT redesign as a live theme — deep-blue glow, the big glowing Scan bar on Home, portfolio hero, bubbly rounded glass, and the indigo-to-cyan gradient everywhere.",
     swatches: { bg: "#070b1a", surface: "#101736", accent: "#818cf8" },
   },
+  {
+    id: "clubhouse",
+    name: "Clubhouse Brass",
+    blurb:
+      "The Clubhouse Poker Room look — deep slate panels, warm brass lines and highlights, letterspaced headings, and a soft warm glow rising from the bottom of every card.",
+    swatches: { bg: "#0c1016", surface: "#171e29", accent: "#c8a24e" },
+  },
 ];
 
 export const DEFAULT_THEME: ThemeId = "vault";
@@ -85,7 +93,8 @@ export function isThemeId(value: unknown): value is ThemeId {
     value === "crimson" ||
     value === "contrast" ||
     value === "rainbow" ||
-    value === "jarvis"
+    value === "jarvis" ||
+    value === "clubhouse"
   );
 }
 
@@ -119,6 +128,7 @@ const THEME_BG: Record<ThemeId, string> = {
   contrast: "#000000",
   rainbow: "#0b0f1e",
   jarvis: "#070b1a",
+  clubhouse: "#0c1016",
 };
 
 export function syncThemeColorMeta(theme: ThemeId): void {

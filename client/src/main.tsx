@@ -23,6 +23,8 @@ try {
     crimson: "#090505",
     contrast: "#000000",
     rainbow: "#0b0f1e",
+    jarvis: "#070b1a",
+    clubhouse: "#0c1016",
   };
   const meta = document.querySelector<HTMLMetaElement>(
     'meta[name="theme-color"]',

@@ -13952,7 +13952,7 @@ export const Actions = {
 
   setThemePreference: defineAction({
     description:
-      "Saves the app theme the user picked in Settings (Vault Dark, Light, Midnight Purple, Crimson Ember, High Contrast, Rainbow, or New Vision 2.0 Beta) on their collector profile, so the choice persists for them across devices. Presentation only — no collection data changes.",
+      "Saves the app theme the user picked in Settings (Vault Dark, Light, Midnight Purple, Crimson Ember, High Contrast, Rainbow, New Vision 2.0 Beta, or Clubhouse Brass) on their collector profile, so the choice persists for them across devices. Presentation only — no collection data changes.",
     request: z.object({
       theme: z.enum([
         "vault",
@@ -13962,6 +13962,7 @@ export const Actions = {
         "contrast",
         "rainbow",
         "jarvis",
+        "clubhouse",
       ]),
     }),
     response: z.object({ ok: z.literal(true), theme: z.string() }),
