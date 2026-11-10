@@ -148,6 +148,7 @@ applyLayout,
 isLayoutId,
 readStoredLayout,
 visionLayoutActive,
+atriumLayoutActive,
 type LayoutId,
 } from "./layouts";
 import tcgplayerLogo from "./assets/tcgplayer-logo.png";
@@ -1982,7 +1983,7 @@ function CardSheet({
 
   return (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
+      className="vx-flow-in fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]"
       role="dialog"
       aria-modal="true"
       aria-label={card ? `Details for ${card.fullName}` : "Card details"}
@@ -2062,7 +2063,13 @@ function CardSheet({
               </div>
             ) : null}
 
-            <div className="mt-2">
+            <div
+              className={
+                document.documentElement.dataset.layout === "atrium"
+                  ? "atrium-frame mt-2 rounded-[4px]"
+                  : "mt-2"
+              }
+            >
               {bundledArtSrc(card.bundledArt) ? (
                 <div className="mx-auto w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 bg-[#2e2b28] shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
                   <img
@@ -2162,6 +2169,51 @@ function CardSheet({
                 </div>
               ) : null}
             </div>
+
+            {/* Atrium gallery plaque (Nov 10, 2026): under this
+                layout the piece's title block becomes a museum
+                plaque — name, set and number, finish — with the
+                headline figures as plaque rows beneath it. The
+                same live figures the other layouts show; the
+                full financials stay on Card Performance. */}
+            {document.documentElement.dataset.layout === "atrium" ? (
+              <div className="atrium-plaque mt-4 rounded-[4px]">
+                <p className="font-album text-lg font-semibold leading-tight text-[var(--text)]">
+                  {card.encounterFront
+                    ? card.encounterFront.frontName
+                    : card.fullName}
+                </p>
+                <p className="mt-0.5 text-xs uppercase tracking-[0.14em] text-[var(--dim)]">
+                  {card.groupName} · #{card.printed ?? "—"}
+                  {card.rarity ? ` · ${card.rarity}` : ""}
+                </p>
+                <div className="mt-2 text-left">
+                  <div className="atrium-plaque-row">
+                    <span className="text-xs uppercase tracking-wide text-[var(--dim)]">In your collection</span>
+                    <span className="text-sm font-semibold text-[var(--text)]">
+                      {total > 0
+                        ? `${total} cop${total === 1 ? "y" : "ies"} — ${Object.entries(current).filter(([, q]) => q > 0).map(([f, q]) => `${f} ×${q}`).join(", ") || "—"}`
+                        : "Not owned yet"}
+                    </span>
+                  </div>
+                  {titlePrice != null ? (
+                    <div className="atrium-plaque-row">
+                      <span className="text-xs uppercase tracking-wide text-[var(--dim)]">Market value</span>
+                      <span className="text-sm font-semibold text-[var(--text)]">{fmtUSD(titlePrice)}</span>
+                    </div>
+                  ) : null}
+                  {card.cardType ? (
+                    <div className="atrium-plaque-row">
+                      <span className="text-xs uppercase tracking-wide text-[var(--dim)]">Type</span>
+                      <span className="text-sm font-semibold text-[var(--text)]">
+                        {card.cardType}
+                        {card.subtypes ? ` — ${card.subtypes}` : ""}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             {/* Best Offer: quick hyperlink straight to this exact
                 printing on TCGplayer (Anthony's addition). */}
@@ -8094,6 +8146,30 @@ let tabNavigationUsed = false;
     immediately from the query cache. */
 let homeBootRevealedOnce = false;
 
+/** Atrium completion ring (Nov 10, 2026): an SVG ring showing a
+    collection's real completion percentage where one is tracked
+    (the Lorcana binder totals behind TCG Universe); where a
+    collection carries no completion figure on Home, the ring
+    renders open with a chevron — it never invents a percentage. */
+function CompletionRing({ pct }: { pct: number | null }) {
+  const r = 15.5;
+  const c = 2 * Math.PI * r;
+  const filled = pct != null ? Math.max(0, Math.min(100, pct)) : 0;
+  return (
+    <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center" aria-hidden="true">
+      <svg viewBox="0 0 36 36" className="h-11 w-11 -rotate-90">
+        <circle cx="18" cy="18" r={r} fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.35)" strokeWidth="2.5" />
+        {pct != null ? (
+          <circle cx="18" cy="18" r={r} fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${(filled / 100) * c} ${c}`} />
+        ) : null}
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white">
+        {pct != null ? `${Math.round(pct)}%` : "›"}
+      </span>
+    </span>
+  );
+}
+
 function HomePanel({
   value,
   onOpenTcgUniverse,
@@ -8118,11 +8194,23 @@ function HomePanel({
   jarvisVision,
   onScanVision,
   onOpenTrade,
+  atriumLayout,
+  onOpenSearch,
 }: {
   /** UAT Quick Actions (Nov 6, 2026): the Trade quick action
       on Home under New Vision 2.0 Beta goes to the Social tab,
       the UAT Trade view's live home. */
   onOpenTrade?: () => void;
+  /** Atrium layout (Nov 10, 2026): Home presents as a gallery —
+      search first, one rotating Focus spotlight, then the
+      collections as full-width banners with completion rings.
+      All data and destinations are the same live ones the
+      other layouts use. */
+  atriumLayout?: boolean;
+  /** Opens the universal Search overlay (the Atrium search
+      pill's tap — the same overlay every layout's Search
+      entry opens, with all its standing rules). */
+  onOpenSearch?: () => void;
   value: number | null;
   /** New Vision presentation active (Anthony, Nov 5, 2026;
       layout choice added Nov 10, 2026): Home carries the
@@ -8264,8 +8352,89 @@ function HomePanel({
   const recentlyAdded = useQuery({
     queryKey: ["recentlyAdded"],
     queryFn: () => api.getRecentlyAdded({}),
-    enabled: jarvisVision === true,
+    enabled: jarvisVision === true || atriumLayout === true,
   });
+  // Atrium Focus + banners data (Nov 10, 2026): the binder
+  // totals/groups behind the Focus spotlight's closest-to-
+  // complete pick and the TCG banner's completion ring — the
+  // SAME ["binder"] query the root already runs, so this is
+  // the shared cache, not a second fetch.
+  const atriumBinder = useQuery({
+    queryKey: ["binder"],
+    queryFn: () => api.getBinder({}),
+    enabled: atriumLayout === true,
+  });
+  // The Focus spotlight (Atrium): ONE rotating spot cycling
+  // three real picks — the most valuable owned item (the
+  // finance payload's own top item), the most recently added
+  // card (the additions log; honestly absent until the first
+  // in-app addition), and the set closest to complete (the
+  // binder group with the highest owned share). Rotation is
+  // a timer only; the three picks are also directly
+  // selectable by their labeled dots.
+  const [focusIdx, setFocusIdx] = useState(0);
+  const focusItems: {
+    key: string;
+    kicker: string;
+    title: string;
+    sub: string;
+    onOpen: () => void;
+  }[] = [];
+  {
+    const top = homeFinance.data?.topItems?.[0];
+    if (top) {
+      focusItems.push({
+        key: "valuable",
+        kicker: "Most valuable",
+        title: top.name,
+        sub: `${top.groupName}${top.printed ? ` · #${top.printed}` : ""} — worth ${fmtUSD(top.totalValue)}`,
+        onOpen: () => {
+          if (top.id != null) onOpenCard(top.id);
+          else onOpenSealed(top.name);
+        },
+      });
+    }
+    const recent = recentlyAdded.data?.items?.[0];
+    if (recent) {
+      focusItems.push({
+        key: "recent",
+        kicker: "Recently added",
+        title: recent.name,
+        sub: `${recent.groupName}${recent.printed ? ` · #${recent.printed}` : ""}`,
+        onOpen: () => onOpenCard(recent.cardId),
+      });
+    }
+    const groups = atriumBinder.data?.groups ?? [];
+    let closest: (typeof groups)[number] | undefined;
+    for (const g of groups) {
+      if (g.total <= 0) continue;
+      if (!closest || g.owned / g.total > closest.owned / closest.total)
+        closest = g;
+    }
+    if (closest) {
+      const pct = Math.round((closest.owned / closest.total) * 100);
+      focusItems.push({
+        key: "closest",
+        kicker: "Closest to complete",
+        title: closest.name,
+        sub: `${closest.owned} of ${closest.total} pockets — ${pct}% complete`,
+        onOpen: () => onOpenBinderGroup(closest!.key),
+      });
+    }
+  }
+  useEffect(() => {
+    if (!atriumLayout || focusItems.length < 2) return;
+    const id = window.setInterval(
+      () => setFocusIdx((i) => (i + 1) % focusItems.length),
+      6000,
+    );
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atriumLayout, focusItems.length]);
+  const focus =
+    focusItems.length > 0
+      ? focusItems[Math.min(focusIdx, focusItems.length - 1)]
+      : undefined;
   // Back-gesture trap (Anthony, Nov 4, 2026 — the app-wide
   // rule: an open window eats the phone's Back first). The
   // example-alert explainer was plain state; it now uses the
@@ -8879,6 +9048,71 @@ function HomePanel({
   );
   return (
     <div className="mt-4">
+      {atriumLayout ? (
+        <>
+          {/* Atrium Home lead (Nov 10, 2026): search FIRST —
+              the universal search pill pinned at the top of
+              Home. It opens the same Search overlay as every
+              Search entry (same rules: never auto-focuses,
+              results open in place, Back returns here). */}
+          <button
+            type="button"
+            onClick={() => onOpenSearch?.()}
+            aria-label="Search your collection"
+            className="flex w-full items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface)] px-5 py-3.5 text-left shadow-[0_8px_24px_rgba(0,0,0,0.25)] transition active:scale-[0.99]"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0 text-[var(--dim)]">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.8-3.8" />
+            </svg>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold text-[var(--text)]">Search your collection</span>
+              <span className="block truncate text-xs text-[var(--dim)]">Cards, figures, comics, sealed — or scan a card</span>
+            </span>
+          </button>
+          <div className="mt-3">{collectorIdEl}</div>
+          {/* Focus: ONE rotating spotlight (see focusItems). */}
+          <section aria-label="Focus" className="mt-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-album text-[22px] leading-tight text-[var(--text)]">Focus</h2>
+              {focusItems.length > 1 ? (
+                <div className="flex items-center gap-1.5" role="group" aria-label="Choose a Focus spotlight">
+                  {focusItems.map((f, i) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => { hapticTick(); setFocusIdx(i); }}
+                      aria-label={`Show Focus: ${f.kicker}`}
+                      aria-pressed={focus?.key === f.key}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${focus?.key === f.key ? "bg-[var(--accent)] text-[var(--on-accent)]" : "text-[var(--dim)]"}`}
+                    >
+                      {f.kicker}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {focus ? (
+              <button
+                key={focus.key}
+                type="button"
+                onClick={focus.onOpen}
+                aria-label={`Focus — ${focus.kicker}: ${focus.title}. ${focus.sub}`}
+                className="vx-flow-in mt-2 block w-full rounded-[18px] border border-[var(--border)] bg-[var(--surface)] p-5 text-left shadow-[0_12px_30px_rgba(0,0,0,0.3)] transition active:scale-[0.99]"
+              >
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--gold-soft)]">{focus.kicker}</span>
+                <span className="font-album mt-1.5 block text-[26px] font-semibold leading-tight text-[var(--text)]">{focus.title}</span>
+                <span className="mt-1 block text-sm text-[var(--dim)]">{focus.sub}</span>
+                <span className="mt-3 block text-sm font-semibold text-[var(--accent)]">View ›</span>
+              </button>
+            ) : (
+              <p className="mt-2 rounded-[18px] border border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-sm leading-relaxed text-[var(--dim)]">
+                Your spotlight appears here as your collection grows — your most valuable item, your latest addition, and the set closest to complete.
+              </p>
+            )}
+          </section>
+        </>
+      ) : null}
       {jarvisVision ? collectorIdEl : null}
       {/* Home header REMOVED (Anthony, Nov 2, 2026, late): the
           small centered Vault X ring + "Vault X" label that sat
@@ -8934,7 +9168,7 @@ function HomePanel({
           Under New Vision 2.0 Beta the same element already
           rendered above the Scan bar as the UAT greeting header,
           so this slot renders it only for the other themes. */}
-      {!jarvisVision ? collectorIdEl : null}
+      {!jarvisVision && !atriumLayout ? collectorIdEl : null}
       {triggeredAlerts.map((a) => {
         const openAlert = () => {
           if (a.targetKind === "card" && a.cardId != null) {
@@ -9223,7 +9457,7 @@ function HomePanel({
           the top IS Home's heading (Nov 6, 2026 — UAT-match
           rebuild): the "Home / clean slate" title block does
           not render in that theme. Other themes keep it. */}
-      {!jarvisVision ? (
+      {!jarvisVision && !atriumLayout ? (
         <>
           <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
             Home
@@ -9259,7 +9493,7 @@ function HomePanel({
           own collection over the last 24 hours, (3) Your
           Collections below. The pill is a hyperlink: tapping
           it ports straight to the Portfolio page. */}
-      {homeFinance.data ? (
+      {homeFinance.data && !atriumLayout ? (
         <div className="mt-5">
           {(() => {
             const hist = homeFinance.data.history;
@@ -9810,12 +10044,51 @@ function HomePanel({
             2.0 Beta (Nov 6, 2026): the UAT heading stands
             alone over the grid. Drag-to-reorder still works
             exactly as in the other themes. */}
-        {!jarvisVision ? (
+        {!jarvisVision && !atriumLayout ? (
           <p className="mt-1 text-xs text-[var(--dim)]">
             Hold a tile until it lifts, then drag it over another
             tile to swap places.
           </p>
         ) : null}
+        {atriumLayout ? (
+          <div className="mt-3 space-y-3">
+            {displayTileOrder
+              .filter((key) => !hiddenTiles.has(key))
+              .map((key) => {
+                const meta = {
+                  tcg: { label: "TCG Universe", sub: "Lorcana · Pokémon · Star Wars Unlimited · Magic: The Gathering", img: collectionTcgUniverse, alt: "TCG Universe artwork: a glowing vault portal with a wizard, an electric mouse, a space soldier, and a hooded mage from the four trading-card game realms around it", open: onOpenTcgUniverse, aria: "Open the TCG Universe — your four trading-card games", pct: atriumBinder.data && atriumBinder.data.totals.slots > 0 ? (atriumBinder.data.totals.ownedSlots / atriumBinder.data.totals.slots) * 100 : null },
+                  lego: { label: "Legos", sub: "Sets and minifigures", img: collectionLego, alt: "Legos collection artwork: colorful building bricks spilling out of an open dark vault chest with blue-purple glow", open: onOpenLego, aria: "Open your Legos section", pct: null },
+                  comics: { label: "Comics", sub: "Graded comics", img: collectionComics, alt: "Comics collection artwork: graded comic books in clear display slabs with bold caped-superhero cover art", open: onOpenComics, aria: "Open your Comics collection", pct: null },
+                  sports: { label: "Sports Cards", sub: "Baseball · Basketball", img: collectionSportsCards, alt: "Sports Cards artwork: two graded card slabs standing on a shelf — a baseball batter silhouette and a basketball player silhouette, their label plates blank", open: onOpenSportsCards, aria: "Open your Sports Cards", pct: null },
+                  toppsau: { label: "Topps Alternate Universe", sub: "Disney · Star Wars · Garbage Pail Kids · WWE", img: collectionToppsAu, alt: "Topps Alternate Universe artwork: a single elegant dark trading card standing upright in blue-purple glow, its face carrying only small icons, no lettering", open: onOpenToppsAlternateUniverse, aria: "Open your Topps Alternate Universe", pct: null },
+                  funko: { label: "Funko", sub: "Pop! figures", img: collectionFunko, alt: "Funko collection artwork: a minimal glowing gold crown floating over a dark vinyl figure inside a gunmetal ring, on a deep blue and violet smoky background", open: onOpenFunko, aria: "Open your Funko Pop! collection", pct: null },
+                }[key];
+                if (!meta) return null;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={tileClickGuarded(meta.open)}
+                    aria-label={meta.aria}
+                    className="relative block w-full overflow-hidden rounded-[18px] border border-[var(--border)] text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  >
+                    <img src={meta.img} alt={meta.alt} loading="lazy" draggable={false} className="block aspect-[21/9] w-full object-cover" />
+                    <span aria-hidden="true" className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(4,6,18,0) 30%, rgba(4,6,18,0.88))" }} />
+                    <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4">
+                      <span className="min-w-0">
+                        <span className="font-album block text-[22px] font-semibold leading-tight text-white">
+                          {meta.label}
+                          {key === "funko" && !funkoReady ? (<span className="ml-2 align-middle text-[10px] font-bold uppercase tracking-wide text-[#ffb020]">{t("common.comingSoon")}</span>) : null}
+                        </span>
+                        <span className="block truncate text-xs text-white/80">{meta.sub}</span>
+                      </span>
+                      <CompletionRing pct={meta.pct} />
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        ) : (
         <div
           ref={tileGridRef}
           className={`mt-3 flex flex-wrap justify-center gap-3 ${
@@ -10146,6 +10419,7 @@ function HomePanel({
             </div>
           ) : null}
         </div>
+        )}
       </section>
 
       {/* Recently Added rail (Nov 6, 2026 — UAT-match rebuild):
@@ -15993,9 +16267,9 @@ function SettingsPanel({
         <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
           Pick how the app is organized — this is separate from
           the theme above, which is just the colors. Mix them
-          however you like: either layout works with any theme,
-          and switching never changes your collection or how
-          anything works.
+          however you like: any of the three layouts works with
+          any theme, and switching never changes your collection
+          or how anything works.
         </p>
         <div className="mt-3">
           <VxSelect
@@ -34293,7 +34567,11 @@ function SocialPanel({
           chips, verified checks, and the confirmed-trades
           trust strip. The Marketplace overlay next door is
           untouched — this lift is Forums only. */}
-      {area === "forums" ? <ForumsPanel /> : null}
+      {area === "forums" ? (
+        <div key="forums" className="vx-flow-in">
+          <ForumsPanel />
+        </div>
+      ) : null}
 
       {/* A friend's profile, opened from the pinned Friends rail
           (Anthony, Nov 4, 2026): it renders in the swap area in
@@ -34320,17 +34598,20 @@ function SocialPanel({
           offers. */}
       {area === "market" ? (
         MARKETPLACE_AVAILABLE ? (
-          <MarketplacePanel
-            onOpenJarvisProfile={() => {
-              openFriend();
-            }}
-          />
+          <div key="market" className="vx-flow-in">
+            <MarketplacePanel
+              onOpenJarvisProfile={() => {
+                openFriend();
+              }}
+            />
+          </div>
         ) : (
           <MarketplaceHeldPanel />
         )
       ) : null}
 
       {area === "trades" ? (
+        <div key="trades" className="vx-flow-in">
         <TradesPanel
           onOpenCard={onOpenCard}
           wantPick={null}
@@ -34344,6 +34625,7 @@ function SocialPanel({
           cartCounts={cartCounts}
           focusDeal={focusDeal}
         />
+        </div>
       ) : null}
 
       {checkoutPage ? (
@@ -35149,6 +35431,14 @@ export function App() {
   // bundles the layout) is active — every layout-aware
   // surface keys off this one flag.
   const visionLayout = visionLayoutActive(layout, theme);
+  // Atrium (Nov 10, 2026): the third layout — its own flag,
+  // separate from Vision (the layouts.ts helper already keeps
+  // an Atrium pick from presenting as Vision, even paired
+  // with the New Vision 2.0 Beta theme).
+  const atriumLayout = atriumLayoutActive(layout);
+  // Atrium binder mini-header: this set's sealed row tucks
+  // under the sticky header and collapses from its toggle.
+  const [atriumSealedOpen, setAtriumSealedOpen] = useState(true);
   // Language (Settings > Language): the same pattern as the
   // theme — starts from the device mirror, the profile's
   // saved choice wins when it arrives, picking applies
@@ -36931,7 +37221,55 @@ export function App() {
       <BackupAutoSync />
       <UsageJournalTracker />
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
-      <main className="mx-auto w-full max-w-3xl px-3 pb-28 sm:px-4">
+      <main
+        key={view}
+        className={`vx-view-flow mx-auto w-full max-w-3xl px-3 sm:px-4 ${atriumLayout ? "pb-10" : "pb-28"}`}
+      >
+        {/* Atrium rooms (Nov 10, 2026): top segmented
+            navigation — Collections | Play | Social |
+            Portfolio — plus labeled Search, Scan, and
+            Settings. It replaces the bottom dock under this
+            layout only, so the bottom of the screen stays
+            clean for steppers and checkout/trade bars. Every
+            destination is the same navigate() the dock uses,
+            so back-button and refresh rules are untouched. */}
+        {atriumLayout ? (
+          <div className="atrium-rooms">
+            <nav aria-label="Rooms" className="flex flex-wrap items-center gap-1.5">
+              {([
+                { key: "collections", label: "Collections", active: ["home", "binder", "comics", "lego", "funko", "sealed", "sports", "toppsau", "au-disney", "au-starwars", "au-gpk", "au-wwe"].includes(view), onClick: () => navigate("home"), icon: (<><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><rect x="13.5" y="13.5" width="7" height="7" rx="2" /></>) },
+                { key: "play", label: "Play", active: ["tcg", "pokemon", "magic", "starwars"].includes(view), onClick: () => navigate("tcg"), icon: (<path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11-7.2a.8.8 0 0 0 0-1.4l-11-7.2A.8.8 0 0 0 7 4.8Z" />) },
+                { key: "social", label: "Social", active: view === "social" && !searchOpen, onClick: () => navigate("social"), icon: (<><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19.5c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" /><circle cx="17.2" cy="9" r="2.6" /><path d="M16.2 14.7c2.2.3 3.7 1.8 4.2 4.3" /></>) },
+                { key: "portfolio", label: "Portfolio", active: view === "finances" && !searchOpen, onClick: () => navigate("finances"), icon: (<><path d="M4 4v16h16" /><path d="M8 16v-5" /><path d="M12.5 16V8" /><path d="M17 16v-8.5" /></>) },
+              ] as const).map((room) => (
+                <button
+                  key={room.key}
+                  type="button"
+                  onClick={room.onClick}
+                  aria-current={room.active ? "page" : undefined}
+                  aria-label={room.label}
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-2 text-[13px] font-semibold transition active:scale-95 ${room.active ? "border-transparent bg-[var(--accent)] text-[var(--on-accent)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"}`}
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">{room.icon}</svg>
+                  {room.label}
+                </button>
+              ))}
+              <span className="mx-0.5 h-6 w-px shrink-0 bg-[var(--border)]" aria-hidden="true" />
+              <button type="button" onClick={goSearch} aria-label="Search" className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] font-semibold text-[var(--text)] transition active:scale-95">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.8-3.8" /></svg>
+                Search
+              </button>
+              <button type="button" onClick={() => openScan()} aria-label="Scan a card" className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] font-semibold text-[var(--text)] transition active:scale-95">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M4 8V5a1 1 0 0 1 1-1h3" /><path d="M16 4h3a1 1 0 0 1 1 1v3" /><path d="M20 16v3a1 1 0 0 1-1 1h-3" /><path d="M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M3 12h18" /></svg>
+                Scan
+              </button>
+              <button type="button" onClick={() => navigate("settings")} aria-current={view === "settings" && !searchOpen ? "page" : undefined} aria-label="Settings" className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-2 text-[13px] font-semibold transition active:scale-95 ${view === "settings" && !searchOpen ? "border-transparent bg-[var(--accent)] text-[var(--on-accent)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"}`}>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.2 5.2l1.8 1.8M17 17l1.8 1.8M18.8 5.2 17 7M7 17l-1.8 1.8" /></svg>
+                Settings
+              </button>
+            </nav>
+          </div>
+        ) : null}
         {/* The pockets-filled collection header USED to render
             here on the binder view — Anthony directed the whole
             metric deleted from everywhere in the app (Nov 3,
@@ -37044,6 +37382,8 @@ export function App() {
             onOpenOrderMail={openInbox}
             jarvisVision={visionLayout}
             onScanVision={() => openScan()}
+            atriumLayout={atriumLayout}
+            onOpenSearch={goSearch}
           />
         ) : view === "tcg" ? (
           <TcgUniversePage
@@ -37282,7 +37622,10 @@ export function App() {
 
         {/* Section heading + filter */}
         {!showPicker && group ? (
-          <section aria-label={group.name} className="mt-3">
+          <section
+            aria-label={group.name}
+            className={atriumLayout ? "atrium-minihead mt-3" : "mt-3"}
+          >
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
                 <h1 className="font-album text-2xl leading-tight text-[var(--text)]">
@@ -37293,6 +37636,29 @@ export function App() {
                     ? `Showing ${sectionData.data.total} — scroll to see them all`
                     : ""}
                 </p>
+                {atriumLayout ? (
+                  <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-[var(--dim)]">
+                    <span>
+                      {group.owned} of {group.total} pockets ·{" "}
+                      {group.total > 0
+                        ? Math.round((group.owned / group.total) * 100)
+                        : 0}
+                      % complete
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        hapticTick();
+                        setAtriumSealedOpen((o) => !o);
+                      }}
+                      aria-expanded={atriumSealedOpen}
+                      aria-label={`Sealed products for ${group.name} — ${atriumSealedOpen ? "hide" : "show"}`}
+                      className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--text)] transition active:scale-95"
+                    >
+                      {atriumSealedOpen ? "Hide sealed ▴" : "Show sealed ▾"}
+                    </button>
+                  </p>
+                ) : null}
               </div>
               <div
                 className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
@@ -37349,6 +37715,9 @@ export function App() {
                       group.name.toLowerCase(),
                   );
                   if (setSealed.length === 0) return null;
+                  // Atrium: the sealed row lives under the sticky
+                  // mini-header and collapses from its toggle.
+                  if (atriumLayout && !atriumSealedOpen) return null;
                   return (
                     <div className="mt-4">
                       <h2 className="font-album text-lg text-[var(--text)]">
@@ -38014,6 +38383,7 @@ export function App() {
           narrower, icon-forward, with the label riding only
           the active tab's pill. Classic layout renders the
           bar exactly as it has always been. */}
+      {!atriumLayout ? (
       <nav
         aria-label={translate(language, "nav.main")}
         className={`pointer-events-none fixed inset-x-0 bottom-0 ${
@@ -38163,7 +38533,7 @@ export function App() {
                     strokeWidth="1.9"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="h-[22px] w-[22px]"
+                    className="h-6 w-6"
                   >
                     {tab.icon}
                   </svg>
@@ -38174,6 +38544,7 @@ export function App() {
           ))}
         </div>
       </nav>
+      ) : null}
 
       {/* Search screen — opened from the bottom Search tab
           (or the Home shortcut). FULL TAKEOVER

@@ -140,7 +140,7 @@ export function VxSelect({
         <div
           role="listbox"
           aria-label={ariaLabel}
-          className={`absolute top-full z-50 mt-2 max-h-64 min-w-full overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.6)] ${
+          className={`absolute top-full z-50 mt-2 max-h-64 min-w-full overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.6)] vx-pop-in ${
             align === "right" ? "right-0" : "left-0"
           }`}
           style={{ width: "max-content", maxWidth: "82vw" }}

@@ -2,6 +2,12 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.122.0
+
+- New layout: Atrium — a third choice in Settings, next to Classic and New Vision. Atrium presents your collection as a gallery: Home opens with search, then one rotating Focus spotlight (your most valuable item, your most recently added card, and the set closest to complete), then your collections as full-width banners with completion rings. Navigation moves to labeled rooms across the top — Collections, Play, Social, Portfolio — so the bottom of the screen stays clear for steppers and checkout bars. Set pages get a slim sticky header with the sealed row tucked under it, and every card or item page shows the piece framed with a museum-style plaque beneath it. Headings are set in a serif face with fresh labeled line icons throughout. It is a layout only: every function, count, price, and rule works exactly the same, it pairs with any theme, and nobody's saved layout changes — Atrium is there in the Layout picker whenever you want to try it.
+- Classic layout: New Vision's bubbly tab flow and icons are now in the normal layout too. Moving from tab to tab in Classic glides and settles the same smooth way it does in New Vision, and Classic's menus and navigation now use New Vision's rounded icons — same places, same labels, same layout, just the friendlier motion and artwork. Tab switches still land exactly where they always did, with no extra screens in between.
+- The bubbly New Vision flow now runs through the whole app, not just the tabs: menus and sub-menus, opening a section from Home, opening a card or item page and coming back, and popup windows, sheets, and dropdowns all glide and settle the same smooth way, in every layout. It is kept quick and light so nothing feels slow, refreshes still land right where you were with no detour, and little in-place changes like counts and search suggestions do not animate at all.
+
 ## v1.121.0
 
 - New: Layouts! Settings now has a Layout picker right next to Theme — the two are separate choices, so you can mix them however you like. Classic is the layout Vault X has always had. New Vision is the modern reorganization: a floating dock with icon tabs at the bottom, Home led by your portfolio and the big Scan bar with quick actions, and rounder, airier screens throughout — in whichever theme colors you pick. Both layouts are here to stay, everything works exactly the same in either, and your choice saves to your profile like your theme does.

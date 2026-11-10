@@ -234,7 +234,8 @@ export const collectorProfile = sqliteTable("collector_profile", {
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),
   /** The app LAYOUT he picked in Settings ("classic" |
-      "vision"; Anthony, Nov 10, 2026): a choice SEPARATE from
+      "vision" | "atrium"; Anthony, Nov 10, 2026 — Atrium
+      added Nov 10, 2026 as the third layout): a choice SEPARATE from
       the theme — themes are colors, layouts are structure
       (navigation form, Home organization, iconography,
       spacing). null = never picked, so the Classic layout

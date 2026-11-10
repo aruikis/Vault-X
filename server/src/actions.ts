@@ -13070,9 +13070,9 @@ export const Actions = {
 
   setLayoutPreference: defineAction({
     description:
-      "Saves the app layout the user picked in Settings (Classic or New Vision) on their collector profile, so the choice persists for them across devices. The layout is a choice separate from the theme: themes are colors, layouts are structure (navigation form, Home organization, iconography, spacing). Presentation only — no collection data or behavior changes; every function works identically under either layout.",
+      "Saves the app layout the user picked in Settings (Classic, New Vision, or Atrium) on their collector profile, so the choice persists for them across devices. The layout is a choice separate from the theme: themes are colors, layouts are structure (navigation form, Home organization, iconography, spacing). Presentation only — no collection data or behavior changes; every function works identically under any layout.",
     request: z.object({
-      layout: z.enum(["classic", "vision"]),
+      layout: z.enum(["classic", "vision", "atrium"]),
     }),
     response: z.object({ ok: z.literal(true), layout: z.string() }),
     async handler(
