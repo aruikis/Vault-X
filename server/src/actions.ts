@@ -42,6 +42,7 @@ import { catalog } from "./data/catalog";
 import {
   puzzleCatalog,
   HUNNY_ENCOUNTER_FRONTS,
+  QUEST_BOSS_PRICES,
 } from "./data/puzzleCatalog";
 import { catalogExtras } from "./data/catalogExtras";
 import type { CatalogEntry } from "./data/catalogTypes";
@@ -585,7 +586,9 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
                 ? "Illustration"
                 : row.rarity === "Encounter"
                   ? "Encounter"
-                  : "Puzzle",
+                  : row.rarity === "Oversized"
+                    ? "Oversized"
+                    : "Puzzle",
         qty: row.ownedQty,
         finishes,
         sceneQty: sceneTotal,
@@ -1431,6 +1434,20 @@ function pocketPrice(
       : (promoSnap.usd ?? promoSnap.usdFoil);
     if (v != null) return v;
   }
+  // Oversized Quest boss cards (Nov 10, 2026): Lorcast — the
+  // main snapshot's basis — carries neither boss card, so
+  // their fallback basis is the uid-keyed TCGplayer
+  // pricepoints snapshot (QUEST_BOSS_PRICES in
+  // data/puzzleCatalog.ts). Each exists in exactly one
+  // printing (Ursula holofoil-only, Jafar normal-only), so
+  // whichever line carries the price is the printing's price.
+  const bossSnap = QUEST_BOSS_PRICES[row.uid];
+  if (bossSnap) {
+    const v = foil
+      ? (bossSnap.usdFoil ?? bossSnap.usd)
+      : (bossSnap.usd ?? bossSnap.usdFoil);
+    if (v != null) return v;
+  }
   // eBay SOLD fallback (Anthony, Nov 4, 2026 — his price
   // hierarchy: TCGplayer #1, eBay sold #2): printings no
   // TCGplayer-basis source prices at all take the median
@@ -1477,6 +1494,15 @@ function cardFinishMarketValue(
     const v = foil
       ? (promoSnap.usdFoil ?? promoSnap.usd)
       : (promoSnap.usd ?? promoSnap.usdFoil);
+    if (v != null && v > 0) return v;
+  }
+  // Oversized Quest boss cards (Nov 10, 2026): the
+  // TCGplayer pricepoints snapshot — see pocketPrice.
+  const bossSnap = QUEST_BOSS_PRICES[row.uid];
+  if (bossSnap) {
+    const v = foil
+      ? (bossSnap.usdFoil ?? bossSnap.usd)
+      : (bossSnap.usd ?? bossSnap.usdFoil);
     if (v != null && v > 0) return v;
   }
   if (row.marketValue != null && row.marketValue > 0)
@@ -13070,9 +13096,9 @@ export const Actions = {
 
   setLayoutPreference: defineAction({
     description:
-      "Saves the app layout the user picked in Settings (Classic, New Vision, or Atrium) on their collector profile, so the choice persists for them across devices. The layout is a choice separate from the theme: themes are colors, layouts are structure (navigation form, Home organization, iconography, spacing). Presentation only — no collection data or behavior changes; every function works identically under any layout.",
+      "Saves the app layout the user picked in Settings (Classic or New Vision) on their collector profile, so the choice persists for them across devices. The layout is a choice separate from the theme: themes are colors, layouts are structure (navigation form, Home organization, iconography, spacing). Presentation only — no collection data or behavior changes; every function works identically under any layout. (Atrium, the short-lived third layout, was removed Nov 10, 2026 at Anthony's direction; a profile still carrying that value simply reads as Classic on the client, which ignores it.)",
     request: z.object({
-      layout: z.enum(["classic", "vision", "atrium"]),
+      layout: z.enum(["classic", "vision"]),
     }),
     response: z.object({ ok: z.literal(true), layout: z.string() }),
     async handler(

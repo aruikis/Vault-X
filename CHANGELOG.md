@@ -2,6 +2,13 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.123.0
+
+- Classic's bottom toolbar is now New Vision's dock, exactly: the floating rounded bar with icons only — no words under the icons — and the tab's name rides just the pill of the tab you're on. Everything else about Classic is exactly as it was.
+- Fixed: the bottom dock's highlight could spill past the dock's edge — on Settings the glow overtook the border. The active tab's highlight and glow now stay fully inside the dock's border on all five tabs (Home, Search, Social, Portfolio, Settings), in every layout and theme.
+- Atrium is gone: the gallery layout has been removed altogether, at your direction. The Layout picker in Settings now offers just Classic and New Vision. If your layout was set to Atrium, you land on Classic (Default) — no error, and nothing else changes: your theme and every other setting stay exactly as they were.
+- New in the catalog: the two oversized Quest boss cards. Ursula - Ruler of Lorcana (Oversized), the giant holofoil boss from Illumineer's Quest: Deep Trouble (TCGplayer market about $5.49), now sits in the Deep Trouble page under “Oversized Boss Card”; Jafar - Supreme Sorcerer of Lorcana (Oversized), the boss from Illumineer's Quest: Palace Heist (about $1.19), sits the same way in the Palace Heist page. Neither is a numbered card, so the Quests' card counts don't change. Both start unowned — add your copies with their steppers, and each has its own page with the usual float-and-turn presentation.
+
 ## v1.122.0
 
 - New layout: Atrium — a third choice in Settings, next to Classic and New Vision. Atrium presents your collection as a gallery: Home opens with search, then one rotating Focus spotlight (your most valuable item, your most recently added card, and the set closest to complete), then your collections as full-width banners with completion rings. Navigation moves to labeled rooms across the top — Collections, Play, Social, Portfolio — so the bottom of the screen stays clear for steppers and checkout bars. Set pages get a slim sticky header with the sealed row tucked under it, and every card or item page shows the piece framed with a museum-style plaque beneath it. Headings are set in a serif face with fresh labeled line icons throughout. It is a layout only: every function, count, price, and rule works exactly the same, it pairs with any theme, and nobody's saved layout changes — Atrium is there in the Layout picker whenever you want to try it.

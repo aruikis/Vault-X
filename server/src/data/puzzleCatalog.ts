@@ -692,6 +692,92 @@ export const HUNNY_ENCOUNTER_FRONTS: HunnyEncounterFront[] = [
   },
 ];
 
+// Oversized Quest boss cards (Anthony, Nov 9, 2026, evening —
+// he held both physical cards and asked to add them: "No,
+// definitely add them to the catalog though."). Each Illumineer's
+// Quest box is built around ONE oversized boss card — the giant
+// villain card the players team up against:
+//   - Ursula - Ruler of Lorcana, from Illumineer's Quest: Deep
+//     Trouble (Q1). Oversized holofoil; art by John Loren
+//     (printed on the card, "EN • Q1" — matches Anthony's photo
+//     of his copy). TCGplayer product 552741, listed as
+//     "Ursula - Ruler of Lorcana (Oversized)"; TCGplayer's own
+//     pricepoints (checked Nov 10, 2026) carry it as Foil-only,
+//     market $5.49.
+//   - Jafar - Supreme Sorcerer of Lorcana, from Illumineer's
+//     Quest: Palace Heist (Q2). Oversized; art by Max Ulichney
+//     (printed on the card, "EN • Q2"). TCGplayer product
+//     639460, "Jafar - Supreme Sorcerer of Lorcana (Oversized)";
+//     pricepoints carry it as Normal (non-foil), market $1.19.
+// (The third Quest's box centers on its Encounter journeys
+// instead; no third boss entry exists to add.)
+// Like the Prize Pack Illustrations they ride the puzzle group
+// (puzzle:Q1 / puzzle:Q2), rendering as an "Oversized Boss Card"
+// section inside the Quest's page: single pockets with their
+// own steppers, ghosted when missing, starting unowned — and
+// NOT numbered cards, so neither Quest's pocket counts or
+// master-set totals move. Each entry's image is the product's
+// real scan on TCGplayer's own CDN (both fetched and visually
+// verified Nov 10, 2026 — the genuine oversized cards, matching
+// Anthony's photos), flowing through the same cardImage
+// pipeline as the puzzle pieces. Tracked prices come from
+// TCGplayer per Anthony's price hierarchy (TCGplayer #1): the
+// snapshot below (QUEST_BOSS_PRICES) seeds them, and the daily
+// re-pricing maintains them from TCGplayer pricepoints by
+// product id (Lorcast does not carry either card — checked
+// Nov 10, 2026).
+const QUEST_BOSS_ENTRIES: CatalogEntry[] = [
+  puzzleEntry({
+    uid: "puzzle:Q1:boss",
+    setCode: "Q1",
+    setName: "Illumineer's Quest: Deep Trouble",
+    number: 1,
+    printed: "Oversized",
+    fullName: "Ursula - Ruler of Lorcana (Oversized)",
+    name: "Ursula - Ruler of Lorcana",
+    rarity: "Oversized",
+    type: "Oversized Boss Card",
+    text: "The oversized boss card from Illumineer's Quest: Deep Trouble — the giant holofoil Ursula the players team up against, the villain centerpiece of the Quest's box. Art by John Loren. It carries no collector number and is not one of the Quest's 31 numbered cards: a collectible centerpiece, tracked like the puzzle inserts.",
+    image:
+      "https://tcgplayer-cdn.tcgplayer.com/product/552741_in_1000x1000.jpg",
+    tcg: 552741,
+  }),
+  puzzleEntry({
+    uid: "puzzle:Q2:boss",
+    setCode: "Q2",
+    setName: "Illumineer's Quest: Palace Heist",
+    number: 1,
+    printed: "Oversized",
+    fullName: "Jafar - Supreme Sorcerer of Lorcana (Oversized)",
+    name: "Jafar - Supreme Sorcerer of Lorcana",
+    rarity: "Oversized",
+    type: "Oversized Boss Card",
+    text: "The oversized boss card from Illumineer's Quest: Palace Heist — the giant Jafar the players team up against, the villain centerpiece of the Quest's box. Art by Max Ulichney. It carries no collector number and is not one of the Quest's numbered cards: a collectible centerpiece, tracked like the puzzle inserts.",
+    image:
+      "https://tcgplayer-cdn.tcgplayer.com/product/639460_in_1000x1000.jpg",
+    tcg: 639460,
+  }),
+];
+
+/** Tracked market prices for the oversized Quest boss cards,
+    keyed by binder uid: TCGplayer's own pricepoints for the
+    exact products, pulled Nov 10, 2026 (Ursula 552741: Foil
+    market $5.49, no Normal printing; Jafar 639460: Normal
+    market $1.19, no Foil printing). Lorcast — the basis of the
+    main catalogPrices snapshot — carries neither card, so this
+    small uid-keyed snapshot is their fallback basis in the
+    price chain (pocketPrice / cardFinishMarketValue in
+    actions.ts), the same role promoPrices plays for promos;
+    the daily re-pricing supersedes it in the database from
+    TCGplayer pricepoints by product id. */
+export const QUEST_BOSS_PRICES: Record<
+  string,
+  { usd: number | null; usdFoil: number | null }
+> = {
+  "puzzle:Q1:boss": { usd: null, usdFoil: 5.49 },
+  "puzzle:Q2:boss": { usd: 1.19, usdFoil: null },
+};
+
 export const puzzleCatalog: CatalogEntry[] = [
   ...PUZZLE_SETS.flatMap((spec) => {
   const entries: CatalogEntry[] = [];
@@ -757,4 +843,5 @@ export const puzzleCatalog: CatalogEntry[] = [
   ...INK_DROP_ENTRIES,
   ...HUNNY_PRIZE_ENTRIES,
   ...HUNNY_ENCOUNTER_ENTRIES,
+  ...QUEST_BOSS_ENTRIES,
 ];
