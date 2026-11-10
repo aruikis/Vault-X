@@ -1,17 +1,26 @@
 // The sideways count dial (Anthony, Nov 3, 2026 — his exact
 // design): long-holding a + stepper opens a small horizontal
-// dial. Tapping a number submits IMMEDIATELY — the count
-// becomes that number ("you own nine cards") — no confirm
-// step, no scrolling list. Shared by every ownership stepper
-// in the app: card-detail finishes, the Sealed shelf tiles,
+// dial. Tapping submits IMMEDIATELY — no confirm step, no
+// scrolling list. Shared by every ownership stepper in the
+// app: set-page grid pockets, card-detail finishes, the
+// connected-artwork scene steppers, the Sealed shelf tiles,
 // the Where-it-lives copies bar on card, sealed, and comic
-// details.
+// details, graded slabs, and the listing quantity picker.
 //
-// NUMBER RANGE REDESIGN (Anthony, Nov 4, 2026): the quick
-// buttons are 1 through 6 ONLY — 7, 8, and 9 are deleted —
-// and right after them sits an OPEN BOX: a type-in field
-// that takes ANY number (his example: 15 copies) and saves
-// it with its Set button. Big counts are typed, not tapped.
+// ADD, DON'T REPLACE (Anthony, Nov 9, 2026 — the Hunny
+// Wizard case): the dial USED to SET the count to the tapped
+// number. He had 4 Regular copies of Winnie the Pooh - Hunny
+// Wizard (Fabled #41), long-pressed, and picked 3 intending
+// to ADD 3 more — the picker replaced his 4 with 3. His
+// words: "that add needs to be fixed." So now the quick
+// buttons are ADD buttons, labeled "+1" through "+6": each
+// adds that many to the current count. The type-in box is
+// kept, but split into two clearly labeled actions — "Add
+// this many" and "Set count to" — so adding and setting can
+// never be confused again, and the current count is shown
+// at the top of the dial before any choice is made. The
+// dial still reports the FINAL count through onPick, so
+// every call site's set-to semantics are unchanged.
 //
 // PLACEMENT RULE (Anthony, Nov 3, 2026, ~2:59 AM, live test):
 // the dial must open ABOVE the + button it belongs to — never
@@ -71,9 +80,13 @@ export function SidewaysCountDial({
 }: {
   /** Accessible name for the dial, e.g. "Pick how many copies of X you own". */
   label: string;
-  /** The count currently in force (highlighted when it is 1-6). */
+  /** The count currently in force — shown at the top of the
+      dial, and the base every "+N" quick button adds to. */
   current: number;
-  /** Tapping a number: the count becomes that number, saved at once. */
+  /** The dial reports the FINAL count, saved at once: a quick
+      "+N" tap reports current + N, "Add this many" reports
+      current + typed, "Set count to" reports the typed number
+      itself. */
   onPick: (n: number) => void;
   onClose: () => void;
   /** Narrow hosts (Sealed shelf tiles): float the dial as a
@@ -202,16 +215,47 @@ export function SidewaysCountDial({
   }, [overlay]);
 
   const [typed, setTyped] = useState("");
-  const submitTyped = () => {
-    const n = Number.parseInt(typed.trim(), 10);
-    if (!Number.isFinite(n) || n < 0 || n > 999) return;
+  const typedValue = Number.parseInt(typed.trim(), 10);
+  const typedValid =
+    typed.trim() !== "" &&
+    Number.isFinite(typedValue) &&
+    typedValue >= 0 &&
+    typedValue <= 999;
+  /** Quick "+N" tap: ADD N to the current count (Anthony,
+      Nov 9, 2026), clamped to the same 999 the type-in allows. */
+  const pickAdd = (n: number) => {
     hapticConfirm();
-    onPick(n);
+    onPick(Math.min(999, current + n));
+    dismissRef.current();
+  };
+  /** The type-in's two actions (Anthony, Nov 9, 2026): "add"
+      adds the typed number to the current count; "set"
+      replaces the count with the typed number. Enter in the
+      box takes the Add action — adding is the intent that
+      was misread before, so it is the default. */
+  const submitTyped = (mode: "add" | "set") => {
+    if (!typedValid) return;
+    hapticConfirm();
+    onPick(
+      mode === "add"
+        ? Math.min(999, current + typedValue)
+        : typedValue,
+    );
     dismissRef.current();
   };
 
   const row = (compact: boolean) => (
     <>
+      {/* The current count, visible before any choice
+          (Anthony, Nov 9, 2026): no more guessing what a
+          tap will do to the count already there. */}
+      <p className="px-1 pb-1.5 text-xs leading-tight text-[var(--dim)]">
+        You have{" "}
+        <span className="text-sm font-bold tabular-nums text-[var(--text)]">
+          {current}
+        </span>{" "}
+        — the buttons below add more.
+      </p>
       <div
         role="listbox"
         aria-label={label}
@@ -224,24 +268,16 @@ export function SidewaysCountDial({
             key={n}
             type="button"
             role="option"
-            aria-selected={n === current}
-            aria-label={`Set the count to ${n}`}
-            onClick={() => {
-              hapticConfirm();
-              onPick(n);
-              dismissRef.current();
-            }}
-            className={`flex items-center justify-center rounded-full tabular-nums ${
+            aria-selected={false}
+            aria-label={`Add ${n} more — you have ${current}, this makes ${Math.min(999, current + n)}`}
+            onClick={() => pickAdd(n)}
+            className={`flex items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] font-semibold tabular-nums text-[var(--text)] ${
               compact
                 ? "h-8 min-w-0 flex-1 text-[13px]"
                 : "h-9 w-9 shrink-0 text-sm"
-            } ${
-              n === current
-                ? "bg-[var(--gold)] font-bold text-black shadow-[0_0_14px_color-mix(in_srgb,var(--accent)_45%,transparent)]"
-                : "border border-[var(--border)] bg-[var(--surface)] font-semibold text-[var(--text)]"
             }`}
           >
-            {n}
+            +{n}
           </button>
         ))}
         <button
@@ -257,15 +293,19 @@ export function SidewaysCountDial({
           ✕
         </button>
       </div>
-      {/* The open box (Anthony, Nov 4, 2026): any count at
-          all, typed — for the collector with 15 copies, not
-          just the 1–6 the quick buttons cover. Enter or the
-          Set button saves it, exactly like tapping a number. */}
+      {/* The open box (Anthony, Nov 4, 2026; split into two
+          labeled actions Nov 9, 2026): any number at all,
+          typed — for the collector with 15 copies, not just
+          the +1–+6 the quick buttons cover. "Add this many"
+          adds it to the current count; "Set count to"
+          replaces the count with it. The two can never be
+          confused, because each button says exactly what
+          it does. */}
       <form
-        className="mt-1.5 flex items-center gap-1.5 px-0.5"
+        className="mt-1.5 px-0.5"
         onSubmit={(e) => {
           e.preventDefault();
-          submitTyped();
+          submitTyped("add");
         }}
       >
         <input
@@ -276,19 +316,32 @@ export function SidewaysCountDial({
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder="Any number — e.g. 15"
-          aria-label="Type any number of copies"
-          className="h-9 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3.5 text-sm font-semibold tabular-nums text-[var(--text)] placeholder:font-normal placeholder:text-[var(--dim)]"
+          aria-label="Type a number of copies to add, or to set the count to"
+          className="h-9 w-full min-w-0 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3.5 text-sm font-semibold tabular-nums text-[var(--text)] placeholder:font-normal placeholder:text-[var(--dim)]"
         />
-        <button
-          type="submit"
-          disabled={typed.trim() === ""}
-          className="h-9 shrink-0 rounded-full bg-[var(--gold)] px-4 text-sm font-bold text-black disabled:opacity-50"
-        >
-          Set
-        </button>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <button
+            type="submit"
+            disabled={!typedValid}
+            className="h-9 min-w-0 flex-1 rounded-full bg-[var(--gold)] px-3 text-sm font-bold text-black disabled:opacity-50"
+          >
+            Add this many
+            {typedValid ? ` → ${Math.min(999, current + typedValue)}` : ""}
+          </button>
+          <button
+            type="button"
+            disabled={!typedValid}
+            onClick={() => submitTyped("set")}
+            className="h-9 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-bold text-[var(--text)] disabled:opacity-50"
+          >
+            Set count to
+            {typedValid ? ` ${typedValue}` : ""}
+          </button>
+        </div>
       </form>
       <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-[var(--dim)]">
-        Tap a number, or type any count and tap Set — saved right away.
+        Saved right away. Tap outside or press back to close without
+        changing anything.
       </p>
     </>
   );

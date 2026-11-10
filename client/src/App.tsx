@@ -47,9 +47,9 @@ deliverFile,
 type ExportRow,
 } from "./exportCollection";
 import {
+COMPRESSED_SIZE_RATIO,
 getArtBlobForIndex,
 getArtworkPending,
-getSessionArtDownload,
 pruneOldArtCaches,
 readArtDownloadChoice,
 startArtworkWarmup,
@@ -142,6 +142,14 @@ isThemeId,
 readStoredTheme,
 type ThemeId,
 } from "./themes";
+import {
+LAYOUTS,
+applyLayout,
+isLayoutId,
+readStoredLayout,
+visionLayoutActive,
+type LayoutId,
+} from "./layouts";
 import tcgplayerLogo from "./assets/tcgplayer-logo.png";
 import vaultXRingArtwork from "./assets/vault-x-ring-artwork.webp";
 import hyperiaFullPuzzleArt from "./assets/puzzle/hyperia-full-puzzle-art.webp";
@@ -683,6 +691,115 @@ function ArtLinkInsignia({ px }: { px: number }) {
   );
 }
 
+/** The Encounter front face for a double-sided Great Hunny
+    Rescue card (Anthony, Nov 10, 2026): cards 1/37–6/37 present
+    front-first, because the Encounter front is the face that
+    carries the number in hand — Entrance Tunnel is #1, not its
+    back, Mickey Mouse - Rescued from the Entrance. No catalog
+    anywhere carries a scan of these fronts, so the face is the
+    app's own rendering of the front's verified data (name,
+    journey, lore goal, special rule, artist — see
+    HUNNY_ENCOUNTER_FRONTS on the server): a deep-vine chamber
+    face, never a borrowed picture of a different card. The
+    rescued-glimmer scan stays one tap away in the detail,
+    labeled as the card's back. Ghosted while missing, like
+    every other pocket — with the app's own ghost-img recipe
+    (the one card scans get, brightness lift included), NOT a
+    bare opacity fade: the first build's opacity-40/saturate-0
+    over these dark stops sank the face into the pocket on
+    Anthony's phone and cards 1–6 read as missing entirely
+    (his Nov 10, 2026 report). */
+function EncounterFrontFace({
+  front,
+  printed,
+  ghost,
+  large = false,
+}: {
+  front: NonNullable<CardLite["encounterFront"]>;
+  printed: string;
+  ghost: boolean;
+  large?: boolean;
+}) {
+  return (
+    <div
+      role="img"
+      aria-label={`${front.frontName}, Encounter ${front.encounter} of ${front.journey}, lore goal ${front.loreGoal} — the front of card ${printed}; its back is ${front.backFullName}`}
+      className={`flex h-full w-full flex-col justify-between overflow-hidden ${
+        large ? "p-5" : "p-2"
+      } ${ghost ? "ghost-img" : ""}`}
+      style={{
+        // Brightened (Nov 10, 2026 fix): the first build's
+        // stops were so dark that, ghosted, the face sank
+        // into the pocket on a real phone screen and read as
+        // an empty pocket — Anthony reported cards 1–6 as not
+        // appearing at all. The face now carries its own
+        // light: a stronger vine-glow at the top, mid-green
+        // stops that survive the ghost filter, and a lit
+        // inner frame line.
+        background:
+          "radial-gradient(120% 90% at 50% 0%, rgba(163,230,53,0.38) 0%, rgba(20,38,28,0) 58%), linear-gradient(165deg, #2f5b36 0%, #1d3d26 48%, #37255c 100%)",
+        boxShadow:
+          "inset 0 0 0 1px rgba(220,252,190,0.28), inset 0 1px 0 rgba(255,255,255,0.18)",
+      }}
+    >
+      <div className="flex items-start justify-between gap-1">
+        <span
+          className={`font-semibold uppercase tracking-wider text-[#c9f29b] ${
+            large ? "text-xs" : "text-[8px]"
+          }`}
+        >
+          Encounter {front.encounter}
+        </span>
+        <span
+          className={`rounded-full bg-black/45 font-semibold text-[#f3e9c8] ring-1 ring-white/20 ${
+            large ? "px-2.5 py-1 text-xs" : "px-1.5 py-px text-[8px]"
+          }`}
+        >
+          Lore goal {front.loreGoal}
+        </span>
+      </div>
+      <div className="min-w-0">
+        <p
+          className={`font-album font-bold leading-tight text-[#fdf6d8] ${
+            large ? "text-3xl" : "text-[13px]"
+          }`}
+        >
+          {front.frontName}
+        </p>
+        <p
+          className={`mt-0.5 leading-tight text-[#b9d9a8] ${
+            large ? "text-sm" : "text-[9px]"
+          }`}
+        >
+          {front.journey}
+        </p>
+        <p
+          className={`mt-1 leading-snug text-[#e8e3c8] ${
+            large ? "text-sm" : "line-clamp-3 text-[8.5px]"
+          }`}
+        >
+          {front.rules}
+        </p>
+        {large && front.artist ? (
+          <p className="mt-2 text-xs text-[#b9d9a8]">Art by {front.artist}</p>
+        ) : null}
+      </div>
+      <div
+        className={`leading-tight text-[#9fb894] ${
+          large ? "text-xs" : "text-[8px]"
+        }`}
+      >
+        <p>
+          {printed} · Front
+        </p>
+        <p className={large ? "" : "truncate"}>
+          Back: {front.backFullName}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // Speed pass (Nov 5, 2026): Pocket is memoized — a section
 // renders up to a few hundred pockets inside the root component,
 // whose state changes constantly (search text, sheets, badges).
@@ -765,6 +882,15 @@ const Pocket = memo(function Pocket({
     setQty((q) => Math.max(0, Math.min(999, q + delta)));
     adjust.mutate({ delta });
   };
+  // Double-sided Great Hunny Rescue cards (Anthony, Nov 10,
+  // 2026): when the server attaches an Encounter front, the
+  // pocket presents the FRONT first — its name leads every
+  // label, and the cataloged rescued glimmer is named as the
+  // card's back.
+  const front = card.encounterFront;
+  const displayName = front
+    ? `${front.frontName} — Encounter ${front.encounter}`
+    : card.fullName;
   const shownQty = cols === 2 ? qty : card.ownedQty;
   // Total copies and filled state span both tallies (Anthony,
   // Nov 9, 2026): a copy held in the joined scene fills this
@@ -773,11 +899,13 @@ const Pocket = memo(function Pocket({
   const tallyQty = shownQty + card.sceneQty;
   const owned = tallyQty > 0;
   const isFoilPocket = card.pocket === "foil" || hasFoil(card.finishes);
-  const pocketAria = `${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
-    isFoilPocket ? ", foil" : ""
-  }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
-    card.artLink ? ", artwork joins a larger scene" : ""
-  }`;
+  const pocketAria = front
+    ? `${front.frontName}, Encounter ${front.encounter}, number ${card.printed}, front of the double-sided card whose back is ${card.fullName}, ${owned ? `owned, ${tallyQty} copies` : "missing"}`
+    : `${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
+        isFoilPocket ? ", foil" : ""
+      }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
+        card.artLink ? ", artwork joins a larger scene" : ""
+      }`;
   const cardButton = (
     <button
       ref={rootRef}
@@ -799,6 +927,12 @@ const Pocket = memo(function Pocket({
             className={`h-full w-full bg-[#2e2b28] object-contain ${
               owned ? "" : "ghost-img"
             }`}
+          />
+        ) : front ? (
+          <EncounterFrontFace
+            front={front}
+            printed={card.printed}
+            ghost={!owned}
           />
         ) : url ? (
           <img
@@ -874,11 +1008,15 @@ const Pocket = memo(function Pocket({
               owned ? "text-[var(--text)]" : "text-[var(--ghost)]"
             }`}
           >
-            {card.fullName}
+            {displayName}
           </p>
           <p className="text-[9px] leading-tight text-[var(--dim)]">
             #{card.printed}
-            {card.rarity ? ` · ${card.rarity}` : ""}
+            {front
+              ? " · Encounter front"
+              : card.rarity
+                ? ` · ${card.rarity}`
+                : ""}
           </p>
         </div>
       ) : null}
@@ -896,11 +1034,13 @@ const Pocket = memo(function Pocket({
             owned ? "text-[var(--text)]" : "text-[var(--ghost)]"
           }`}
         >
-          {card.fullName}
+          {displayName}
         </p>
         <p className="text-[11px] leading-tight text-[var(--dim)]">
           #{card.printed}
-          {card.rarity ? ` · ${card.rarity}` : ""} · {card.pocketLabel}
+          {front
+            ? " · Encounter front"
+            : `${card.rarity ? ` · ${card.rarity}` : ""} · ${card.pocketLabel}`}
         </p>
       </div>
       <div className="px-0.5">
@@ -1904,6 +2044,24 @@ function CardSheet({
               </button>
             </div>
 
+            {/* Double-sided Great Hunny Rescue cards (Anthony,
+                Nov 10, 2026): the Encounter front leads the
+                detail, exactly as the pocket presents it — the
+                artwork below is the card's BACK, the rescued
+                glimmer, and is labeled that way so #1 reads as
+                Entrance Tunnel first and Mickey Mouse only as
+                its back. */}
+            {card.encounterFront ? (
+              <div className="mx-auto mt-3 aspect-[88/63] w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
+                <EncounterFrontFace
+                  front={card.encounterFront}
+                  printed={card.printed}
+                  ghost={!ownedAny}
+                  large
+                />
+              </div>
+            ) : null}
+
             <div className="mt-2">
               {bundledArtSrc(card.bundledArt) ? (
                 <div className="mx-auto w-full max-w-[36rem] overflow-hidden rounded-xl border border-white/15 bg-[#2e2b28] shadow-[0_10px_36px_rgba(0,0,0,0.5)]">
@@ -1943,13 +2101,29 @@ function CardSheet({
               )}
             </div>
 
+            {card.encounterFront ? (
+              <p className="mt-2 text-center text-xs text-[var(--dim)]">
+                The artwork above is this card&rsquo;s back — the
+                rescued glimmer. Its front is{" "}
+                {card.encounterFront.frontName}, Encounter{" "}
+                {card.encounterFront.encounter}, shown first above.
+              </p>
+            ) : null}
+
             {/* Professional title block: name + collector number and the
                 market price on one line, set name in blue + rarity under */}
             <div className="mt-5 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="font-album text-[22px] font-bold leading-tight text-white">
-                  {card.fullName} {card.printed}
+                  {card.encounterFront
+                    ? `${card.encounterFront.frontName} ${card.printed}`
+                    : `${card.fullName} ${card.printed}`}
                 </h2>
+                {card.encounterFront ? (
+                  <p className="mt-0.5 text-sm text-white/80">
+                    Back: {card.fullName}
+                  </p>
+                ) : null}
                 <p className="mt-1 text-[15px]">
                   <span className="font-medium text-[var(--accent)]">
                     {card.groupName}
@@ -2735,7 +2909,7 @@ function RecentRailCard({
       onClick={onOpen}
       aria-label={`Open ${item.name}`}
       className="w-32 shrink-0 overflow-hidden rounded-[20px] border text-left"
-      style={{ borderColor: "#2a3570", background: "#101736" }}
+      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
     >
       {url ? (
         <img
@@ -2757,7 +2931,7 @@ function RecentRailCard({
         </span>
         <span
           className="mt-1 block truncate text-[11px]"
-          style={{ color: "#9aa5d6" }}
+          style={{ color: "var(--dim)" }}
         >
           {item.groupName}
           {item.unitValue != null ? ` · ${fmtUSD(item.unitValue)}` : ""}
@@ -3111,7 +3285,7 @@ function FinancePanel({
               aria-label={hideVals ? "Show values" : "Hide values"}
               aria-pressed={hideVals}
               className="flex h-10 w-10 items-center justify-center rounded-full border text-[var(--text)]"
-              style={{ borderColor: "#2a3570", background: "#101736" }}
+              style={{ borderColor: "var(--border)", background: "var(--surface)" }}
             >
               <svg
                 width="18"
@@ -3134,13 +3308,13 @@ function FinancePanel({
             aria-label="Collection value summary"
             className="relative overflow-hidden rounded-[28px] border p-5"
             style={{
-              background: "linear-gradient(150deg, #182250, #101736)",
-              borderColor: "#2a3570",
+              background: "linear-gradient(150deg, var(--surface), var(--pocket))",
+              borderColor: "var(--border)",
             }}
           >
             <p
               className="text-xs font-bold tracking-widest"
-              style={{ color: "#9aa5d6" }}
+              style={{ color: "var(--dim)" }}
             >
               TOTAL VALUE
             </p>
@@ -3157,7 +3331,7 @@ function FinancePanel({
             </div>
             <div
               className="flex justify-between text-[11px]"
-              style={{ color: "#9aa5d6" }}
+              style={{ color: "var(--dim)" }}
             >
               <span>
                 Tracked from{" "}
@@ -3193,9 +3367,9 @@ function FinancePanel({
               <div
                 key={s.l}
                 className="rounded-[20px] border py-3"
-                style={{ background: "#101736", borderColor: "#2a3570" }}
+                style={{ background: "var(--surface)", borderColor: "var(--border)" }}
               >
-                <p className="text-[11px]" style={{ color: "#9aa5d6" }}>
+                <p className="text-[11px]" style={{ color: "var(--dim)" }}>
                   {s.l}
                 </p>
                 <p
@@ -3214,7 +3388,7 @@ function FinancePanel({
                 disabled={refresh.isPending}
                 onClick={() => refresh.mutate(false)}
                 className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-                style={{ borderColor: "#2a3570", color: "#c9d8ff" }}
+                style={{ borderColor: "var(--border)", color: "var(--gold-soft)" }}
               >
                 {refresh.isPending ? "Starting…" : "Re-price now"}
               </button>
@@ -3224,7 +3398,7 @@ function FinancePanel({
                 onClick={() => refresh.mutate(true)}
                 aria-label="Reprice Force — start a fresh re-pricing run even if today's already ran"
                 className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-                style={{ borderColor: "#2a3570", color: "#c9d8ff" }}
+                style={{ borderColor: "var(--border)", color: "var(--gold-soft)" }}
               >
                 Reprice Force
               </button>
@@ -3232,7 +3406,7 @@ function FinancePanel({
             {refresh.isSuccess ? (
               <p
                 className="mt-1 text-right text-xs"
-                style={{ color: "#9aa5d6" }}
+                style={{ color: "var(--dim)" }}
               >
                 {refresh.data.started
                   ? "Daily re-pricing started in the background — totals and a new chart point land when it finishes."
@@ -6273,7 +6447,7 @@ function CollectorIdCard({
            yellow Update pill when an update (or its one-time
            test) is waiting. */
         <div>
-          <p className="text-sm" style={{ color: "#9aa5d6" }}>
+          <p className="text-sm" style={{ color: "var(--dim)" }}>
             {greeting},
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -6297,7 +6471,7 @@ function CollectorIdCard({
               disabled={!data}
               aria-label={`Your profile: ${username}, ${data?.collectorCode ?? ""}. Tap to open your profile page.`}
               className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold text-[var(--text)] disabled:opacity-60"
-              style={{ borderColor: "#2a3570", background: "#101736" }}
+              style={{ borderColor: "var(--border)", background: "var(--surface)" }}
             >
               @{username}
               <VerifiedBadge
@@ -6305,7 +6479,7 @@ function CollectorIdCard({
                 username={username}
                 className="h-4 w-4"
               />
-              <span style={{ color: "#9aa5d6" }}>
+              <span style={{ color: "var(--dim)" }}>
                 · {data?.collectorCode ?? "Generating…"}
               </span>
             </button>
@@ -7950,12 +8124,14 @@ function HomePanel({
       the UAT Trade view's live home. */
   onOpenTrade?: () => void;
   value: number | null;
-  /** New Vision 2.0 Beta theme active (Anthony, Nov 5, 2026):
-      Home carries the UAT redesign's signature element — the
-      big glowing Scan bar at the top — only while that theme
-      is picked; every other theme's Home is untouched. The
-      rest of the Vision (hero pill, movers ticker, tile grid)
-      is theme.css presentation under the same theme. */
+  /** New Vision presentation active (Anthony, Nov 5, 2026;
+      layout choice added Nov 10, 2026): Home carries the
+      redesign's signature elements — the big glowing Scan
+      bar at the top, the portfolio hero, the quick actions —
+      while the New Vision LAYOUT is picked or the New Vision
+      2.0 Beta theme (which bundles the layout) is active;
+      Classic layout with any other theme keeps Home exactly
+      as it has always been. */
   jarvisVision?: boolean;
   onScanVision?: () => void;
   /** The condensed TCG Universe tile (Nov 4, 2026): the
@@ -8714,14 +8890,17 @@ function HomePanel({
           ID pill below is the first thing on the page. The ring
           artwork itself still lives in Settings → About this
           app, where he approved it. */}
-      {/* New Vision 2.0 Beta — the glowing Scan bar (Anthony,
-          Nov 5, 2026): in the UAT redesign the camera is the
+      {/* New Vision — the glowing Scan bar (Anthony,
+          Nov 5, 2026): in the redesign the camera is the
           heart of the app, so Scan sits in the number-one slot
           as a big glowing gradient pill, above everything else
-          on Home. It renders ONLY while the New Vision 2.0 Beta
-          theme is active (every other theme keeps the Collector
-          ID at the very top, as below) and opens the real
-          scanner, exactly like the scanner entries elsewhere.
+          on Home. It renders while the New Vision presentation
+          is active — the New Vision layout picked (Nov 10,
+          2026: layouts are their own choice, separate from
+          themes) or the New Vision 2.0 Beta theme — and opens
+          the real scanner, exactly like the scanner entries
+          elsewhere. Classic layout keeps the Collector ID at
+          the very top, as below.
           Price alerts pin directly under the ID card, as in
           the UAT they pinned under the bar's header row. */}
       {jarvisVision && onScanVision ? (
@@ -8781,7 +8960,7 @@ function HomePanel({
               onClick={openAlert}
               aria-label={`Price alert: ${a.label} ${a.currentValue != null ? fmtUSD(a.currentValue) : ""}, target ${fmtUSD(a.threshold)}`}
               className="mb-3 flex w-full items-center gap-2 rounded-full border px-4 py-2.5 text-left text-sm font-semibold text-[var(--text)]"
-              style={{ borderColor: "#facc15", background: "#101736" }}
+              style={{ borderColor: "#facc15", background: "var(--surface)" }}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -8840,7 +9019,7 @@ function HomePanel({
           onClick={() => exampleSheet.openSheet()}
           aria-label="Example price alert — tap to learn how price alerts work"
           className="mb-3 flex w-full items-center gap-2 rounded-full border px-4 py-2.5 text-left text-sm font-semibold text-[var(--text)]"
-          style={{ borderColor: "#facc15", background: "#101736" }}
+          style={{ borderColor: "#facc15", background: "var(--surface)" }}
         >
           <svg
             viewBox="0 0 24 24"
@@ -9182,8 +9361,8 @@ function HomePanel({
                   className="relative overflow-hidden rounded-[28px] border p-5"
                   style={{
                     background:
-                      "linear-gradient(150deg, #182250, #101736)",
-                    borderColor: "#2a3570",
+                      "linear-gradient(150deg, var(--surface), var(--pocket))",
+                    borderColor: "var(--border)",
                   }}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -9195,7 +9374,7 @@ function HomePanel({
                     >
                       <span
                         className="block text-xs font-bold tracking-widest"
-                        style={{ color: "#9aa5d6" }}
+                        style={{ color: "var(--dim)" }}
                       >
                         PORTFOLIO
                       </span>
@@ -9223,8 +9402,8 @@ function HomePanel({
                       aria-pressed={heroHide}
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[var(--text)]"
                       style={{
-                        borderColor: "#2a3570",
-                        background: "#101736",
+                        borderColor: "var(--border)",
+                        background: "var(--surface)",
                       }}
                     >
                       <svg
@@ -9251,7 +9430,7 @@ function HomePanel({
                   </div>
                   <div
                     className="mt-2 grid grid-cols-3 border-t pt-3 text-center"
-                    style={{ borderColor: "#2a3570" }}
+                    style={{ borderColor: "var(--border)" }}
                   >
                     {/* UAT labels, plain (Nov 6, 2026 — UAT-match
                         rebuild): the UAT strip reads Paid / Net /
@@ -9266,7 +9445,7 @@ function HomePanel({
                     <div>
                       <p
                         className="text-[11px]"
-                        style={{ color: "#9aa5d6" }}
+                        style={{ color: "var(--dim)" }}
                       >
                         Paid
                       </p>
@@ -9277,7 +9456,7 @@ function HomePanel({
                     <div>
                       <p
                         className="text-[11px]"
-                        style={{ color: "#9aa5d6" }}
+                        style={{ color: "var(--dim)" }}
                       >
                         Net
                       </p>
@@ -9293,7 +9472,7 @@ function HomePanel({
                     <div>
                       <p
                         className="text-[11px]"
-                        style={{ color: "#9aa5d6" }}
+                        style={{ color: "var(--dim)" }}
                       >
                         Cards
                       </p>
@@ -9305,12 +9484,12 @@ function HomePanel({
                   {fin.movers24h.length > 0 ? (
                     <div
                       className="no-scrollbar mt-3 flex gap-4 overflow-x-auto border-t pt-3"
-                      style={{ borderColor: "#2a3570" }}
+                      style={{ borderColor: "var(--border)" }}
                       aria-label="Top movers in your collection, last 24 hours"
                     >
                       <span
                         className="shrink-0 text-[11px] font-black tracking-wider"
-                        style={{ color: "#9aa5d6" }}
+                        style={{ color: "var(--dim)" }}
                       >
                         TOP MOVERS
                       </span>
@@ -9548,16 +9727,19 @@ function HomePanel({
               onClick={a.onClick}
               aria-label={a.label}
               className="flex flex-col items-center gap-1.5 rounded-[20px] border py-3"
-              style={{ background: "#101736", borderColor: "#2a3570" }}
+              style={{ background: "var(--surface)", borderColor: "var(--border)" }}
             >
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="#22d3ee"
+                stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="h-5 w-5"
+                style={{
+                  color: "var(--jarvis-accent2, var(--accent))",
+                }}
                 aria-hidden="true"
               >
                 <path d={a.path} />
@@ -9732,7 +9914,7 @@ function HomePanel({
                           onClick={tileClickGuarded(meta.open)}
                           aria-label={meta.aria}
                           className="relative block w-full overflow-hidden rounded-[28px] border text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                          style={{ borderColor: "#2a3570" }}
+                          style={{ borderColor: "var(--border)" }}
                         >
                           <img
                             src={meta.img}
@@ -9771,8 +9953,8 @@ function HomePanel({
                         aria-label={meta.aria}
                         className="block w-full overflow-hidden rounded-[24px] border text-left focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                         style={{
-                          borderColor: "#2a3570",
-                          background: "#101736",
+                          borderColor: "var(--border)",
+                          background: "var(--surface)",
                         }}
                       >
                         <img
@@ -9946,7 +10128,7 @@ function HomePanel({
                 }}
                 aria-label="Add collection — choose which collections show on Home"
                 className="flex min-h-[128px] w-full flex-col items-center justify-center gap-1 rounded-[24px] border-2 border-dashed text-sm font-bold transition active:scale-[0.98]"
-                style={{ borderColor: "#2a3570", color: "#9aa5d6" }}
+                style={{ borderColor: "var(--border)", color: "var(--dim)" }}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -9995,9 +10177,9 @@ function HomePanel({
             <p
               className="mt-3 rounded-[20px] border px-4 py-3.5 text-sm leading-relaxed"
               style={{
-                borderColor: "#2a3570",
-                background: "#101736",
-                color: "#9aa5d6",
+                borderColor: "var(--border)",
+                background: "var(--surface)",
+                color: "var(--dim)",
               }}
             >
               Nothing here yet — cards you add from a card page, the
@@ -13450,6 +13632,21 @@ const SETTINGS_JUMPS: {
     ),
   },
   {
+    id: "settings-layout",
+    label: "Layout",
+    // Panels in the same 1.8-stroke line style: a screen
+    // split into a dock and content — the layout mark
+    // (Nov 10, 2026, with the Layout picker).
+    icon: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2.5" />
+        <path d="M3 16.5h18" />
+        <path d="M8.5 20v-3.5" />
+        <path d="M15.5 20v-3.5" />
+      </>
+    ),
+  },
+  {
     id: "settings-language",
     label: "Language",
     // Globe in the same 1.8-stroke line style as every other
@@ -14463,8 +14660,10 @@ function ValuePrivacySwitch() {
     pending images never offered before), a notice at the
     bottom of the intro screen offers the choice: download
     everything now — with the pending size quoted up front
-    and a size-based progress bar (real downloaded MB against
-    that same quoted total) — or opt out for real, in which
+    (the COMPRESSED on-device total since Nov 10, 2026) and
+    a size-based progress bar (compressed MB actually saved
+    on this device against that same quoted total) — or opt
+    out for real, in which
     case no bulk job runs and images cache as the user scrolls
     through the binders. The choice is remembered per artwork
     generation; nothing pending = no notice; the user is
@@ -14488,10 +14687,15 @@ function IntroDownloadGate({ welcomeDone }: { welcomeDone: boolean }) {
     remaining: number;
   }>({ bytes: 0, remaining: 0 });
   const evaluatedRef = useRef(false);
-  const baselineRef = useRef<{ bytes: number; fetches: number }>({
-    bytes: 0,
-    fetches: 0,
-  });
+  // Stored-bytes baseline (Nov 10, 2026 — the compression
+  // pass): the progress bar counts COMPRESSED bytes actually
+  // saved on this device against the quoted compressed total
+  // (the on-device index's real stored bytes, read through
+  // getArtworkPending). The pre-compression bar counted raw
+  // downloaded scan bytes against a raw scan-size quote —
+  // the 1,805 MB figure — which no longer describes anything
+  // the device stores.
+  const baselineStoredRef = useRef(0);
   // Back-gesture trap (Anthony, Nov 4, 2026 — the app-wide
   // rule from his verified-badge report: an open window eats
   // the phone's Back FIRST, never the app underneath). This
@@ -14559,18 +14763,30 @@ function IntroDownloadGate({ welcomeDone }: { welcomeDone: boolean }) {
         setPhase("hidden");
         return;
       }
-      // Quote the size before the choice: the server measures
-      // its stored artwork for a sample of the pending ids;
-      // the total is that measured average times the pending
-      // count. No measurable sample = a count-only quote —
-      // never an invented size.
+      // Quote the size before the choice (Nov 10, 2026 —
+      // compressed quote): the server measures its stored
+      // SCANS for a sample of the pending ids; the client
+      // converts that scan average into the compressed
+      // on-device total with the cache's measured per-tier
+      // ratios (grid copies store at ~0.15 of scan size,
+      // two-across at ~0.43 — COMPRESSED_SIZE_RATIO in
+      // artCache.ts), so the number offered here is what
+      // will actually sit on the device. Before the
+      // compression pass this multiplication used the raw
+      // scan average for every copy and quoted 1,805 MB.
+      // No measurable sample = a count-only quote — never
+      // an invented size.
       let quotedBytes: number | null = null;
       try {
         const quote = await api.getArtworkDownloadQuote({
           pendingIds: [...p.gridMissing, ...p.largeMissing],
         });
         if (quote.avgBytes != null)
-          quotedBytes = quote.avgBytes * total;
+          quotedBytes = Math.round(
+            quote.avgBytes *
+              (p.gridMissing.length * COMPRESSED_SIZE_RATIO.grid +
+                p.largeMissing.length * COMPRESSED_SIZE_RATIO.large),
+          );
       } catch {
         quotedBytes = null;
       }
@@ -14579,22 +14795,26 @@ function IntroDownloadGate({ welcomeDone }: { welcomeDone: boolean }) {
     })();
   }, [welcomeDone, plan.data]);
 
-  // While downloading on this screen: poll the real session
-  // download bytes and the shrinking pending set. Completion
-  // is the pending set reaching zero — then the user
-  // proceeds into the app.
+  // While downloading on this screen: poll the compressed
+  // bytes actually stored on this device (the cache index's
+  // real per-tier byte sums, over the baseline taken when
+  // the download started) and the shrinking pending set.
+  // Completion is the pending set reaching zero — then the
+  // user proceeds into the app.
   useEffect(() => {
     if (phase !== "downloading" || !plan.data) return;
     const data = plan.data;
     let alive = true;
     const timer = window.setInterval(() => {
       void (async () => {
-        const session = getSessionArtDownload();
         const p = await getArtworkPending(data);
         if (!alive) return;
         const remaining = p.gridMissing.length + p.largeMissing.length;
         setProgress({
-          bytes: Math.max(0, session.bytes - baselineRef.current.bytes),
+          bytes: Math.max(
+            0,
+            p.gridBytes + p.largeBytes - baselineStoredRef.current,
+          ),
           remaining,
         });
         if (remaining === 0) {
@@ -14677,7 +14897,14 @@ function IntroDownloadGate({ welcomeDone }: { welcomeDone: boolean }) {
                       choice: "download",
                       at: new Date().toISOString(),
                     });
-                    baselineRef.current = getSessionArtDownload();
+                    // Baseline = compressed bytes already on
+                    // the device at this moment; the progress
+                    // bar counts what this save adds on top.
+                    baselineStoredRef.current = 0;
+                    void getArtworkPending(planData).then((p) => {
+                      baselineStoredRef.current =
+                        p.gridBytes + p.largeBytes;
+                    });
                     startArtworkWarmup(planData);
                     setPhase("downloading");
                   }}
@@ -14784,7 +15011,10 @@ function ArtworkCacheLine() {
         <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
           Artwork cache: {cached.toLocaleString()} of{" "}
           {total.toLocaleString()} images saved on this device.
-          {mb > 0 ? ` About ${mb} MB of artwork is stored.` : ""}
+          {mb > 0 ? ` About ${mb} MB of artwork is stored.` : ""}{" "}
+          Artwork is saved compressed — browsing copies are
+          right-sized for the binders, and each card&rsquo;s full
+          detail stays crisp on its own page.
         </p>
       ) : (
         <p className="mt-0.5 text-xs leading-relaxed text-[var(--dim)]">
@@ -15089,11 +15319,15 @@ function AdminRegistrySection() {
 function SettingsPanel({
   theme,
   onThemeChange,
+  layout,
+  onLayoutChange,
   language,
   onLanguageChange,
 }: {
   theme: ThemeId;
   onThemeChange: (next: ThemeId) => void;
+  layout: LayoutId;
+  onLayoutChange: (next: LayoutId) => void;
   language: LangId;
   onLanguageChange: (next: LangId) => void;
 }) {
@@ -15732,6 +15966,50 @@ function SettingsPanel({
           />
           <p className="mt-2 text-xs leading-snug text-[var(--dim)]">
             {THEMES.find((t) => t.id === theme)?.blurb ?? ""}
+          </p>
+        </div>
+      </section>
+
+      {/* Layout — pick the app's STRUCTURE (Anthony, Nov 10,
+          2026): a choice SEPARATE from the Theme above. Themes
+          are colors; layouts are how the app is organized —
+          the navigation's form, Home's layout, the icons, the
+          spacing. The picker is the SAME shared themed
+          dropdown as the Theme picker (his absolute rule: no
+          native/generic dropdown anywhere, ever), the choice
+          applies app-wide the moment it's tapped and saves to
+          the user's profile like the theme, and BOTH layouts
+          are permanent, fully supported options — every
+          function works identically under either. */}
+      <section
+        id="settings-layout"
+        aria-label="App layout"
+        className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+      >
+        <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
+          <SettingsSectionIcon id="settings-layout" />
+          Layout
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+          Pick how the app is organized — this is separate from
+          the theme above, which is just the colors. Mix them
+          however you like: either layout works with any theme,
+          and switching never changes your collection or how
+          anything works.
+        </p>
+        <div className="mt-3">
+          <VxSelect
+            value={layout}
+            onChange={(v) => onLayoutChange(v as LayoutId)}
+            options={LAYOUTS.map((l) => ({
+              value: l.id,
+              label:
+                l.id === "classic" ? `${l.name} (Default)` : l.name,
+            }))}
+            ariaLabel="Choose a layout"
+          />
+          <p className="mt-2 text-xs leading-snug text-[var(--dim)]">
+            {LAYOUTS.find((l) => l.id === layout)?.blurb ?? ""}
           </p>
         </div>
       </section>
@@ -23623,11 +23901,15 @@ function FlipPocket({
     <button
       type="button"
       onClick={() => onOpen(card.id)}
-      aria-label={`${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
-        isFoilPocket ? ", foil" : ""
-      }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
-        card.artLink ? ", artwork joins a larger scene" : ""
-      }`}
+      aria-label={
+        card.encounterFront
+          ? `${card.encounterFront.frontName}, Encounter ${card.encounterFront.encounter}, number ${card.printed}, front of the double-sided card whose back is ${card.fullName}, ${owned ? `owned, ${tallyQty} copies` : "missing"}`
+          : `${card.fullName}, number ${card.printed}, ${card.pocketLabel} pocket${
+              isFoilPocket ? ", foil" : ""
+            }, ${owned ? `owned, ${tallyQty} copies` : "missing"}${
+              card.artLink ? ", artwork joins a larger scene" : ""
+            }`
+      }
       className="group block w-full text-left focus:outline-none"
     >
       <div className="pocket-sheen relative aspect-[63/88] overflow-hidden rounded-[6px] border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_1px_rgba(0,0,0,0.35),0_1px_3px_rgba(0,0,0,0.5)]">
@@ -23640,6 +23922,12 @@ function FlipPocket({
             className={`h-full w-full bg-[#2e2b28] object-contain ${
               owned ? "" : "ghost-img"
             }`}
+          />
+        ) : card.encounterFront ? (
+          <EncounterFrontFace
+            front={card.encounterFront}
+            printed={card.printed}
+            ghost={!owned}
           />
         ) : url ? (
           <img
@@ -34830,6 +35118,37 @@ export function App() {
       // saved choice.
     });
   };
+  // Layout (Settings > Layout): the same pattern as the theme,
+  // and a SEPARATE choice (Anthony, Nov 10, 2026 — multiple
+  // layouts AND multiple themes, each picked on its own):
+  // starts from the device mirror, the profile's saved choice
+  // wins when it arrives, picking applies instantly, mirrors
+  // to the device, and saves to the profile.
+  const [layout, setLayout] = useState<LayoutId>(readStoredLayout);
+  useEffect(() => {
+    const saved = profileTheme.data?.layout;
+    if (isLayoutId(saved) && saved !== layout) {
+      setLayout(saved);
+      applyLayout(saved);
+    }
+    // Only the arriving server value matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileTheme.data]);
+  const changeLayout = (next: LayoutId) => {
+    hapticTick();
+    setLayout(next);
+    applyLayout(next);
+    void api.setLayoutPreference({ layout: next }).catch(() => {
+      // Offline or server hiccup: the layout still applies here
+      // and is mirrored on this device; the profile keeps the
+      // last saved choice.
+    });
+  };
+  // The Vision reorganization presents when the New Vision
+  // layout is picked OR the New Vision 2.0 Beta theme (which
+  // bundles the layout) is active — every layout-aware
+  // surface keys off this one flag.
+  const visionLayout = visionLayoutActive(layout, theme);
   // Language (Settings > Language): the same pattern as the
   // theme — starts from the device mirror, the profile's
   // saved choice wins when it arrives, picking applies
@@ -35853,22 +36172,14 @@ export function App() {
   // 2026): Quest 3's cards 1/37–6/37 are double-sided — the
   // front of each is a landscape Encounter card (Entrance Tunnel
   // is the front of 1/37; Mickey Mouse - Rescued from the
-  // Entrance, the card the list showed, is its back). The six
-  // fronts live in their own encounter:Q3 group and render as a
-  // separate subsection inside the Quest 3 page, below the Prize
-  // Pack Illustrations — never mixed into the 37 set cards.
-  const encounterGroupKey =
-    group?.key === "quest:Q3" ? "encounter:Q3" : null;
-  const encounterData = useQuery({
-    queryKey: ["section", encounterGroupKey, filter],
-    queryFn: () =>
-      api.getSection({ groupKey: encounterGroupKey ?? "", filter }),
-    enabled: encounterGroupKey != null && !showPicker,
-    retry: 3,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
-  });
+  // Entrance, the card the list used to show, is its back).
+  // The fronts no longer live in a separate subsection: the
+  // server attaches each front's data to its back's row
+  // (card.encounterFront), so the numbered pockets 1–6 present
+  // front-first, exactly as the physical cards are held and
+  // filed. The old encounter:Q3 rows stay in the database
+  // untouched (ownership preserved); they simply no longer
+  // render as a duplicate second listing of the same cards.
 
   // Progressive pocket rendering: paint the first chunk of the section
   // immediately and grow it as the reader scrolls, so a 420-pocket
@@ -36731,7 +37042,7 @@ export function App() {
             onOpenUpdateTest={() => openUpdateView("test")}
             onOpenChangeRequests={openTicketsWindow}
             onOpenOrderMail={openInbox}
-            jarvisVision={theme === "jarvis"}
+            jarvisVision={visionLayout}
             onScanVision={() => openScan()}
           />
         ) : view === "tcg" ? (
@@ -36795,6 +37106,8 @@ export function App() {
           <SettingsPanel
             theme={theme}
             onThemeChange={changeTheme}
+            layout={layout}
+            onLayoutChange={changeLayout}
             language={language}
             onLanguageChange={changeLanguage}
           />
@@ -37404,52 +37717,17 @@ export function App() {
               </div>
             ) : null}
 
-            {/* The Great Hunny Rescue's Encounter Cards
-                (Anthony, Nov 10, 2026): cards 1/37 through 6/37
-                of this Quest are double-sided. The front of
-                each is one of these Encounter cards — a chamber
-                of the Vine with a lore goal — and its back is
-                the Rescued character (or boss) listed at that
-                same number in the set above: Entrance Tunnel
-                is the front of 1/37, and Mickey Mouse - Rescued
-                from the Entrance is its back. Two journeys of
-                three encounters — The Search for Piglet, then
-                The Heart of the Vine — cleared at 5, 12, and
-                20 lore. Their own subsection, separate from the
-                set cards and from the Prize Pack Illustrations,
-                tracked like the puzzle inserts. */}
-            {encounterData.data && encounterData.data.cards.length > 0 ? (
-              <div className="mt-6">
-                <h2 className="font-album text-lg text-[var(--text)]">
-                  Encounter Cards
-                </h2>
-                <p className="text-sm text-[var(--dim)]">
-                  Cards 1/37 to 6/37 of this Quest are
-                  double-sided: the front of each is one of these
-                  Encounter cards, and the back is the Rescued
-                  character — or boss — listed at that same
-                  number in the set above. Entrance Tunnel is the
-                  front of 1/37; Mickey Mouse - Rescued from the
-                  Entrance is its back. Two journeys of three
-                  encounters — The Search for Piglet, then The
-                  Heart of the Vine — each cleared at 5, 12, and
-                  20 lore.
-                </p>
-                <div
-                  className={`mt-3 grid gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 sm:gap-3 sm:p-4 ${
-                    gridCols === 2 ? "grid-cols-2" : "grid-cols-4"
-                  }`}
-                >
-                  {encounterData.data.cards.map((card) => (
-                    <Pocket
-                      key={`${card.id}:${card.pocket}`}
-                      card={card}
-                      onOpen={openCard}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            {/* The Great Hunny Rescue's first six cards
+                (Anthony, Nov 10, 2026): 1/37 through 6/37 are
+                double-sided Encounter cards, and the numbered
+                pockets above now present them front-first —
+                Entrance Tunnel leads the set as #1, not its
+                back (Mickey Mouse - Rescued from the Entrance).
+                The separate Encounter Cards subsection that
+                used to sit here is gone: the fronts live on
+                the cards themselves, and each card's detail
+                shows the front first with the rescued-glimmer
+                scan labeled as its back. */}
 
           </section>
         ) : null}
@@ -37729,14 +38007,27 @@ export function App() {
           tappable — nobody gets trapped in Search by mistake
           (Anthony, Nov 2, 2026). Otherwise it keeps its normal
           layer under the sheets and overlays. */}
+      {/* New Vision layout (Nov 10, 2026): the same five tabs,
+          same order, same destinations, same labels (each
+          button keeps its aria-label) — reorganized as a
+          floating glass DOCK: detached from the screen edges,
+          narrower, icon-forward, with the label riding only
+          the active tab's pill. Classic layout renders the
+          bar exactly as it has always been. */}
       <nav
         aria-label={translate(language, "nav.main")}
-        className={`pointer-events-none fixed inset-x-0 bottom-0 px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))] ${
-          searchOpen && selectedId == null ? "z-[67]" : "z-40"
-        }`}
+        className={`pointer-events-none fixed inset-x-0 bottom-0 ${
+          visionLayout
+            ? "px-5 pb-[max(1.1rem,env(safe-area-inset-bottom))]"
+            : "px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))]"
+        } ${searchOpen && selectedId == null ? "z-[67]" : "z-40"}`}
       >
         <div
-          className="pointer-events-auto mx-auto grid w-full max-w-3xl grid-cols-5 rounded-[26px] border border-[var(--border)] bg-[var(--surface)]/95 px-1.5 py-1.5 shadow-[0_10px_36px_rgba(0,0,0,0.6)] backdrop-blur"
+          className={
+            visionLayout
+              ? "pointer-events-auto mx-auto grid w-full max-w-xl grid-cols-5 rounded-full border border-[var(--border)] bg-[var(--surface)]/85 px-2 py-2 shadow-[0_18px_44px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+              : "pointer-events-auto mx-auto grid w-full max-w-3xl grid-cols-5 rounded-[26px] border border-[var(--border)] bg-[var(--surface)]/95 px-1.5 py-1.5 shadow-[0_10px_36px_rgba(0,0,0,0.6)] backdrop-blur"
+          }
         >
           {(
             [
@@ -37834,27 +38125,51 @@ export function App() {
                   his two approved shapes; a full circle can't
                   hug a stacked icon + label). The blue-purple
                   glow color is unchanged — shape only. */}
-              <span
-                className={`flex flex-col items-center gap-0.5 whitespace-nowrap rounded-[10px] px-2 py-1.5 text-[10px] font-medium ${
-                  tab.active
-                    ? "bg-[var(--accent)] text-[var(--on-accent)]"
-                    : "text-[var(--dim)]"
-                }`}
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.9"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-[22px] w-[22px]"
+              {visionLayout ? (
+                <span
+                  className={`flex items-center justify-center whitespace-nowrap rounded-full ${
+                    tab.active
+                      ? "gap-1.5 bg-[var(--accent)] px-3 py-2 text-[11px] font-bold text-[var(--on-accent)]"
+                      : "p-2.5 text-[var(--dim)]"
+                  }`}
                 >
-                  {tab.icon}
-                </svg>
-                {tab.label}
-              </span>
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-6 w-6"
+                  >
+                    {tab.icon}
+                  </svg>
+                  {tab.active ? tab.label : null}
+                </span>
+              ) : (
+                <span
+                  className={`flex flex-col items-center gap-0.5 whitespace-nowrap rounded-[10px] px-2 py-1.5 text-[10px] font-medium ${
+                    tab.active
+                      ? "bg-[var(--accent)] text-[var(--on-accent)]"
+                      : "text-[var(--dim)]"
+                  }`}
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-[22px] w-[22px]"
+                  >
+                    {tab.icon}
+                  </svg>
+                  {tab.label}
+                </span>
+              )}
             </button>
           ))}
         </div>

@@ -233,6 +233,15 @@ export const collectorProfile = sqliteTable("collector_profile", {
       the default Vault Dark applies. Presentation only — the theme
       drives the CSS variables in theme.css and no collection data. */
   theme: text("theme"),
+  /** The app LAYOUT he picked in Settings ("classic" |
+      "vision"; Anthony, Nov 10, 2026): a choice SEPARATE from
+      the theme — themes are colors, layouts are structure
+      (navigation form, Home organization, iconography,
+      spacing). null = never picked, so the Classic layout
+      applies. Presentation only, exactly like the theme: the
+      layout reorganizes how screens are presented and never
+      touches collection data or behavior. */
+  layout: text("layout"),
   /** The UI language he picked in Settings ("en" | "es" | "de" |
       "fr" | "ja"; Anthony, Nov 4, 2026); null = never picked, so
       English applies. Presentation only — catalog names and

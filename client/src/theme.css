@@ -2270,3 +2270,82 @@ span.stepper-ring {
   align-items: center;
   justify-content: center;
 }
+
+/* ——— New Vision LAYOUT (Nov 10, 2026) ———
+   The layout is a per-user choice SEPARATE from the theme
+   (Settings > Layout; Anthony's model: multiple layouts AND
+   multiple themes, independently picked). Themes above are
+   colors; this layer is STRUCTURE, keyed off data-layout so
+   it pairs with ANY theme: rounder geometry, airier section
+   rhythm, headings in the modern display treatment, surfaces
+   with a soft neutral depth that reads on light and dark
+   themes alike, and crisper binder pockets. The navigation's
+   dock form and Home's reorganization are component-level
+   (App.tsx, keyed off the same choice); everything here is
+   presentation only — no geometry of data changes, and the
+   Classic layout (no data-layout="vision") is untouched. */
+
+:root[data-layout="vision"] {
+  --radius: 18px;
+}
+
+/* Rounder geometry: the common radii step up, so cards,
+   panels, sheets, and controls share one modern curvature. */
+:root[data-layout="vision"] .rounded-lg {
+  border-radius: 1rem;
+}
+:root[data-layout="vision"] .rounded-xl {
+  border-radius: 1.25rem;
+}
+:root[data-layout="vision"] .rounded-2xl {
+  border-radius: 1.5rem;
+}
+:root[data-layout="vision"] .rounded-3xl {
+  border-radius: 1.875rem;
+}
+
+/* Headings take the modern display treatment: the Outfit
+   face (loaded at the top of this file; system-sans
+   fallback), tighter tracking, a touch more weight —
+   app-wide under this layout, whatever the theme. */
+:root[data-layout="vision"] .font-album,
+:root[data-layout="vision"] h1,
+:root[data-layout="vision"] h2,
+:root[data-layout="vision"] h3 {
+  font-family:
+    "Outfit", ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Surfaces sit raised with a neutral lit top edge and a
+   soft shadow — theme-independent (a white wash at this
+   strength reads as light on dark themes and is invisible
+   on the light theme, where the shadow does the work). */
+:root[data-layout="vision"] [class*="bg-\[var\(--surface\)\]"] {
+  background-image: linear-gradient(
+    170deg,
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0) 55%
+  );
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Binder pockets: a crisper edge and a deeper seat, so the
+   grid reads as physical pockets in a modern binder. The
+   pocket geometry (aspect, counts, steppers) is unchanged. */
+:root[data-layout="vision"] .pocket-sheen {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* A slightly wider reading column on larger screens under
+   the Vision layout (phone widths are unaffected — the cap
+   only binds where the screen has room to spare). The main
+   column's own bottom padding already clears the dock. */
+:root[data-layout="vision"] main {
+  max-width: 52rem;
+}

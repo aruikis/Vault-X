@@ -34,6 +34,26 @@
 //   near 1 GB for the whole catalog — so full resolution stays
 //   cached only for cards whose detail view has been opened,
 //   exactly as before, and backfills that card's grid copy).
+// - THE COMPRESSION RULE (Anthony, Nov 10, 2026 — standing):
+//   EVERY copy this cache stores is compressed, sized and
+//   encoded for how the artwork is actually displayed — grid
+//   pockets get a 320px copy, two-across tiles a 640px copy,
+//   and the detail view a copy capped at 1280px wide, all at
+//   high, visually lossless JPEG quality — with one limit that
+//   outranks size every time: never compress so far that the
+//   card's visual integrity suffers. The compressor enforces
+//   it mechanically: a re-encode is stored ONLY when it comes
+//   out smaller than the source (the official Ravensburger
+//   scans are already efficiently encoded at 1468px, so a
+//   detail re-encode usually measures LARGER and the original
+//   bytes are kept untouched — full integrity, zero loss).
+//   Before this rule the intro download choice quoted the
+//   pending save at the scans' full size for every copy —
+//   1,805 MB; the quote now converts the measured scan average
+//   into the compressed on-device total (COMPRESSED_SIZE_RATIO
+//   below, measured on real scans Nov 10, 2026), and each
+//   card's scan is downloaded only ONCE per pass, with every
+//   needed copy cut from that single download.
 // - A small localStorage index tracks insertion order and byte
 //   size per kind; beyond the caps the oldest entries are evicted
 //   first. The grid cap (4,200) sits above the full catalog
@@ -46,7 +66,14 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 
-const CACHE_NAME = "lorcana-art-v4";
+// art-v6 (Nov 10, 2026): bumped with the server's
+// ARTWORK_VERSION for the compression pass — every stored copy
+// is now compressed under the scheme in the header comment, so
+// the warm-up wipes the old generation (whose detail copies
+// were stored at full scan size) and re-saves everything
+// compressed. No double storage: the old generation's cache is
+// deleted, never kept alongside the new one.
+const CACHE_NAME = "lorcana-art-v6";
 const CACHE_PREFIX = "lorcana-art-";
 const INDEX_KEY = "lorcana-art-index-v2";
 const WARMUP_META_KEY = "lorcana-art-warmup-v2";
@@ -57,6 +84,29 @@ const GRID_WIDTH = 320;
 // upscaling the 320px grid thumbnail — Anthony's two-across
 // scroll-jank report ("the bigger pictures need re-caching").
 const LARGE_WIDTH = 640;
+// Detail copies (Nov 10, 2026 — the compression rule): the
+// detail page is where a collector inspects the card, so its
+// copy keeps inspection resolution — capped at 1280px wide
+// (the official scans are 1468px) at the highest quality of
+// the three tiers. The never-grow guard in compressForStorage
+// means an already-efficient scan is stored byte-for-byte;
+// the cap only trims genuinely oversized sources.
+const FULL_MAX_WIDTH = 1280;
+/** Per-tier JPEG quality for the stored copies: high enough
+    to be visually lossless at each tier's display size. */
+const QUALITY = { grid: 0.85, large: 0.85, full: 0.9 } as const;
+/** Measured stored size of each browsing tier as a fraction
+    of the full scan's bytes (Nov 10, 2026, measured on real
+    Ravensburger scans of 1468×2048, ~250–300 KB: a 320px
+    copy at quality 0.85 weighs ~37 KB ≈ 0.15 of the scan;
+    a 640px copy ~106 KB ≈ 0.43). The intro download quote
+    converts the server's measured scan average into the
+    compressed on-device total with these — the honest size
+    of what will actually sit on the device. */
+export const COMPRESSED_SIZE_RATIO = {
+  grid: 0.15,
+  large: 0.43,
+} as const;
 const CAPS = { grid: 4200, large: 4200, full: 120 } as const;
 
 export type ArtKind = keyof typeof CAPS;
@@ -130,14 +180,39 @@ async function recordAndEvict(
   saveIndex(entries);
 }
 
-async function downscaleToWidth(blob: Blob, width: number): Promise<Blob> {
+/** Compress one downloaded scan into the copy this cache
+    stores for `kind` (Nov 10, 2026 — the compression rule):
+    resized to the tier's display width (never upscaled) and
+    re-encoded as a high-quality JPEG. VISUAL INTEGRITY GUARD:
+    the re-encode is kept only when it comes out SMALLER than
+    the source — when compression would not actually save
+    space (the common case for the already-efficient official
+    scans at detail size, whose high-quality re-encodes
+    measure larger), the source bytes are stored untouched,
+    so no stored copy is ever a degraded version of its scan.
+    Any failure along the way also keeps the source. */
+async function compressForStorage(
+  blob: Blob,
+  kind: ArtKind,
+): Promise<Blob> {
+  const maxWidth =
+    kind === "grid"
+      ? GRID_WIDTH
+      : kind === "large"
+        ? LARGE_WIDTH
+        : FULL_MAX_WIDTH;
   try {
     const bmp = await createImageBitmap(blob);
-    if (bmp.width <= width) {
+    if (bmp.width <= maxWidth && kind !== "full") {
+      // Already at or under this tier's display width:
+      // re-encoding could only cost quality, never save
+      // meaningful space — store the source as-is.
       bmp.close();
       return blob;
     }
-    const height = Math.round(bmp.height * (width / bmp.width));
+    const scale = Math.min(1, maxWidth / bmp.width);
+    const width = Math.max(1, Math.round(bmp.width * scale));
+    const height = Math.max(1, Math.round(bmp.height * scale));
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -148,9 +223,11 @@ async function downscaleToWidth(blob: Blob, width: number): Promise<Blob> {
     }
     ctx2d.drawImage(bmp, 0, 0, width, height);
     bmp.close();
-    return await new Promise<Blob>((resolve) => {
-      canvas.toBlob((b) => resolve(b ?? blob), "image/jpeg", 0.82);
+    const encoded = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", QUALITY[kind]);
     });
+    if (!encoded) return blob;
+    return encoded.size < blob.size ? encoded : blob;
   } catch {
     return blob;
   }
@@ -164,12 +241,9 @@ async function cachePut(
   try {
     const cache = await openCache();
     if (!cache) return;
-    const toStore =
-      kind === "grid"
-        ? await downscaleToWidth(sourceBlob, GRID_WIDTH)
-        : kind === "large"
-          ? await downscaleToWidth(sourceBlob, LARGE_WIDTH)
-          : sourceBlob;
+    // Every stored copy passes through the compressor —
+    // no tier stores the raw scan by default any more.
+    const toStore = await compressForStorage(sourceBlob, kind);
     await cache.put(
       keyFor(id, kind),
       new Response(toStore, {
@@ -227,6 +301,26 @@ export async function getArtBlobForIndex(
 // and the detail view, so the same art is never fetched twice at once.
 const inflight = new Map<number, Promise<Blob | null>>();
 
+// Session-held downloads (Nov 10, 2026 — the compression
+// pass): a card's scan, once downloaded this session, is
+// re-used for every copy cut from it (grid, two-across,
+// detail, the scanner's index) instead of being fetched
+// again per tier — the old warm-up fetched the full scan
+// once for the grid pass and AGAIN for the two-across pass.
+// Capped and FIFO-evicted so a long session never holds
+// more than a few MB of scans in memory.
+const sessionBlobs = new Map<number, Blob>();
+const SESSION_BLOB_CAP = 24;
+
+function rememberSessionBlob(id: number, blob: Blob): void {
+  sessionBlobs.set(id, blob);
+  while (sessionBlobs.size > SESSION_BLOB_CAP) {
+    const oldest = sessionBlobs.keys().next().value;
+    if (oldest == null) break;
+    sessionBlobs.delete(oldest);
+  }
+}
+
 /** Session download accounting (Nov 4, 2026 — the intro
     download choice): REAL bytes and fetch counts for every
     source image downloaded since this app open, so the
@@ -244,6 +338,8 @@ export function getSessionArtDownload(): {
 }
 
 function fetchSourceBlob(cardId: number): Promise<Blob | null> {
+  const held = sessionBlobs.get(cardId);
+  if (held) return Promise.resolve(held);
   const existing = inflight.get(cardId);
   if (existing) return existing;
   const p = (async (): Promise<Blob | null> => {
@@ -255,6 +351,7 @@ function fetchSourceBlob(cardId: number): Promise<Blob | null> {
       const blob = await res.blob();
       sessionBytes += blob.size;
       sessionFetches += 1;
+      rememberSessionBlob(cardId, blob);
       return blob;
     } catch {
       return null;
@@ -330,7 +427,14 @@ export function useCachedArt(
       }
       show(URL.createObjectURL(blob), true);
       void cachePut(cardId, kind, blob);
+      // One download fills every smaller tier from the same
+      // bytes (Nov 10, 2026): a detail view also refreshes the
+      // two-across and grid copies; a two-across view refreshes
+      // the grid copy. Nothing is fetched twice for one card.
       if (kind === "full") {
+        void cachePut(cardId, "large", blob);
+        void cachePut(cardId, "grid", blob);
+      } else if (kind === "large") {
         void cachePut(cardId, "grid", blob);
       }
     })();
@@ -512,27 +616,9 @@ export function startArtworkWarmup(plan: {
       } catch {
         // Fall through with an empty set: downloads are idempotent.
       }
-      const missing = plan.ids.filter(
+      const missingGrid = plan.ids.filter(
         (id) => !present.has(keyFor(id, "grid")),
       );
-      if (missing.length > 0) {
-        let cursor = 0;
-        const worker = async (): Promise<void> => {
-          while (cursor < missing.length) {
-            if (!(await waitUntilOnline())) return;
-            const id = missing[cursor];
-            cursor += 1;
-            if (id == null) continue;
-            const blob = await fetchSourceBlob(id);
-            if (blob) await cachePut(id, "grid", blob);
-            if (cursor % 4 === 0) {
-              emitProgress(true);
-              await waitForBrowsingRoom();
-            }
-          }
-        };
-        await Promise.all([worker(), worker()]);
-      }
       // Two-across copies (Nov 4, 2026): the 640px variant is
       // pre-cached for the priority printings and the user's
       // own collection — the segment at the head of the plan —
@@ -549,20 +635,46 @@ export function startArtworkWarmup(plan: {
       const missingLarge = largeWanted.filter(
         (id) => !present.has(keyFor(id, "large")),
       );
-      if (missingLarge.length > 0) {
+      // ONE download per card (Nov 10, 2026 — the compression
+      // pass): the grid and two-across copies a card needs are
+      // cut from a single fetch of its scan. The two passes
+      // used to run one after the other, each downloading the
+      // full scan again — the owned/priority segment was
+      // fetched twice, which is most of why the old pending
+      // figure (1,805 MB) was so large and the save so slow.
+      // Job order keeps the plan's order (own collection
+      // first); a card needing only its two-across copy joins
+      // at the end of the queue.
+      const jobs = new Map<number, ArtKind[]>();
+      for (const id of missingGrid) jobs.set(id, ["grid"]);
+      for (const id of missingLarge) {
+        const kinds = jobs.get(id);
+        if (kinds) kinds.push("large");
+        else jobs.set(id, ["large"]);
+      }
+      const jobList = [...jobs.entries()];
+      if (jobList.length > 0) {
         let cursor = 0;
-        const largeWorker = async (): Promise<void> => {
-          while (cursor < missingLarge.length) {
+        const worker = async (): Promise<void> => {
+          while (cursor < jobList.length) {
             if (!(await waitUntilOnline())) return;
-            const id = missingLarge[cursor];
+            const job = jobList[cursor];
             cursor += 1;
-            if (id == null) continue;
+            if (!job) continue;
+            const [id, kinds] = job;
             const blob = await fetchSourceBlob(id);
-            if (blob) await cachePut(id, "large", blob);
-            if (cursor % 4 === 0) await waitForBrowsingRoom();
+            if (blob) {
+              for (const kind of kinds) {
+                await cachePut(id, kind, blob);
+              }
+            }
+            if (cursor % 4 === 0) {
+              emitProgress(true);
+              await waitForBrowsingRoom();
+            }
           }
         };
-        await Promise.all([largeWorker(), largeWorker()]);
+        await Promise.all([worker(), worker()]);
       }
       saveWarmupMeta({ version: plan.artworkVersion, total: plan.total });
     } catch {

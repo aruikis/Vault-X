@@ -39,7 +39,10 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lt, or, 
 import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "./schema";
 import { catalog } from "./data/catalog";
-import { puzzleCatalog } from "./data/puzzleCatalog";
+import {
+  puzzleCatalog,
+  HUNNY_ENCOUNTER_FRONTS,
+} from "./data/puzzleCatalog";
 import { catalogExtras } from "./data/catalogExtras";
 import type { CatalogEntry } from "./data/catalogTypes";
 import { ownership } from "./data/ownership";
@@ -139,7 +142,15 @@ const PAGE_SIZE = 12; // 4 across x 3 down, like his Vault X binder pages
     nobody keeps stale art. Sealed / comic / set-logo artwork is
     bundled with the app build itself (content-hashed files), so
     an app update already replaces those bytes directly. */
-const ARTWORK_VERSION = "art-v4";
+// art-v6 (Nov 10, 2026): the compression pass (Anthony's
+// standing rule — all saved artwork compressed, visual
+// integrity the hard limit). Every device drops its cached
+// art and re-saves it under the compressed scheme (right-sized
+// high-quality copies per display tier; detail copies keep
+// inspection resolution and are never stored degraded), so no
+// uncompressed full-size browsing copy survives alongside the
+// compressed ones. Client CACHE_NAME bumps in step.
+const ARTWORK_VERSION = "art-v6";
 
 /** Sealed items with Anthony's quantity overrides applied (the
     sealed_qty table; adjusted via the plus/minus controls on the
@@ -314,6 +325,52 @@ function tallyTotal(row: {
   return row.ownedQty + tallySum(sceneFinishesOf(row));
 }
 
+/** The Encounter front of a double-sided Great Hunny Rescue
+    card (Anthony, Nov 10, 2026 — "number one is showing
+    Mickey Mouse. Number one is not Mickey Mouse in this
+    set"): cards 1/37–6/37 are double-sided, the Encounter
+    front is the face that carries the card's number in hand,
+    and the cataloged rescued glimmer is its back. The server
+    attaches the front's verified data (HUNNY_ENCOUNTER_FRONTS
+    in data/puzzleCatalog.ts) to the back's row so every
+    surface presents the card front-first. Null for every
+    ordinary card. */
+const encounterFront = z.object({
+  frontName: z.string(),
+  journey: z.string(),
+  encounter: z.number(),
+  loreGoal: z.number(),
+  rules: z.string(),
+  artist: z.string().nullable(),
+  backFullName: z.string(),
+});
+
+type EncounterFront = z.infer<typeof encounterFront>;
+
+const ENCOUNTER_FRONT_BY_UID: ReadonlyMap<string, EncounterFront> =
+  new Map(
+    HUNNY_ENCOUNTER_FRONTS.map((f) => [
+      f.backUid,
+      {
+        frontName: f.frontName,
+        journey: f.journey,
+        encounter: f.encounter,
+        loreGoal: f.loreGoal,
+        rules: f.rules,
+        artist: f.artist,
+        backFullName: "",
+      },
+    ]),
+  );
+
+function encounterFrontForRow(row: {
+  uid: string;
+  fullName: string;
+}): EncounterFront | null {
+  const front = ENCOUNTER_FRONT_BY_UID.get(row.uid);
+  return front ? { ...front, backFullName: row.fullName } : null;
+}
+
 const cardLite = z.object({
   id: z.number(),
   fullName: z.string(),
@@ -355,6 +412,9 @@ const cardLite = z.object({
       (see BUNDLED_ART_BY_UID). Outranks the entry's own art
       and its composite. Null everywhere else. */
   bundledArt: z.string().nullable(),
+  /** Encounter front data for the six double-sided Great
+      Hunny Rescue cards (1/37–6/37); null everywhere else. */
+  encounterFront: encounterFront.nullable(),
 });
 
 type CardLite = z.infer<typeof cardLite>;
@@ -892,6 +952,7 @@ function toLite(
     composite,
     artLink: artLinkForRow(row),
     bundledArt: bundledArtForRow(row),
+    encounterFront: encounterFrontForRow(row),
   };
 }
 
@@ -1656,6 +1717,9 @@ const cardDetailResponse = z.object({
   /** Owner-supplied bundled display art key (Nov 9, 2026):
       see BUNDLED_ART_BY_UID. Null everywhere else. */
   bundledArt: z.string().nullable(),
+  /** Encounter front data for the six double-sided Great
+      Hunny Rescue cards (1/37–6/37); null everywhere else. */
+  encounterFront: encounterFront.nullable(),
   /** Connecting-art group (Nov 9, 2026): when this printing's
       artwork joins a verified multi-card scene, every member
       in scene order with its owned finishes, plus per-finish-
@@ -2039,6 +2103,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     bannerBlobKey: null as string | null,
     bio: null as string | null,
     theme: null as string | null,
+    layout: null as string | null,
     language: null as string | null,
     gridCols: null as number | null,
     onlyMine: null as number | null,
@@ -2092,6 +2157,11 @@ const collectorIdResponse = z.object({
   /** The theme picked in Settings, or null when never picked (the
       default Vault Dark applies). */
   theme: z.string().nullable(),
+  /** The layout picked in Settings ("classic" | "vision"), or
+      null when never picked (the Classic layout applies). A
+      choice separate from the theme: themes are colors,
+      layouts are structure. */
+  layout: z.string().nullable(),
   /** The UI language picked in Settings ("en" | "es" | "de" |
       "fr" | "ja"), or null when never picked (English applies). */
   language: z.string().nullable(),
@@ -8131,6 +8201,23 @@ export const Actions = {
           .where(eq(schema.financeSnapshots.label, "sync:v2"))
           .limit(1);
         const firstCorrectedSync = marker.length === 0;
+        // Great Hunny Rescue artwork refresh (Nov 10, 2026 —
+        // Anthony: the Hunny cards' artwork "is bad" on every
+        // card but the two Prize Pack Illustrations, and #1
+        // showed the wrong face): one time only, every stored
+        // artwork blob for a Quest 3 row is dropped so
+        // cardImage re-fetches the official scan fresh from the
+        // row's catalog URL — no stale or mismatched stored
+        // copy survives. Ownership, finishes, and prices are
+        // never touched. Guarded by the "sync:q3-art-v1"
+        // finance-snapshot marker (source "sync", filtered out
+        // of every chart, the sync:v2 precedent).
+        const q3ArtMarker = await db
+          .select({ id: schema.financeSnapshots.id })
+          .from(schema.financeSnapshots)
+          .where(eq(schema.financeSnapshots.label, "sync:q3-art-v1"))
+          .limit(1);
+        const q3ArtRefreshPending = q3ArtMarker.length === 0;
         for (const row of existing) {
           const own = ownership[row.uid];
           // Foil-only quest reprints (Nov 9, 2026): the export
@@ -8230,7 +8317,29 @@ export const Actions = {
             if (entry) {
               const groupName = groupNameOf(entry);
               if (row.groupName !== groupName) set.groupName = groupName;
+              // Artwork source sync (Nov 10, 2026): a quest
+              // row's scan URL follows the bundled catalog, and
+              // a changed URL drops the stored blob so the new
+              // scan fetches fresh — the puzzle sync's rule,
+              // extended to quests by the Great Hunny Rescue
+              // artwork report.
+              const img = entry.image ?? null;
+              if (row.imageUrl !== img) {
+                set.imageUrl = img;
+                set.imageBlobKey = null;
+              }
             }
+          }
+          // One-time Quest 3 artwork refresh (see the marker
+          // note above): drop the stored blob so the official
+          // scan re-fetches on next view, whatever URL the row
+          // already carried.
+          if (
+            q3ArtRefreshPending &&
+            row.setCode === "Q3" &&
+            row.imageBlobKey != null
+          ) {
+            set.imageBlobKey = null;
           }
           if (Object.keys(set).length > 0) {
             await db
@@ -8250,6 +8359,16 @@ export const Actions = {
           await db.insert(schema.financeSnapshots).values({
             date: "2026-11-01",
             label: "sync:v2",
+            value: 0,
+            paid: 0,
+            cards: 0,
+            source: "sync",
+          });
+        }
+        if (q3ArtRefreshPending) {
+          await db.insert(schema.financeSnapshots).values({
+            date: "2026-11-10",
+            label: "sync:q3-art-v1",
             value: 0,
             paid: 0,
             cards: 0,
@@ -9593,6 +9712,7 @@ export const Actions = {
             .where(eq(schema.cards.groupKey, row.groupKey)),
         ),
         bundledArt: bundledArtForRow(row),
+        encounterFront: encounterFrontForRow(row),
         artGroup,
         tcgplayerId: tcgIdOf(row),
         finance: {
@@ -12757,6 +12877,7 @@ export const Actions = {
           : null,
         bio: profile.bio ?? null,
         theme: profile.theme ?? null,
+        layout: profile.layout ?? null,
         language: profile.language ?? null,
         updateTestSeen: profile.updateTestSeen > 0,
         shareCollection: (profile.shareCollection ?? 1) > 0,
@@ -12944,6 +13065,31 @@ export const Actions = {
         .where(eq(schema.collectorProfile.id, 1));
       ctx.invalidateQueries();
       return { ok: true, theme: args.theme };
+    },
+  }),
+
+  setLayoutPreference: defineAction({
+    description:
+      "Saves the app layout the user picked in Settings (Classic or New Vision) on their collector profile, so the choice persists for them across devices. The layout is a choice separate from the theme: themes are colors, layouts are structure (navigation form, Home organization, iconography, spacing). Presentation only — no collection data or behavior changes; every function works identically under either layout.",
+    request: z.object({
+      layout: z.enum(["classic", "vision"]),
+    }),
+    response: z.object({ ok: z.literal(true), layout: z.string() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; layout: string }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          layout: args.layout,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, 1));
+      ctx.invalidateQueries();
+      return { ok: true, layout: args.layout };
     },
   }),
 
@@ -14306,7 +14452,7 @@ export const Actions = {
 
   getArtworkDownloadQuote: defineAction({
     description:
-      "Sizes the pending artwork download for the intro-screen download choice (Anthony, Nov 4, 2026): given the card ids this device still needs, samples up to 60 of them evenly and measures the server's stored artwork for the sample, returning the average bytes per image so the client can quote the pending total honestly (and count progress against that same figure). avgBytes is null when the server holds no measurable sample, so the client falls back to a count-only quote instead of inventing a size.",
+      "Sizes the pending artwork download for the intro-screen download choice (Anthony, Nov 4, 2026): given the card ids this device still needs, samples up to 60 of them evenly and measures the server's stored artwork for the sample, returning the average bytes per image so the client can quote the pending total honestly (and count progress against that same figure). avgBytes is null when the server holds no measurable sample, so the client falls back to a count-only quote instead of inventing a size. Since the Nov 10, 2026 compression pass the measured average is the full SCAN's size: the client converts it into the compressed on-device total with its measured per-tier ratios (the copies actually stored are right-sized — about 0.15 of scan size for grid copies, 0.43 for two-across), so the quoted figure is what will sit on the device, not the scans' raw size (the pre-compression quote read 1,805 MB).",
     request: z.object({
       pendingIds: z.array(z.number().int().positive()).max(20000),
     }),

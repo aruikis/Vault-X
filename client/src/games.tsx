@@ -33,6 +33,7 @@ type QueryClient,
 } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { fmtMoneyUSD, useT } from "./i18n";
+import { hapticTick } from "./haptics";
 import { SearchScanRow } from "./searchScanRow";
 import {
 GradedSlabsBox,
@@ -429,6 +430,12 @@ const GameGridTile = memo(function GameGridTile({
         {c.printed ? `#${c.printed}` : ""}
         {c.finish ? ` · ${c.finish}` : ""}
       </span>
+      {/* Haptics (Nov 2, 2026 design; restored Nov 10, 2026):
+          this file's hand-rolled steppers never inherited the
+          haptic tick the shared StepperButton fires — every
+          plus stepper in this file calls hapticTick() through
+          the one shared helper in haptics.ts, like the rest
+          of the app. Do not strip it in a restyle. */}
       <div className="mt-1 flex items-center justify-between">
         <button
           type="button"
@@ -450,7 +457,10 @@ const GameGridTile = memo(function GameGridTile({
         <button
           type="button"
           aria-label={`Add one copy of ${c.name}`}
-          onClick={() => step(1)}
+          onClick={() => {
+            hapticTick();
+            step(1);
+          }}
           data-dir="plus"
           className="flex h-8 w-8 items-center justify-center rounded-full"
         >
@@ -980,7 +990,10 @@ function LegoStepperRow({
           type="button"
           aria-label={`Add one ${label.toLowerCase()} copy of ${itemName}`}
           disabled={savePending}
-          onClick={() => onStep(qty + 1)}
+          onClick={() => {
+            hapticTick();
+            onStep(qty + 1);
+          }}
           data-dir="plus"
           className="flex h-7 w-7 items-center justify-center rounded-full disabled:opacity-40"
         >
@@ -2855,7 +2868,10 @@ function CardDetailSheet({
               type="button"
               aria-label="Add one copy"
               disabled={save.isPending}
-              onClick={() => step(owned + 1)}
+              onClick={() => {
+                hapticTick();
+                step(owned + 1);
+              }}
               data-dir="plus"
               className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40"
             >

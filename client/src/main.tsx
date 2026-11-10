@@ -32,6 +32,20 @@ try {
   // Storage unavailable: the default Vault Dark theme applies.
 }
 
+// Same first-frame treatment for the LAYOUT (Nov 10, 2026):
+// layouts are a per-user choice separate from the theme
+// (Settings > Layout), mirrored in localStorage like the
+// theme, so stamp data-layout before React renders and the
+// picked layout's structure is there from the first frame.
+try {
+  const storedLayout = window.localStorage.getItem("vaultx-layout");
+  if (storedLayout === "vision" || storedLayout === "classic") {
+    document.documentElement.dataset.layout = storedLayout;
+  }
+} catch {
+  // Storage unavailable: the Classic layout applies.
+}
+
 // Same first-frame treatment for the UI language (Nov 4,
 // 2026): seed the i18n module's active language from the
 // device mirror and stamp the document language, so the

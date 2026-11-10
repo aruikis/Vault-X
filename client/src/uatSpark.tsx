@@ -26,16 +26,24 @@
 
 import { useEffect, useState } from "react";
 
-/** True while the New Vision 2.0 Beta theme (data-theme
-    "jarvis") is the active theme. Reads the attribute
-    applyTheme sets on <html> and follows it live through a
-    MutationObserver, so any component can take the UAT
-    presentation while that theme is picked without threading
-    the theme through every prop chain. */
+/** True while the New Vision presentation should render:
+    the New Vision 2.0 Beta theme (data-theme "jarvis") is
+    active, OR the New Vision LAYOUT is picked (data-layout
+    "vision"). Since Nov 10, 2026 the layout is its own
+    per-user choice in Settings, separate from the theme
+    (Anthony's model: multiple layouts AND multiple themes);
+    the Beta theme bundles the layout as it always has, so
+    this follows either attribute live through a
+    MutationObserver and any component can take the Vision
+    presentation without threading both choices through
+    every prop chain. */
 export function useJarvisVision(): boolean {
   const [jarvis, setJarvis] = useState<boolean>(() => {
     try {
-      return document.documentElement.dataset.theme === "jarvis";
+      return (
+        document.documentElement.dataset.theme === "jarvis" ||
+        document.documentElement.dataset.layout === "vision"
+      );
     } catch {
       return false;
     }
@@ -43,7 +51,10 @@ export function useJarvisVision(): boolean {
   useEffect(() => {
     const read = () => {
       try {
-        setJarvis(document.documentElement.dataset.theme === "jarvis");
+        setJarvis(
+          document.documentElement.dataset.theme === "jarvis" ||
+            document.documentElement.dataset.layout === "vision",
+        );
       } catch {
         // No document: keep the last known value.
       }
@@ -52,7 +63,7 @@ export function useJarvisVision(): boolean {
     const observer = new MutationObserver(read);
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ["data-theme", "data-layout"],
     });
     return () => observer.disconnect();
   }, []);

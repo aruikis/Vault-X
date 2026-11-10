@@ -600,6 +600,98 @@ const HUNNY_ENCOUNTER_ENTRIES: CatalogEntry[] = [
   }),
 ];
 
+/** Structured Encounter-front data for the six double-sided
+    Great Hunny Rescue cards (Anthony, Nov 10, 2026 — "number
+    one is showing Mickey Mouse. Number one is not Mickey
+    Mouse in this set"): the physical card numbered 1/37 is
+    Entrance Tunnel — the Encounter front is the face a player
+    holds and files first, and the rescued glimmer the
+    catalogs list (Mickey Mouse - Rescued from the Entrance)
+    is its BACK. The binder therefore presents cards 1/37–6/37
+    front-first: the server attaches this front data to the
+    back's catalog row (keyed by the back's uid), the pocket
+    renders the Encounter front as the card's primary face,
+    and the detail sheet shows the front first with the
+    rescued-glimmer scan labeled as the back. All fields are
+    the verified front data documented above the
+    HUNNY_ENCOUNTER_ENTRIES (unboxing walkthrough of the
+    physical cards, BoardGameQuest review photos, Zatu's
+    review): names, journeys, lore goals 5/12/20 per journey,
+    and the special-rule names; rule effects are included
+    only where the verified sources state them, and the
+    artist only where a source credits one. No scan of any
+    front exists in any catalog, so the front face is the
+    app's own rendering of this data — never a borrowed
+    picture of a different card. */
+export interface HunnyEncounterFront {
+  /** Catalog uid of the rescued-glimmer back (e.g. "Q3:3514"). */
+  backUid: string;
+  frontName: string;
+  journey: string;
+  encounter: number;
+  loreGoal: number;
+  rules: string;
+  artist: string | null;
+}
+
+export const HUNNY_ENCOUNTER_FRONTS: HunnyEncounterFront[] = [
+  {
+    backUid: "Q3:3514",
+    frontName: "Entrance Tunnel",
+    journey: "The Search for Piglet",
+    encounter: 1,
+    loreGoal: 5,
+    rules: "GROWING THREAT — At the start of the Vine's turn, it gains 1 lore.",
+    artist: "Douglas De La Hoz",
+  },
+  {
+    backUid: "Q3:3515",
+    frontName: "Room of Darkness",
+    journey: "The Search for Piglet",
+    encounter: 2,
+    loreGoal: 12,
+    rules: "TWIST AWAY — Vine Tendril characters gain Evasive.",
+    artist: "Gabe Ramos",
+  },
+  {
+    backUid: "Q3:3516",
+    frontName: "Vine Pod Chamber",
+    journey: "The Search for Piglet",
+    encounter: 3,
+    loreGoal: 20,
+    rules: "RESURGENCE · RISING THREAT",
+    artist: "Rubin Chung / Leonardo Giammichele",
+  },
+  {
+    backUid: "Q3:3517",
+    frontName: "Garden of Hungry Vegetables",
+    journey: "The Heart of the Vine",
+    encounter: 4,
+    loreGoal: 5,
+    rules: "NEW GROWTH — The Vine makes a Vine Tendril.",
+    artist: null,
+  },
+  {
+    backUid: "Q3:3518",
+    frontName: "Staircase of Thorns",
+    journey: "The Heart of the Vine",
+    encounter: 5,
+    loreGoal: 12,
+    rules:
+      "BRIARS EVERYWHERE — A questing character takes 1 damage, which can't be reduced by Resist.",
+    artist: null,
+  },
+  {
+    backUid: "Q3:3519",
+    frontName: "Story Star Chamber",
+    journey: "The Heart of the Vine",
+    encounter: 6,
+    loreGoal: 20,
+    rules: "FALTERING HOPE · INK RESERVES · RISING THREAT",
+    artist: "Alyssa Lee",
+  },
+];
+
 export const puzzleCatalog: CatalogEntry[] = [
   ...PUZZLE_SETS.flatMap((spec) => {
   const entries: CatalogEntry[] = [];

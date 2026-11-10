@@ -52,7 +52,7 @@ useQueryClient,
 } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { fmtMoneyUSD } from "./i18n";
-import { hapticTick } from "./haptics";
+import { hapticConfirm, hapticTick } from "./haptics";
 import { VxSelect } from "./vxSelect";
 import { Turntable } from "./turntable";
 import { SidewaysCountDial } from "./countDial";
@@ -1849,6 +1849,7 @@ export function SlabDetailView({
     longPressedRef.current = false;
     pressTimer.current = window.setTimeout(() => {
       longPressedRef.current = true;
+      hapticConfirm();
       setDialOpen(true);
     }, 450);
   };
@@ -2082,6 +2083,7 @@ export function SlabDetailView({
                   type="button"
                   onClick={() => {
                     if (!longPressedRef.current) {
+                      hapticTick();
                       stepQty(shownQty + 1);
                     }
                     longPressedRef.current = false;
