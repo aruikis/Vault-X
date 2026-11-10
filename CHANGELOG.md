@@ -2,6 +2,12 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.118.0
+
+- Fixed: Quest 3 — The Great Hunny Rescue did not match the physical cards. The Quest's first six cards are double-sided: Entrance Tunnel is the FRONT of card 1/37, and Mickey Mouse - Rescued from the Entrance — the card the list showed at #1 — is printed on its back. The app only carried the backs, so the Quest looked wrong from the first card.
+- New: an Encounter Cards subsection on the Quest 3 page, separate from the set cards just like the Prize Pack Illustrations — all six encounter fronts (Entrance Tunnel, Room of Darkness, Vine Pod Chamber, Garden of Hungry Vegetables, Staircase of Thorns, and Story Star Chamber), each with its journey, its lore goal of 5, 12, or 20, its rule, and the card printed on its back, each with its own plus and minus like the puzzle pieces. The Quest's tile now carries its full official name, Illumineer's Quest: The Great Hunny Rescue.
+- Checked: all 37 numbered Quest 3 cards were re-verified against the official Disney Lorcana card gallery — every number, name, type, and rarity already matched (1/37 Mickey Mouse - Rescued from the Entrance, 18/37 Vine Sprout - Buzzer, 32/37 Unseen Attack), so no card was replaced and no owned copies were touched. The two Prize Pack Illustration cards are unchanged.
+
 ## v1.117.0
 
 - New: your Collector ID page now has a quick Copy button right beside your code — one tap copies the exact code (like MC-XFU8-Z5WD) to the clipboard and briefly shows Copied, so nobody has to long-press and copy it by hand anymore. It is on every collector's own Collector ID page; the QR code and everything else on that page are unchanged.

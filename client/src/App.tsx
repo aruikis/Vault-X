@@ -35817,12 +35817,42 @@ export function App() {
   // page, after its cards — every piece its own pocket,
   // ghosted when missing, plus the Full Puzzle Art item.
   const puzzleGroupKey =
-    group?.kind === "set" ? `puzzle:${group.key.slice(4)}` : null;
+    group?.kind === "set"
+      ? `puzzle:${group.key.slice(4)}`
+      : // The Great Hunny Rescue's prize-pack illustration
+        // cards (Anthony, Nov 9, 2026 — "treat them like the
+        // puzzle cards"): they live in their own puzzle:Q3
+        // group and render as an insert section inside the
+        // Quest 3 page, exactly like a set's Puzzle section.
+        group?.key === "quest:Q3"
+        ? "puzzle:Q3"
+        : null;
   const puzzleData = useQuery({
     queryKey: ["section", puzzleGroupKey, filter],
     queryFn: () =>
       api.getSection({ groupKey: puzzleGroupKey ?? "", filter }),
     enabled: puzzleGroupKey != null && !showPicker,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+
+  // The Great Hunny Rescue's Encounter cards (Anthony, Nov 10,
+  // 2026): Quest 3's cards 1/37–6/37 are double-sided — the
+  // front of each is a landscape Encounter card (Entrance Tunnel
+  // is the front of 1/37; Mickey Mouse - Rescued from the
+  // Entrance, the card the list showed, is its back). The six
+  // fronts live in their own encounter:Q3 group and render as a
+  // separate subsection inside the Quest 3 page, below the Prize
+  // Pack Illustrations — never mixed into the 37 set cards.
+  const encounterGroupKey =
+    group?.key === "quest:Q3" ? "encounter:Q3" : null;
+  const encounterData = useQuery({
+    queryKey: ["section", encounterGroupKey, filter],
+    queryFn: () =>
+      api.getSection({ groupKey: encounterGroupKey ?? "", filter }),
+    enabled: encounterGroupKey != null && !showPicker,
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnReconnect: true,
@@ -37330,14 +37360,22 @@ export function App() {
             {puzzleData.data && puzzleData.data.cards.length > 0 ? (
               <div className="mt-6">
                 <h2 className="font-album text-lg text-[var(--text)]">
-                  Puzzle
+                  {group?.key === "quest:Q3"
+                    ? "Prize Pack Illustrations"
+                    : "Puzzle"}
                 </h2>
                 <p className="text-sm text-[var(--dim)]">
-                  One insert in every booster pack — collect
-                  all the pieces to assemble the full artwork.
-                  {group?.key === "set:14"
-                    ? " Hyperia City packs can put an Ink Drop counter card in that slot instead — both designs sit at the end, after the Full Puzzle Art."
-                    : null}
+                  {group?.key === "quest:Q3" ? (
+                    "The full-art illustration cards from this Quest's two prize packs — one in each pack, alongside its playable foil. No gameplay text, no collector number: collectible art pieces, tracked like the puzzle inserts."
+                  ) : (
+                    <>
+                      One insert in every booster pack — collect
+                      all the pieces to assemble the full artwork.
+                      {group?.key === "set:14"
+                        ? " Hyperia City packs can put an Ink Drop counter card in that slot instead — both designs sit at the end, after the Full Puzzle Art."
+                        : null}
+                    </>
+                  )}
                 </p>
                 <div
                   className={`mt-3 grid gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 sm:gap-3 sm:p-4 ${
@@ -37345,6 +37383,53 @@ export function App() {
                   }`}
                 >
                   {puzzleData.data.cards.map((card) => (
+                    <Pocket
+                      key={`${card.id}:${card.pocket}`}
+                      card={card}
+                      onOpen={openCard}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {/* The Great Hunny Rescue's Encounter Cards
+                (Anthony, Nov 10, 2026): cards 1/37 through 6/37
+                of this Quest are double-sided. The front of
+                each is one of these Encounter cards — a chamber
+                of the Vine with a lore goal — and its back is
+                the Rescued character (or boss) listed at that
+                same number in the set above: Entrance Tunnel
+                is the front of 1/37, and Mickey Mouse - Rescued
+                from the Entrance is its back. Two journeys of
+                three encounters — The Search for Piglet, then
+                The Heart of the Vine — cleared at 5, 12, and
+                20 lore. Their own subsection, separate from the
+                set cards and from the Prize Pack Illustrations,
+                tracked like the puzzle inserts. */}
+            {encounterData.data && encounterData.data.cards.length > 0 ? (
+              <div className="mt-6">
+                <h2 className="font-album text-lg text-[var(--text)]">
+                  Encounter Cards
+                </h2>
+                <p className="text-sm text-[var(--dim)]">
+                  Cards 1/37 to 6/37 of this Quest are
+                  double-sided: the front of each is one of these
+                  Encounter cards, and the back is the Rescued
+                  character — or boss — listed at that same
+                  number in the set above. Entrance Tunnel is the
+                  front of 1/37; Mickey Mouse - Rescued from the
+                  Entrance is its back. Two journeys of three
+                  encounters — The Search for Piglet, then The
+                  Heart of the Vine — each cleared at 5, 12, and
+                  20 lore.
+                </p>
+                <div
+                  className={`mt-3 grid gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 sm:gap-3 sm:p-4 ${
+                    gridCols === 2 ? "grid-cols-2" : "grid-cols-4"
+                  }`}
+                >
+                  {encounterData.data.cards.map((card) => (
                     <Pocket
                       key={`${card.id}:${card.pocket}`}
                       card={card}
@@ -37779,7 +37864,7 @@ export function App() {
           keeps the familiar dark pill field (grey magnifier,
           grey italic placeholder, white typed text) and shows
           results inside its panel. Tapping a result opens the
-          card in place; closing (empty-area tap, ✕, Escape, or
+          card in place; closing (empty-area tap, Escape, or
           the device/browser Back — opening pushed one history
           entry, the same trap as the card sheet) returns to
           the view underneath, untouched. Tab changes are
@@ -37860,7 +37945,26 @@ export function App() {
                 <input
                   id="overlay-search"
                   ref={searchInputRef}
-                  type="search"
+                  // NOT type="search" (Anthony, Nov 9, 2026 —
+                  // the two-X bug): a search-type field grows
+                  // the browser's OWN clear × whenever text is
+                  // present, so the field carried TWO × controls
+                  // — the native one (clears the text) beside
+                  // this panel's ✕ button (which CLOSED Search
+                  // outright). Tapping the wrong one after
+                  // adding a card left the old query sitting in
+                  // state under an apparently empty field, and
+                  // the next search populated nothing. A plain
+                  // text field (with the search input mode kept
+                  // for the keyboard) never grows a native ×:
+                  // the ONE × below is the only one, and it
+                  // only ever clears the text.
+                  type="text"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                   onFocus={() => {
@@ -37883,14 +37987,30 @@ export function App() {
                   placeholder="Search all collectibles"
                   className="h-[52px] w-full rounded-full border border-[var(--border)] bg-[var(--surface)] pl-12 pr-12 text-base text-[var(--text)] placeholder:italic placeholder:text-[#8a8a96]"
                 />
-                <button
-                  type="button"
-                  onClick={closeSearch}
-                  aria-label="Close search"
-                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-lg leading-none text-[var(--dim)]"
-                >
-                  ✕
-                </button>
+                {/* The ONE × (Anthony, Nov 9, 2026): it
+                    appears only while text is present and it
+                    ONLY clears the text — it never exits
+                    Search. Clearing empties the query so both
+                    searches stand down, and the field keeps
+                    focus, so the next search types straight in
+                    and suggestions populate from the first
+                    letter. Leaving Search stays on the ways it
+                    always had besides this button: the Search
+                    tab itself, a tap outside the panel,
+                    Escape, or the device Back. */}
+                {searchText.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchText("");
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-lg leading-none text-[var(--dim)]"
+                  >
+                    ✕
+                  </button>
+                ) : null}
               </div>
               <button
                 type="button"

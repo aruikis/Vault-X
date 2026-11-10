@@ -227,14 +227,36 @@ function groupSortOf(entry: CatalogEntry): number {
 
 function groupKeyOf(entry: CatalogEntry): string {
   if (entry.grp === "set") return `set:${entry.setCode}`;
-  if (entry.grp === "puzzle") return `puzzle:${entry.setCode}`;
+  if (entry.grp === "puzzle")
+    // The Great Hunny Rescue Encounter fronts (Nov 10, 2026)
+    // ride the puzzle machinery but live in their OWN group, so
+    // the Quest 3 page renders them as a separate "Encounter
+    // Cards" subsection, apart from the Prize Pack Illustrations
+    // in puzzle:Q3 and from the 37 set cards in quest:Q3.
+    return entry.uid.startsWith("encounter:")
+      ? `encounter:${entry.setCode}`
+      : `puzzle:${entry.setCode}`;
   if (entry.grp === "quest") return `quest:${entry.setCode}`;
   return `promo:${entry.family ?? "P1"}`;
 }
 
+/** Display name for a catalog entry's binder group. The bundled
+    catalog snapshot shortens Quest 3's product name to
+    "Illumineer's Quest: Hunny Rescue", which reads like a
+    different product next to the box's actual name — the full
+    official name is used everywhere the group is displayed
+    (Nov 10, 2026). */
+const GROUP_NAME_OVERRIDES: Record<string, string> = {
+  Q3: "Illumineer's Quest: The Great Hunny Rescue",
+};
+function groupNameOf(entry: CatalogEntry): string {
+  return GROUP_NAME_OVERRIDES[entry.setCode] ?? entry.setName;
+}
+
 function groupLabelOf(entry: CatalogEntry): string {
   if (entry.grp === "set") return `Set ${entry.setCode}`;
-  if (entry.grp === "puzzle") return "Puzzle";
+  if (entry.grp === "puzzle")
+    return entry.uid.startsWith("encounter:") ? "Encounters" : "Puzzle";
   if (entry.grp === "quest") return `Quest ${entry.setCode}`;
   return entry.family ?? "Promo";
 }
@@ -499,7 +521,11 @@ function pocketsOf(row: typeof schema.cards.$inferSelect): Pocket[] {
             ? "Lore"
             : row.rarity === "Counter"
               ? "Counter"
-              : "Puzzle",
+              : row.rarity === "Illustration"
+                ? "Illustration"
+                : row.rarity === "Encounter"
+                  ? "Encounter"
+                  : "Puzzle",
         qty: row.ownedQty,
         finishes,
         sceneQty: sceneTotal,
@@ -1004,7 +1030,7 @@ function catalogRowOf(
     uid: entry.uid,
     grp: entry.grp,
     groupKey: groupKeyOf(entry),
-    groupName: entry.setName,
+    groupName: groupNameOf(entry),
     groupLabel: groupLabelOf(entry),
     groupSort: groupSortOf(entry),
     slotSort,
@@ -8184,6 +8210,18 @@ export const Actions = {
               }
               const ss = slotSortByUid.get(row.uid);
               if (ss != null && row.slotSort !== ss) set.slotSort = ss;
+            }
+          }
+          // Quest group-name sync (Nov 10, 2026): a stored quest
+          // row's group name follows the catalog's display name
+          // for the quest (GROUP_NAME_OVERRIDES gives Quest 3
+          // its full official product name). Display string
+          // only — ownership, prices, and counts never move.
+          if (row.grp === "quest") {
+            const entry = catalogByUid.get(row.uid);
+            if (entry) {
+              const groupName = groupNameOf(entry);
+              if (row.groupName !== groupName) set.groupName = groupName;
             }
           }
           if (Object.keys(set).length > 0) {

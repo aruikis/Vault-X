@@ -403,6 +403,200 @@ const WINTERSPELL_PUZZLE_ENTRIES: CatalogEntry[] = WINTERSPELL_PUZZLE_TCG.map(
   },
 );
 
+// Great Hunny Rescue prize-pack illustration cards (Anthony,
+// Nov 9, 2026): Illumineer's Quest: The Great Hunny Rescue's box
+// carries two prize packs — The Search for Piglet and The Heart
+// of the Vine — and each pack holds two cards: one playable foil
+// (With a Few Good Friends; The Beanstalk — both regular Quest
+// catalog cards) plus ONE full-art illustration card: no gameplay
+// text, no collector number, just the artwork and the artist's
+// signature (the Heart of the Vine piece is art by Sam Burley —
+// a wizard facing the glowing Vine, per Anthony's own photo of
+// his copy). Anthony's direction: "We can treat them like the
+// puzzle cards." So they live here as puzzle-group entries under
+// the Quest's own code (group puzzle:Q3, rendered as an insert
+// section inside the Great Hunny Rescue Quest page): single
+// pockets with their own steppers, ghosted when missing, NOT
+// regular cards and NOT counted in any set's pocket totals or
+// master-set counts. No artwork is wired: no verified scan
+// source exists for either piece, so both render the clean
+// imageless pocket like the unscanned lore cards rather than
+// borrow a wrong picture. Anthony opened both packs and owns
+// both cards, but ownership is NOT pre-set — the entries start
+// unowned and he adds his copies with the steppers himself.
+const HUNNY_PRIZE_ENTRIES: CatalogEntry[] = [
+  puzzleEntry({
+    uid: "puzzle:Q3:piglet",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 1,
+    printed: "Illustration",
+    fullName: "Prize Pack Illustration — The Search for Piglet",
+    name: "Prize Pack Illustration",
+    rarity: "Illustration",
+    type: "Illustration",
+    text: "Full-art illustration card from The Search for Piglet prize pack in Illumineer's Quest: The Great Hunny Rescue — the pack's other card is the playable foil With a Few Good Friends. Art by Alex Accorsi (from Anthony's own photo of his copy): Tigger watches Piglet float up on a balloon toward Pooh the Hunny Archmage. No gameplay text and no collector number: a collectible art piece, tracked like the puzzle inserts.",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "puzzle:Q3:vine",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 2,
+    printed: "Illustration",
+    fullName: "Prize Pack Illustration — The Heart of the Vine",
+    name: "Prize Pack Illustration",
+    rarity: "Illustration",
+    type: "Illustration",
+    text: "Full-art illustration card from The Heart of the Vine prize pack in Illumineer's Quest: The Great Hunny Rescue — the pack's other card is the playable foil The Beanstalk. Art by Sam Burley: a wizard facing the glowing Vine. No gameplay text and no collector number: a collectible art piece, tracked like the puzzle inserts.",
+    image: null,
+    tcg: null,
+  }),
+];
+
+// Great Hunny Rescue ENCOUNTER cards (Anthony, Nov 10, 2026 —
+// the "cards don't match what's in my hand" report): Quest 3's
+// cards 1/37 through 6/37 are DOUBLE-SIDED. The playable face
+// the catalogs list (Mickey Mouse - Rescued from the Entrance
+// at 1/37, Rapunzel at 2/37, and so on) is the BACK; the FRONT
+// of each is a landscape Encounter card — a chamber of the Vine
+// with a lore goal and a special rule, flipped over when the
+// Illumineers clear it to reveal the rescued glimmer. Anthony's
+// first physical card, Entrance Tunnel "1 of 37", is the front
+// of 1/37 — the app showed only its back, so the Quest looked
+// wrong from the first card. No card database (official gallery,
+// Lorcast, LorcanaJSON — all re-checked live Nov 10, 2026)
+// lists the fronts separately: gallery/Lorcast numbering for
+// the 37 was verified card-by-card and already matches the
+// binder exactly, so the 37 stay untouched and the six fronts
+// live here as their own insert group (group encounter:Q3,
+// rendered as an "Encounter Cards" subsection inside the Quest
+// 3 page — separate from the set cards, exactly like the Prize
+// Pack Illustrations). Single pockets with their own steppers,
+// ghosted when missing, starting unowned like the illustration
+// cards. No artwork is wired: the fronts are landscape game
+// components with no verified scan source, so they render the
+// clean imageless pocket rather than borrow a wrong picture.
+//
+// The six fronts, in order (two journeys of three encounters;
+// numbering is continuous 1–6 across both journeys; lore goals
+// repeat 5 / 12 / 20 per journey). Verified Nov 10, 2026 from
+// the Inkborn Heroes unboxing walkthrough of the physical
+// cards (youtube.com/watch?v=qysIQ3svBKY, ~11:20–14:10),
+// corroborated by the BoardGameQuest review photos (Vine Pod
+// Chamber front + its Chamber Guardian back) and Zatu's review
+// (two journeys × three encounters, 5/12/20 lore goals):
+//   1/37 Entrance Tunnel — The Search for Piglet, Encounter 1,
+//        lore 5, GROWING THREAT; back: Mickey Mouse - Rescued
+//        from the Entrance. Art by Douglas De La Hoz.
+//   2/37 Room of Darkness — Encounter 2, lore 12, TWIST AWAY
+//        (Vine Tendrils gain Evasive); back: Rapunzel -
+//        Rescued from the Darkness. Art by Gabe Ramos.
+//   3/37 Vine Pod Chamber — Encounter 3, lore 20, RESURGENCE +
+//        RISING THREAT; back: Chamber Guardian - Vine
+//        Protector (clearing it wins the journey and opens
+//        The Search for Piglet prize pack). Art by Rubin
+//        Chung / Leonardo Giammichele.
+//   4/37 Garden of Hungry Vegetables — The Heart of the Vine,
+//        Encounter 4, lore 5, NEW GROWTH (the Vine makes a
+//        Vine Tendril); back: Sulley - Rescued from the Garden.
+//   5/37 Staircase of Thorns — Encounter 5, lore 12, BRIARS
+//        EVERYWHERE (a questing character takes 1 damage,
+//        not reduced by Resist); back: Maleficent - Rescued
+//        from the Staircase.
+//   6/37 Story Star Chamber — Encounter 6, lore 20, FALTERING
+//        HOPE + INK RESERVES + RISING THREAT; back: The Vine
+//        Maw - Final Foe (clearing it wins the journey and
+//        opens The Heart of the Vine prize pack). Art by
+//        Alyssa Lee.
+const HUNNY_ENCOUNTER_ENTRIES: CatalogEntry[] = [
+  puzzleEntry({
+    uid: "encounter:Q3:1",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 1,
+    printed: "1/37",
+    fullName: "Entrance Tunnel — Encounter 1 (The Search for Piglet)",
+    name: "Entrance Tunnel",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 1 of The Search for Piglet in Illumineer's Quest: The Great Hunny Rescue — the front of card 1/37. Lore goal 5. GROWING THREAT: at the start of the Vine's turn, it gains 1 lore. When the Illumineers complete this encounter, they rescue the character on the back of this card: Mickey Mouse - Rescued from the Entrance (1/37 in the set above). Art by Douglas De La Hoz.",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "encounter:Q3:2",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 2,
+    printed: "2/37",
+    fullName: "Room of Darkness — Encounter 2 (The Search for Piglet)",
+    name: "Room of Darkness",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 2 of The Search for Piglet in Illumineer's Quest: The Great Hunny Rescue — the front of card 2/37. Lore goal 12. TWIST AWAY: Vine Tendril characters gain Evasive. When the Illumineers complete this encounter, they rescue the character on the back of this card: Rapunzel - Rescued from the Darkness (2/37 in the set above). Art by Gabe Ramos.",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "encounter:Q3:3",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 3,
+    printed: "3/37",
+    fullName: "Vine Pod Chamber — Encounter 3 (The Search for Piglet)",
+    name: "Vine Pod Chamber",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 3 of The Search for Piglet in Illumineer's Quest: The Great Hunny Rescue — the front of card 3/37, and the journey's final encounter. Lore goal 20. RESURGENCE and RISING THREAT. When the Illumineers complete this encounter, they rescue the character on the back of this card: Chamber Guardian - Vine Protector (3/37 in the set above) — clearing it wins the journey and opens The Search for Piglet prize pack. Art by Rubin Chung and Leonardo Giammichele.",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "encounter:Q3:4",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 4,
+    printed: "4/37",
+    fullName: "Garden of Hungry Vegetables — Encounter 4 (The Heart of the Vine)",
+    name: "Garden of Hungry Vegetables",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 4 — the first encounter of the second journey, The Heart of the Vine, in Illumineer's Quest: The Great Hunny Rescue — the front of card 4/37. Lore goal 5. NEW GROWTH: the Vine makes a Vine Tendril. When the Illumineers complete this encounter, they rescue the character on the back of this card: Sulley - Rescued from the Garden (4/37 in the set above).",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "encounter:Q3:5",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 5,
+    printed: "5/37",
+    fullName: "Staircase of Thorns — Encounter 5 (The Heart of the Vine)",
+    name: "Staircase of Thorns",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 5 of The Heart of the Vine in Illumineer's Quest: The Great Hunny Rescue — the front of card 5/37. Lore goal 12. BRIARS EVERYWHERE: a questing character takes 1 damage, which can't be reduced by Resist. When the Illumineers complete this encounter, they rescue the character on the back of this card: Maleficent - Rescued from the Staircase (5/37 in the set above).",
+    image: null,
+    tcg: null,
+  }),
+  puzzleEntry({
+    uid: "encounter:Q3:6",
+    setCode: "Q3",
+    setName: "Illumineer's Quest: The Great Hunny Rescue",
+    number: 6,
+    printed: "6/37",
+    fullName: "Story Star Chamber — Encounter 6 (The Heart of the Vine)",
+    name: "Story Star Chamber",
+    rarity: "Encounter",
+    type: "Encounter",
+    text: "Encounter 6 of The Heart of the Vine in Illumineer's Quest: The Great Hunny Rescue — the front of card 6/37, and the journey's final encounter. Lore goal 20. FALTERING HOPE, INK RESERVES, and RISING THREAT. When the Illumineers complete this encounter, they rescue the character on the back of this card: The Vine Maw - Final Foe (6/37 in the set above) — clearing it wins the journey and opens The Heart of the Vine prize pack. Art by Alyssa Lee.",
+    image: null,
+    tcg: null,
+  }),
+];
+
 export const puzzleCatalog: CatalogEntry[] = [
   ...PUZZLE_SETS.flatMap((spec) => {
   const entries: CatalogEntry[] = [];
@@ -466,4 +660,6 @@ export const puzzleCatalog: CatalogEntry[] = [
   }),
   ...WINTERSPELL_PUZZLE_ENTRIES,
   ...INK_DROP_ENTRIES,
+  ...HUNNY_PRIZE_ENTRIES,
+  ...HUNNY_ENCOUNTER_ENTRIES,
 ];
