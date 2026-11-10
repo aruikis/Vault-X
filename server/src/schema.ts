@@ -1277,6 +1277,30 @@ export const gameCards = sqliteTable("game_cards", {
   imageUrl: text("image_url"),
   /** Market price in USD where the source publishes one. */
   price: real("price"),
+  /** The card's exact-printing TCGplayer product ID (migration
+      0083, Nov 10, 2026 — the three-game linking Anthony
+      directed): the same link Lorcana binder cards store,
+      matched by set + collector number + finish from each
+      game's own authoritative source (Pokémon: the Pokémon
+      TCG API's per-card TCGplayer redirect; Magic: Scryfall's
+      per-printing tcgplayer_id; Star Wars Unlimited: SWU-DB's
+      per-printing TCGplayer product). Null when no exact
+      match exists — a wrong link is worse than none, so
+      unmatched printings stay null and honestly unpriced. */
+  tcgplayerId: text("tcgplayer_id"),
+  /** Where the current price came from (migration 0083):
+      "tcgplayer" (TCGplayer market), "scryfall" (Scryfall's
+      published USD price), "ebay-sold" (a recorded eBay SOLD
+      listing — the Topps families' market), or "comc" (a
+      COMC listing price). Null for import-time prices that
+      predate provenance tracking; the Financial tab falls
+      back to the game's catalog source line for those. */
+  priceSource: text("price_source"),
+  /** The date the current price refers to (yyyy-mm-dd): the
+      sale date for an eBay sold value, otherwise the day the
+      price was fetched. Drives the Financial tab's honest
+      "last sold at … on …" / "as of …" labels. */
+  priceDate: text("price_date"),
   /** What the collector paid per copy, USD, when they record
       it on the item's page (Money Tracker, Nov 5, 2026).
       Null = cost not recorded — shown honestly as unknown,

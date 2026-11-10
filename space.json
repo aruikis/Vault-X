@@ -150,6 +150,84 @@
       "id": "lorcana-binder-game-import-wwe-topps",
       "purpose": "Continues the resumable WWE Topps catalog download (Topps' own official WWE product checklists from topps.com/pages/checklists, text data only — no artwork) a chunk per day until the catalog is complete; no-ops as a light re-check once complete.",
       "schedule": "daily 06:37 America/Chicago"
+    },
+    {
+      "action": "linkGameTcgplayer",
+      "args": {
+        "game": "starwars"
+      },
+      "id": "lorcana-binder-tcg-link-starwars",
+      "purpose": "Continues the resumable Star Wars Unlimited TCGplayer linking pass (Anthony, Nov 10, 2026): matches catalog printings to their exact TCGplayer product via SWU-DB (set + number + variant + Fantasy Flight card id) and stores the product ID plus the TCGplayer market price. No-ops as a light re-check once every section is processed, and re-checks sections whose catalog rows grow.",
+      "schedule": "daily 05:00 America/Chicago"
+    },
+    {
+      "action": "linkGameTcgplayer",
+      "args": {
+        "game": "pokemon"
+      },
+      "id": "lorcana-binder-tcg-link-pokemon",
+      "purpose": "Continues the resumable Pokémon TCGplayer linking pass (Anthony, Nov 10, 2026): each card's product ID is read from the Pokémon TCG API's own per-card TCGplayer redirect (exact printing by construction), with the API's TCGplayer price for the card's finish. No-ops as a light re-check once every section is processed, and re-checks sections whose catalog rows grow.",
+      "schedule": "daily 05:08 America/Chicago"
+    },
+    {
+      "action": "linkGameTcgplayer",
+      "args": {
+        "game": "magic"
+      },
+      "id": "lorcana-binder-tcg-link-magic",
+      "purpose": "Continues the resumable Magic: The Gathering TCGplayer linking pass (Anthony, Nov 10, 2026): Scryfall's per-printing tcgplayer_id stored on the catalog row keyed by the same Scryfall printing id, with Scryfall's published USD price. No-ops as a light re-check once every section is processed, and re-checks sections whose catalog rows grow.",
+      "schedule": "daily 05:16 America/Chicago"
+    },
+    {
+      "action": "linkGameTcgplayer",
+      "args": {
+        "game": "pokemon"
+      },
+      "id": "lorcana-binder-tcg-link-pokemon-pm",
+      "purpose": "Second daily run of the Pokémon TCGplayer linking pass while the initial catch-up is underway (the Pokémon API's per-card product resolution is slow, so one morning run alone would take months); no-ops as a light re-check once every section is processed.",
+      "schedule": "daily 13:08 America/Chicago"
+    },
+    {
+      "action": "linkGameTcgplayer",
+      "args": {
+        "game": "magic"
+      },
+      "id": "lorcana-binder-tcg-link-magic-pm",
+      "purpose": "Second daily run of the Magic: The Gathering TCGplayer linking pass while the initial catch-up is underway; no-ops as a light re-check once every section is processed.",
+      "schedule": "daily 17:16 America/Chicago"
+    },
+    {
+      "action": "refreshToppsPricing",
+      "id": "lorcana-binder-topps-sold-pricing",
+      "purpose": "Daily Topps sold-price lookup (Anthony, Nov 10, 2026 — built for his sister's Disney Topps collection): an agent task prices owned Topps-family cards (Disney Topps first) from the most recent eBay SOLD listing of the exact card (TCGplayer where the exact product exists, COMC listing third), saving each verified value via saveToppsSoldPrice so values show as 'last sold' with their sale date and history accrues. Starts nothing when no Topps cards are owned.",
+      "schedule": "daily 07:05 America/Chicago"
+    },
+    {
+      "action": "repriceGameCards",
+      "args": {
+        "game": "pokemon"
+      },
+      "id": "lorcana-binder-game-reprice-pokemon",
+      "purpose": "Nightly re-pricing of TCGplayer-linked Pokémon cards (owned first, then stalest): refreshes each card's TCGplayer market price for its own finish via the Pokémon TCG API, stamps source and date, and appends today's value-history point.",
+      "schedule": "daily 08:20 America/Chicago"
+    },
+    {
+      "action": "repriceGameCards",
+      "args": {
+        "game": "magic"
+      },
+      "id": "lorcana-binder-game-reprice-magic",
+      "purpose": "Nightly re-pricing of TCGplayer-linked Magic: The Gathering printings (owned first, then stalest): refreshes Scryfall's published USD price for the exact printing, stamps source and date, and appends today's value-history point.",
+      "schedule": "daily 08:30 America/Chicago"
+    },
+    {
+      "action": "repriceGameCards",
+      "args": {
+        "game": "starwars"
+      },
+      "id": "lorcana-binder-game-reprice-starwars",
+      "purpose": "Nightly re-pricing of TCGplayer-linked Star Wars Unlimited cards (owned first, then stalest): refreshes TCGplayer's own pricepoints for the linked product (Foil or Normal by the card's finish), stamps source and date, and appends today's value-history point.",
+      "schedule": "daily 08:40 America/Chicago"
     }
   ],
   "name": "Vault X",

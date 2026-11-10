@@ -6993,6 +6993,846 @@ async function insertGameRows(ctx: Ctx, rows: GameRow[]) {
   }
 }
 
+/* ==== TCGplayer linking for the three TCG Universe games
+   (Anthony, Nov 10, 2026 — "do that linking for everything"):
+   Pokémon, Magic: The Gathering, and Star Wars Unlimited were
+   cataloged without the TCGplayer product links Lorcana cards
+   carry, so their pricing never flowed. Each game is linked
+   from its own authoritative source by EXACT printing — set,
+   collector number, and finish — never by name alone:
+   - Pokémon: the official Pokémon TCG API publishes, for every
+     card, its own TCGplayer link (prices.pokemontcg.io/tcgplayer/
+     <card id>), which redirects to that printing's TCGplayer
+     product page; the product ID is read out of the redirect.
+   - Magic: Scryfall publishes a tcgplayer_id on every printing
+     it knows TCGplayer carries; the catalog rows are keyed by
+     Scryfall's own printing id, so the match is by identity.
+   - Star Wars Unlimited: SWU-DB (api.swu-db.com), the
+     collector database built on Fantasy Flight's official
+     data, publishes each printing's tcgplayerId and TCGplayer
+     market prices; rows match by Fantasy Flight's own card id
+     (cid) where the catalog carries it, else by set + number +
+     variant + name together.
+   A printing with no exact match keeps tcgplayer_id NULL and
+   stays honestly unpriced — a wrong link is worse than none.
+   Progress and per-section outcomes (linked / unmatched /
+   reason tallies) live in game_import_meta under
+   "tcglink:<game>" so the passes are resumable and auditable,
+   exactly like the catalog importers. */
+
+type TcgLinkGame = "pokemon" | "magic" | "starwars";
+
+type TcgLinkSectionState = {
+  /** Catalog rows in the section when it was last processed. */
+  rows: number;
+  linked: number;
+  unmatched: number;
+  /** Why rows stayed unlinked: not-on-tcgplayer,
+      no-exact-match, ambiguous, name-mismatch,
+      finish-not-carried, set-not-in-source, fetch-failed… */
+  reasons: Record<string, number>;
+  /** Rows whose attempt failed on a network error; a section
+      with pending > 0 is retried even at the same row count. */
+  pending: number;
+  at: string;
+};
+type TcgLinkState = {
+  /** Pass version: bump when a linker's matching rules
+      change, so every section is re-checked once under the
+      new rules (links already on rows are kept and simply
+      re-confirmed). v2: SWU-DB's "Foil" VariantType is the
+      standard printing's foil, not a separate variant. */
+  v?: number;
+  sections: Record<string, TcgLinkSectionState>;
+};
+const TCG_LINK_STATE_VERSION = 2;
+
+async function readTcgLinkState(
+  ctx: Ctx,
+  game: TcgLinkGame,
+): Promise<TcgLinkState> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.gameImportMeta)
+    .where(eq(schema.gameImportMeta.game, `tcglink:${game}`));
+  const row = rows[0];
+  if (!row) return { v: TCG_LINK_STATE_VERSION, sections: {} };
+  try {
+    const parsed = JSON.parse(row.state) as TcgLinkState;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.sections &&
+      (parsed.v ?? 1) >= TCG_LINK_STATE_VERSION
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Corrupt state restarts the pass; links already written
+    // to rows are kept and simply re-confirmed.
+  }
+  return { v: TCG_LINK_STATE_VERSION, sections: {} };
+}
+
+async function writeTcgLinkState(
+  ctx: Ctx,
+  game: TcgLinkGame,
+  state: TcgLinkState,
+  sectionsTotal: number,
+  sectionsDone: number,
+  complete: boolean,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const key = `tcglink:${game}`;
+  const now = new Date().toISOString();
+  const countRows = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(schema.gameCards)
+    .where(eq(schema.gameCards.game, game));
+  const existing = await db
+    .select()
+    .from(schema.gameImportMeta)
+    .where(eq(schema.gameImportMeta.game, key));
+  if (existing.length > 0) {
+    await db
+      .update(schema.gameImportMeta)
+      .set({
+        state: JSON.stringify(state),
+        setsTotal: sectionsTotal,
+        setsDone: sectionsDone,
+        cardsTotal: countRows[0]?.c ?? 0,
+        complete: complete ? 1 : 0,
+        updatedAt: now,
+      })
+      .where(eq(schema.gameImportMeta.game, key));
+  } else {
+    await db.insert(schema.gameImportMeta).values({
+      game: key,
+      state: JSON.stringify(state),
+      setsTotal: sectionsTotal,
+      setsDone: sectionsDone,
+      cardsTotal: countRows[0]?.c ?? 0,
+      complete: complete ? 1 : 0,
+      updatedAt: now,
+    });
+  }
+}
+
+/** Sections of one game that still need a linking pass, in
+    catalog order: never processed, grown since processing
+    (the catalog importers keep adding printings), or holding
+    rows whose last attempt failed on the network. */
+async function tcgLinkWorklist(
+  ctx: Ctx,
+  game: TcgLinkGame,
+  state: TcgLinkState,
+): Promise<
+  Array<{ key: string; rows: number; sort: number }>
+> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select({
+      key: schema.gameCards.sectionKey,
+      sort: sql<number>`min(${schema.gameCards.sectionSort})`,
+      total: sql<number>`count(*)`,
+    })
+    .from(schema.gameCards)
+    .where(eq(schema.gameCards.game, game))
+    .groupBy(schema.gameCards.sectionKey)
+    .orderBy(asc(sql`min(${schema.gameCards.sectionSort})`));
+  const work: Array<{ key: string; rows: number; sort: number }> = [];
+  for (const r of rows) {
+    const done = state.sections[r.key];
+    if (!done || done.rows !== r.total || done.pending > 0) {
+      work.push({ key: r.key, rows: r.total, sort: r.sort });
+    }
+  }
+  return work;
+}
+
+/** Text fetch with the same transient-retry contract as
+    fetchJson (SWU-DB's per-set CSV is the caller). */
+async function fetchTextRetry(url: string): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleepMs(attempt === 1 ? 700 : 1600);
+    try {
+      const res = await fetch(url, {
+        headers: { "user-agent": "VaultX catalog import" },
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
+      return await res.text();
+    } catch (e) {
+      lastError = e;
+      const msg = e instanceof Error ? e.message : "";
+      const status = msg.match(/^fetch (\d{3}) for /)?.[1];
+      if (status) {
+        const code = parseInt(status, 10);
+        if (code >= 400 && code < 500 && code !== 429) break;
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`fetch failed for ${url}`);
+}
+
+function bumpReason(
+  reasons: Record<string, number>,
+  key: string,
+): void {
+  reasons[key] = (reasons[key] ?? 0) + 1;
+}
+
+/** Writes one row's link (+ price where the linking source
+    publishes that printing's market price). Only ever called
+    with an exact-printing match. */
+async function writeGameCardLink(
+  ctx: Ctx,
+  rowId: number,
+  tcgplayerId: string,
+  price: number | null,
+  priceSource: "tcgplayer" | "scryfall",
+  today: string,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  if (price != null) {
+    await db
+      .update(schema.gameCards)
+      .set({
+        tcgplayerId,
+        price,
+        priceSource,
+        priceDate: today,
+      })
+      .where(eq(schema.gameCards.id, rowId));
+    // The first tracked price is also the first value-history
+    // point — history starts accruing the moment pricing
+    // does, not at some later re-pricing.
+    const existing = await db
+      .select()
+      .from(schema.gameCardPriceHistory)
+      .where(
+        and(
+          eq(schema.gameCardPriceHistory.gameCardId, rowId),
+          eq(schema.gameCardPriceHistory.date, today),
+          eq(schema.gameCardPriceHistory.source, priceSource),
+        ),
+      );
+    if (existing.length === 0) {
+      await db.insert(schema.gameCardPriceHistory).values({
+        gameCardId: rowId,
+        date: today,
+        label: today,
+        unitValue: price,
+        source: priceSource,
+      });
+    }
+  } else {
+    await db
+      .update(schema.gameCards)
+      .set({ tcgplayerId })
+      .where(eq(schema.gameCards.id, rowId));
+  }
+}
+
+/** The Pokémon price the API publishes for ONE finish — the
+    row's own finish only, never another finish's price (the
+    exact-printing rule: a Holofoil row must not inherit the
+    Normal price, or an Unlimited holo the 1st Edition one).
+    The API's per-finish prices ARE TCGplayer's. WotC-era sets
+    name the same finishes differently (unlimitedHolofoil /
+    unlimited / 1stEdition), so each finish carries its alias
+    keys — same finish, older spelling. */
+const POKEMON_FINISH_KEYS: Array<{
+  label: string;
+  keys: string[];
+}> = [
+  { label: "Normal", keys: ["normal", "unlimited"] },
+  { label: "Holofoil", keys: ["holofoil", "unlimitedHolofoil"] },
+  { label: "Reverse Holofoil", keys: ["reverseHolofoil"] },
+  { label: "1st Edition Holofoil", keys: ["1stEditionHolofoil"] },
+  { label: "1st Edition", keys: ["1stEdition", "1stEditionNormal"] },
+];
+function pokemonFinishPrice(
+  prices: Record<string, unknown>,
+  finish: string | null,
+): number | null {
+  const entry = POKEMON_FINISH_KEYS.find((e) => e.label === finish);
+  if (!entry) return null;
+  for (const key of entry.keys) {
+    const pr = asRec(prices[key]);
+    const v = asNum(pr.market) ?? asNum(pr.mid);
+    if (v != null) return v;
+  }
+  return null;
+}
+
+/** Resolves one Pokémon card's TCGplayer product ID from the
+    API's own per-card TCGplayer link: the redirect target
+    names the product. Returns the ID, null when the link
+    resolves somewhere that is not a product (the card is not
+    carried as a product), or "failed" on a network error so
+    the row stays pending instead of being written off. */
+async function resolvePokemonProductId(
+  cardId: string,
+): Promise<string | null | "failed"> {
+  try {
+    const res = await fetch(
+      `https://prices.pokemontcg.io/tcgplayer/${encodeURIComponent(cardId)}`,
+      {
+        redirect: "manual",
+        headers: { "user-agent": "VaultX catalog import" },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const loc = res.headers.get("location") ?? "";
+    const m = loc.match(/product\/(\d+)/);
+    if (m) return m[1]!;
+    // A definitive non-product answer (a redirect elsewhere
+    // or a 4xx) means this printing has no TCGplayer
+    // product; a 5xx or a network error leaves the row
+    // pending for the next pass instead.
+    if (res.status >= 500) return "failed";
+    return null;
+  } catch {
+    return "failed";
+  }
+}
+
+/** Links one Pokémon section: the API lists the set's cards
+    (each with its own TCGplayer link + prices); every catalog
+    row of the set is matched by the API's card id, which is
+    the row's uid — identity, not name matching. */
+async function linkPokemonSection(
+  ctx: Ctx,
+  sectionKey: string,
+  today: string,
+): Promise<TcgLinkSectionState> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.gameCards)
+    .where(
+      and(
+        eq(schema.gameCards.game, "pokemon"),
+        eq(schema.gameCards.sectionKey, sectionKey),
+      ),
+    );
+  const result: TcgLinkSectionState = {
+    rows: rows.length,
+    linked: 0,
+    unmatched: 0,
+    reasons: {},
+    pending: 0,
+    at: new Date().toISOString(),
+  };
+  if (rows.length > 0 && rows.every((r) => r.tcgplayerId)) {
+    // Fully linked already (e.g. an earlier call timed out
+    // after its writes landed): close the section without
+    // touching the source.
+    result.linked = rows.length;
+    return result;
+  }
+  const byCardId = new Map<string, Record<string, unknown>>();
+  let page = 1;
+  for (;;) {
+    const data = asRec(
+      await fetchJson(
+        `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(`set.id:${sectionKey}`)}&page=${page}&pageSize=250&select=id,tcgplayer`,
+      ),
+    );
+    const cards = asArr(data.data);
+    for (const cRaw of cards) {
+      const c = asRec(cRaw);
+      const id = asStr(c.id);
+      if (id) byCardId.set(id, c);
+    }
+    const totalCount = asNum(data.totalCount) ?? byCardId.size;
+    if (byCardId.size >= totalCount || cards.length === 0) break;
+    page += 1;
+    if (page > 6) break;
+  }
+  // Resolve product IDs in parallel batches — one redirect
+  // per card, straight from the card's own published link.
+  // Only rows still missing their link resolve: a section an
+  // earlier call half-finished (its writes land even when
+  // the call itself times out) re-runs cheap.
+  const targets = rows.filter((r) => {
+    if (r.tcgplayerId) return false;
+    const cardId = r.uid.replace(/^pokemon:/, "");
+    return byCardId.has(cardId);
+  });
+  const resolved = new Map<string, string | null | "failed">();
+  for (let i = 0; i < targets.length; i += 20) {
+    const batch = targets.slice(i, i + 20);
+    const out = await Promise.all(
+      batch.map(async (r) => {
+        const cardId = r.uid.replace(/^pokemon:/, "");
+        // The redirect IS the test: it names a product only
+        // when TCGplayer carries this exact printing.
+        return [r.uid, await resolvePokemonProductId(cardId)] as const;
+      }),
+    );
+    for (const [uid, v] of out) resolved.set(uid, v);
+  }
+  for (const r of rows) {
+    const cardId = r.uid.replace(/^pokemon:/, "");
+    const c = byCardId.get(cardId);
+    if (!c) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "no-exact-match");
+      continue;
+    }
+    if (r.tcgplayerId) {
+      result.linked += 1;
+      continue;
+    }
+    const productId = resolved.get(r.uid);
+    if (productId === "failed") {
+      result.pending += 1;
+      bumpReason(result.reasons, "fetch-failed");
+      continue;
+    }
+    if (!productId) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "not-on-tcgplayer");
+      continue;
+    }
+    const prices = asRec(asRec(c.tcgplayer).prices);
+    const price = pokemonFinishPrice(prices, r.finish);
+    await writeGameCardLink(ctx, r.id, productId, price, "tcgplayer", today);
+    result.linked += 1;
+  }
+  return result;
+}
+
+/** Links one Magic section: Scryfall's per-set printings carry
+    their own tcgplayer_id; catalog rows are keyed by the same
+    Scryfall printing id, so matches are by identity. The
+    price refresh rides along (Scryfall's published USD —
+    usd, else usd_foil — the importer's standing rule). */
+async function linkMagicSection(
+  ctx: Ctx,
+  sectionKey: string,
+  today: string,
+): Promise<TcgLinkSectionState> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.gameCards)
+    .where(
+      and(
+        eq(schema.gameCards.game, "magic"),
+        eq(schema.gameCards.sectionKey, sectionKey),
+      ),
+    );
+  const result: TcgLinkSectionState = {
+    rows: rows.length,
+    linked: 0,
+    unmatched: 0,
+    reasons: {},
+    pending: 0,
+    at: new Date().toISOString(),
+  };
+  if (rows.length > 0 && rows.every((r) => r.tcgplayerId)) {
+    result.linked = rows.length;
+    return result;
+  }
+  const byId = new Map<
+    string,
+    { tcg: string | null; price: number | null }
+  >();
+  let url: string | null =
+    `https://api.scryfall.com/cards/search?q=e%3A${encodeURIComponent(sectionKey)}&unique=prints&order=set&dir=asc`;
+  while (url) {
+    const data = asRec(await fetchJson(url));
+    for (const cRaw of asArr(data.data)) {
+      const c = asRec(cRaw);
+      const id = asStr(c.id);
+      if (!id) continue;
+      const prices = asRec(c.prices);
+      byId.set(id, {
+        tcg: c.tcgplayer_id != null ? String(c.tcgplayer_id) : null,
+        price: asNum(prices.usd) ?? asNum(prices.usd_foil),
+      });
+    }
+    url = data.has_more === true ? asStr(data.next_page) : null;
+    if (url) await sleepMs(120);
+  }
+  for (const r of rows) {
+    const entry = byId.get(r.uid.replace(/^magic:/, ""));
+    if (!entry) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "no-exact-match");
+      continue;
+    }
+    if (!entry.tcg) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "not-on-tcgplayer");
+      // Scryfall still publishes a price for some printings
+      // TCGplayer doesn't carry as a product; keep the price
+      // flowing honestly under Scryfall's name.
+      if (entry.price != null && r.tcgplayerId == null) {
+        await db
+          .update(schema.gameCards)
+          .set({
+            price: entry.price,
+            priceSource: "scryfall",
+            priceDate: today,
+          })
+          .where(eq(schema.gameCards.id, r.id));
+      }
+      continue;
+    }
+    if (r.tcgplayerId === entry.tcg) {
+      result.linked += 1;
+      continue;
+    }
+    await writeGameCardLink(
+      ctx,
+      r.id,
+      entry.tcg,
+      entry.price,
+      "scryfall",
+      today,
+    );
+    result.linked += 1;
+  }
+  return result;
+}
+
+/** Name comparison key for the SWU number-match path:
+    case/diacritic/punctuation-insensitive, so FFG's
+    "Chirrut Îmwe" and SWU-DB's spelling compare equal while
+    different cards never do. */
+function swuNormName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  // (the character class above is U+0300–U+036F, the
+  // combining diacritical marks stripped after NFD)
+}
+
+/** Our FFG finish → SWU-DB variant + foil flag. Finishes the
+    collector database doesn't model (organized-play promos:
+    Weekly Play, Store Showdown, Judge…) return null and stay
+    unlinked rather than being forced onto a base printing. */
+function swuVariantOf(
+  finish: string | null,
+): { variant: string; foil: boolean } | null {
+  if (!finish) return null;
+  let f = finish.trim();
+  let foil = false;
+  if (/ foil$/i.test(f)) {
+    foil = true;
+    f = f.replace(/ foil$/i, "");
+  }
+  const base = f === "Standard" ? "Normal" : f;
+  if (
+    base === "Normal" ||
+    base === "Hyperspace" ||
+    base === "Showcase" ||
+    base === "Prestige" ||
+    base === "Serialized"
+  ) {
+    return { variant: base, foil };
+  }
+  return null;
+}
+
+type SwuDbEntry = {
+  cid: string;
+  number: string;
+  variant: string;
+  foil: boolean;
+  name: string;
+  tcgplayerId: string | null;
+  marketPrice: number | null;
+  foilPrice: number | null;
+};
+
+/** Links one Star Wars Unlimited section from SWU-DB's
+    per-set download (every printing with its TCGplayer
+    product id and market prices). Match order: Fantasy
+    Flight's own card id (cid) first — identity — then
+    set + number + variant + name together. Foil printings
+    share the base printing's TCGplayer product (its Foil
+    pricepoint), exactly as TCGplayer lists them. */
+async function linkStarwarsSection(
+  ctx: Ctx,
+  sectionKey: string,
+  today: string,
+): Promise<TcgLinkSectionState> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.gameCards)
+    .where(
+      and(
+        eq(schema.gameCards.game, "starwars"),
+        eq(schema.gameCards.sectionKey, sectionKey),
+      ),
+    );
+  const result: TcgLinkSectionState = {
+    rows: rows.length,
+    linked: 0,
+    unmatched: 0,
+    reasons: {},
+    pending: 0,
+    at: new Date().toISOString(),
+  };
+  if (rows.length > 0 && rows.every((r) => r.tcgplayerId)) {
+    result.linked = rows.length;
+    return result;
+  }
+  let csv: string;
+  try {
+    csv = await fetchTextRetry(
+      `https://api.swu-db.com/cards/${encodeURIComponent(sectionKey.toLowerCase())}?format=csv`,
+    );
+  } catch (e) {
+    if (e instanceof Error && /fetch 404 for /.test(e.message)) {
+      // SWU-DB has no download for this section (convention /
+      // judge / weekly-play sections live only in FFG's data):
+      // every row is honestly unmatched, and the section is
+      // not retried until its catalog rows change.
+      result.unmatched = rows.length;
+      result.reasons["set-not-in-source"] = rows.length;
+      return result;
+    }
+    // A network failure says nothing about the section:
+    // leave every row pending for the next run.
+    result.pending = rows.length;
+    result.reasons["fetch-failed"] = rows.length;
+    return result;
+  }
+  const table = parseCsvRows(csv);
+  const header = table[0] ?? [];
+  const col = (name: string) => header.indexOf(name);
+  const iSet = col("Set");
+  const iNum = col("Number");
+  const iName = col("Name");
+  const iSub = col("Subtitle");
+  const iCid = col("cid");
+  const iVariant = col("VariantType");
+  const iMarket = col("MarketPrice");
+  const iFoil = col("FoilPrice");
+  const iTcg = col("tcgplayerId");
+  if (iNum < 0 || iCid < 0 || iVariant < 0 || iTcg < 0) {
+    result.pending = rows.length;
+    result.reasons["fetch-failed"] = rows.length;
+    return result;
+  }
+  const entries: SwuDbEntry[] = [];
+  for (const line of table.slice(1)) {
+    const setVal = (line[iSet] ?? "").trim();
+    if (setVal && setVal.toUpperCase() !== sectionKey.toUpperCase()) {
+      continue;
+    }
+    const rawNum = (line[iNum] ?? "").trim();
+    const number = rawNum.replace(/F$/i, "").replace(/^0+(?=\d)/, "");
+    const name = (line[iName] ?? "").trim();
+    if (!number || !name) continue;
+    // SWU-DB names the foil printing of a standard card
+    // VariantType "Foil" (its own line, F-suffixed number,
+    // same TCGplayer product) and "Hyperspace Foil" for the
+    // hyperspace one. Normalize to the catalog's model: a
+    // base variant (Normal / Hyperspace / Showcase / …) plus
+    // a foil flag.
+    const rawVariant = (line[iVariant] ?? "").trim();
+    const foil = /F$/i.test(rawNum) || /(^|\s)Foil$/i.test(rawVariant);
+    const variant =
+      rawVariant === "Foil"
+        ? "Normal"
+        : rawVariant.replace(/ Foil$/i, "");
+    const subtitle = iSub >= 0 ? (line[iSub] ?? "").trim() : "";
+    entries.push({
+      cid: (line[iCid] ?? "").trim().replace(/^0+(?=\d)/, ""),
+      number,
+      variant,
+      foil,
+      name: subtitle ? `${name} - ${subtitle}` : name,
+      tcgplayerId: (line[iTcg] ?? "").trim() || null,
+      marketPrice: asNum((line[iMarket] ?? "").trim()),
+      foilPrice: iFoil >= 0 ? asNum((line[iFoil] ?? "").trim()) : null,
+    });
+  }
+  const byCid = new Map<string, SwuDbEntry>();
+  const byKey = new Map<string, SwuDbEntry[]>();
+  for (const e of entries) {
+    if (e.cid) byCid.set(e.cid, e);
+    const key = `${e.number}|${e.variant}|${e.foil ? "F" : "N"}`;
+    const list = byKey.get(key) ?? [];
+    list.push(e);
+    byKey.set(key, list);
+  }
+  for (const r of rows) {
+    if (r.tcgplayerId) {
+      result.linked += 1;
+      continue;
+    }
+    const v = swuVariantOf(r.finish);
+    if (!v) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "finish-not-carried");
+      continue;
+    }
+    let entry: SwuDbEntry | null = null;
+    const uidSuffix = r.uid.replace(/^starwars:/, "");
+    if (/^\d{6,}$/.test(uidSuffix)) {
+      entry = byCid.get(uidSuffix.replace(/^0+(?=\d)/, "")) ?? null;
+      if (
+        entry &&
+        (entry.variant !== v.variant || entry.foil !== v.foil)
+      ) {
+        entry = null;
+      }
+    }
+    if (!entry) {
+      const num = (r.number ?? "").replace(/^0+(?=\d)/, "");
+      const candidates =
+        byKey.get(`${num}|${v.variant}|${v.foil ? "F" : "N"}`) ?? [];
+      if (candidates.length > 1) {
+        result.unmatched += 1;
+        bumpReason(result.reasons, "ambiguous");
+        continue;
+      }
+      const cand = candidates[0] ?? null;
+      if (cand) {
+        if (swuNormName(cand.name) !== swuNormName(r.name)) {
+          result.unmatched += 1;
+          bumpReason(result.reasons, "name-mismatch");
+          continue;
+        }
+        entry = cand;
+      }
+    }
+    if (!entry) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "no-exact-match");
+      continue;
+    }
+    if (!entry.tcgplayerId) {
+      result.unmatched += 1;
+      bumpReason(result.reasons, "not-on-tcgplayer");
+      continue;
+    }
+    // The entry's own MarketPrice is the price for ITS finish
+    // (SWU-DB lists foil printings as their own entries); a
+    // foil row matched to a base entry reads its FoilPrice.
+    const price =
+      entry.foil === v.foil
+        ? entry.marketPrice
+        : v.foil
+          ? entry.foilPrice
+          : entry.marketPrice;
+    await writeGameCardLink(ctx, r.id, entry.tcgplayerId, price, "tcgplayer", today);
+    result.linked += 1;
+  }
+  return result;
+}
+
+/** Runs one resumable chunk of one game's TCGplayer linking
+    pass and returns the chunk's tallies. Shared by the
+    linkGameTcgplayer action and the all-games kickoff. */
+async function runTcgLinkChunk(
+  ctx: Ctx,
+  game: TcgLinkGame,
+): Promise<{
+  sectionsProcessed: number;
+  linked: number;
+  unmatched: number;
+  pending: number;
+  remainingSections: number;
+  complete: boolean;
+}> {
+  const state = await readTcgLinkState(ctx, game);
+  const work = await tcgLinkWorklist(ctx, game, state);
+  const today = new Date().toISOString().slice(0, 10);
+  // Per-call budgets, sized so one call stays a modest run:
+  // Pokémon sections are redirect-heavy (~a set's worth of
+  // cards), Magic sections are Scryfall-page-heavy, SWU
+  // sections are one download each.
+  const maxSections = game === "pokemon" ? 2 : game === "magic" ? 8 : 12;
+  const maxCards = game === "pokemon" ? 260 : game === "magic" ? 3200 : 9000;
+  let sectionsProcessed = 0;
+  let cardsBudget = maxCards;
+  let linked = 0;
+  let unmatched = 0;
+  let pending = 0;
+  let consecutiveFailures = 0;
+  for (const sec of work) {
+    if (sectionsProcessed >= maxSections || cardsBudget <= 0) break;
+    let res: TcgLinkSectionState;
+    try {
+      res =
+        game === "pokemon"
+          ? await linkPokemonSection(ctx, sec.key, today)
+          : game === "magic"
+            ? await linkMagicSection(ctx, sec.key, today)
+            : await linkStarwarsSection(ctx, sec.key, today);
+      consecutiveFailures = 0;
+    } catch {
+      // One section's source hiccup (the Pokémon API's known
+      // intermittent 502s) must not stall the whole chunk:
+      // leave the section unprocessed so the next run retries
+      // it, and move on — but stop after three in a row, where
+      // the source is likely down for real.
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) break;
+      continue;
+    }
+    state.sections[sec.key] = res;
+    sectionsProcessed += 1;
+    cardsBudget -= sec.rows;
+    linked += res.linked;
+    unmatched += res.unmatched;
+    pending += res.pending;
+  }
+  const remaining = (await tcgLinkWorklist(ctx, game, state)).length;
+  const totalSections =
+    remaining + Object.keys(state.sections).length;
+  await writeTcgLinkState(
+    ctx,
+    game,
+    state,
+    totalSections,
+    Object.keys(state.sections).length,
+    remaining === 0,
+  );
+  if (sectionsProcessed > 0) ctx.invalidateQueries();
+  return {
+    sectionsProcessed,
+    linked,
+    unmatched,
+    pending,
+    remainingSections: remaining,
+    complete: remaining === 0,
+  };
+}
+
+/** The Topps families (Anthony, Nov 10, 2026): priced from
+    eBay SOLD listings for owned cards, TCGplayer where a card
+    genuinely exists there, COMC third — never whole-catalog
+    repricing, because these catalogs have no product-ID
+    linking. Disney Topps leads the target order (the
+    collection this feed was built for). */
+const TOPPS_FAMILY_GAMES = [
+  "disney-topps",
+  "starwars-topps",
+  "gpk",
+  "wwe-topps",
+  "topps",
+  "bowman",
+  "topps-basketball",
+] as const;
+
 async function importPokemonChunk(
   ctx: Ctx,
   state: ImportState,
@@ -17804,6 +18644,9 @@ export const Actions = {
           finish: z.string().nullable(),
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
         }),
@@ -17856,6 +18699,9 @@ export const Actions = {
           finish: r.finish,
           imageUrl: r.imageUrl,
           price: r.price,
+          tcgplayerId: r.tcgplayerId ?? null,
+          priceSource: r.priceSource ?? null,
+          priceDate: r.priceDate ?? null,
           ownedQty: r.ownedQty,
           ownedSealedQty: r.ownedSealedQty,
         })),
@@ -17881,6 +18727,9 @@ export const Actions = {
           finish: z.string().nullable(),
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
         })
@@ -17910,6 +18759,9 @@ export const Actions = {
               finish: r.finish,
               imageUrl: r.imageUrl,
               price: r.price,
+              tcgplayerId: r.tcgplayerId ?? null,
+              priceSource: r.priceSource ?? null,
+              priceDate: r.priceDate ?? null,
               ownedQty: r.ownedQty,
               ownedSealedQty: r.ownedSealedQty,
             }
@@ -17937,6 +18789,9 @@ export const Actions = {
           finish: z.string().nullable(),
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
         }),
@@ -17968,6 +18823,9 @@ export const Actions = {
           finish: r.finish,
           imageUrl: r.imageUrl,
           price: r.price,
+          tcgplayerId: r.tcgplayerId ?? null,
+          priceSource: r.priceSource ?? null,
+          priceDate: r.priceDate ?? null,
           ownedQty: r.ownedQty,
           ownedSealedQty: r.ownedSealedQty,
         })),
@@ -18005,6 +18863,9 @@ export const Actions = {
           finish: z.string().nullable(),
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
         }),
@@ -18057,6 +18918,9 @@ export const Actions = {
         finish: string | null;
         imageUrl: string | null;
         price: number | null;
+        tcgplayerId: string | null;
+        priceSource: string | null;
+        priceDate: string | null;
         ownedQty: number;
         ownedSealedQty: number;
       }> = [];
@@ -18075,6 +18939,9 @@ export const Actions = {
           finish: r.finish,
           imageUrl: r.imageUrl,
           price: r.price,
+          tcgplayerId: r.tcgplayerId ?? null,
+          priceSource: r.priceSource ?? null,
+          priceDate: r.priceDate ?? null,
           ownedQty: r.ownedQty,
           ownedSealedQty: r.ownedSealedQty,
         });
@@ -18104,6 +18971,11 @@ export const Actions = {
           printed: z.string(),
           name: z.string(),
           rarity: z.string().nullable(),
+          finish: z.string().nullable(),
+          price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           imageUrl: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
@@ -18137,6 +19009,11 @@ export const Actions = {
           printed: r.printed,
           name: r.name,
           rarity: r.rarity,
+          finish: r.finish,
+          price: r.price,
+          tcgplayerId: r.tcgplayerId ?? null,
+          priceSource: r.priceSource ?? null,
+          priceDate: r.priceDate ?? null,
           imageUrl: r.imageUrl,
           ownedQty: r.ownedQty,
           ownedSealedQty: r.ownedSealedQty,
@@ -18392,6 +19269,9 @@ export const Actions = {
           finish: z.string().nullable(),
           imageUrl: z.string().nullable(),
           price: z.number().nullable(),
+          tcgplayerId: z.string().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
           ownedQty: z.number(),
           ownedSealedQty: z.number(),
         })
@@ -18439,6 +19319,9 @@ export const Actions = {
           finish: row.finish,
           imageUrl: row.imageUrl,
           price: row.price,
+          tcgplayerId: row.tcgplayerId ?? null,
+          priceSource: row.priceSource ?? null,
+          priceDate: row.priceDate ?? null,
           ownedQty: row.ownedQty,
           ownedSealedQty: row.ownedSealedQty,
         },
@@ -18495,6 +19378,9 @@ export const Actions = {
             finish: z.string().nullable(),
             imageUrl: z.string().nullable(),
             price: z.number().nullable(),
+            tcgplayerId: z.string().nullable(),
+            priceSource: z.string().nullable(),
+            priceDate: z.string().nullable(),
             ownedQty: z.number(),
             ownedSealedQty: z.number(),
           }),
@@ -18535,6 +19421,9 @@ export const Actions = {
             finish: card.finish,
             imageUrl: card.imageUrl,
             price: card.price,
+            tcgplayerId: card.tcgplayerId ?? null,
+            priceSource: card.priceSource ?? null,
+            priceDate: card.priceDate ?? null,
             ownedQty: card.ownedQty,
             ownedSealedQty: card.ownedSealedQty,
           },
@@ -19447,6 +20336,600 @@ export const Actions = {
       }
       if (recorded > 0) ctx.invalidateQueries();
       return { recorded };
+    },
+  }),
+
+  linkGameTcgplayer: defineAction({
+    description:
+      "Runs one resumable chunk of one TCG Universe game's TCGplayer linking pass (Anthony, Nov 10, 2026): Pokémon, Magic, or Star Wars Unlimited catalog cards are matched to their exact-printing TCGplayer product — by set, collector number, and finish, from the game's own authoritative source (Pokémon TCG API's per-card TCGplayer redirect; Scryfall's per-printing tcgplayer_id; SWU-DB's per-printing product id) — and the product ID is stored on the card the way Lorcana cards store theirs, with the source's market price for that printing where it publishes one. Printings with no exact match stay unlinked and unpriced. Progress persists per section, so repeat calls (and the daily schedule) continue until the catalog is covered; sections are re-checked when the catalog grows.",
+    request: z.object({
+      game: z.enum(["pokemon", "magic", "starwars"]),
+    }),
+    response: z.object({
+      game: z.string(),
+      sectionsProcessed: z.number(),
+      linked: z.number(),
+      unmatched: z.number(),
+      pending: z.number(),
+      remainingSections: z.number(),
+      complete: z.boolean(),
+    }),
+    async handler(ctx, args) {
+      const r = await runTcgLinkChunk(ctx, args.game);
+      return { game: args.game, ...r };
+    },
+  }),
+
+  linkAllGamesTcgplayer: defineAction({
+    description:
+      "Runs one linking chunk for EACH of the three TCG Universe games (Pokémon, Magic, Star Wars Unlimited) — the kickoff that starts all three TCGplayer linking passes at once after this build lands; the per-game daily schedules then continue each pass until its catalog is covered.",
+    request: z.object({}),
+    response: z.object({
+      games: z.array(
+        z.object({
+          game: z.string(),
+          sectionsProcessed: z.number(),
+          linked: z.number(),
+          unmatched: z.number(),
+          pending: z.number(),
+          remainingSections: z.number(),
+          complete: z.boolean(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const games: Array<{ game: string } & Awaited<
+        ReturnType<typeof runTcgLinkChunk>
+      >> = [];
+      for (const game of ["starwars", "pokemon", "magic"] as const) {
+        try {
+          const r = await runTcgLinkChunk(ctx, game);
+          games.push({ game, ...r });
+        } catch {
+          games.push({
+            game,
+            sectionsProcessed: 0,
+            linked: 0,
+            unmatched: 0,
+            pending: 0,
+            remainingSections: -1,
+            complete: false,
+          });
+        }
+      }
+      return { games };
+    },
+  }),
+
+  getTcgLinkStatus: defineAction({
+    description:
+      "The TCGplayer linking report (Anthony, Nov 10, 2026): per TCG Universe game — catalog cards total, how many carry an exact-printing TCGplayer link, how many carry a tracked price, sections processed of total, and the tallied reasons cards stayed unlinked (not sold on TCGplayer, no exact match, ambiguous printing, finish the source doesn't carry, set the source doesn't cover). Plus the Topps families' owned-card pricing coverage (owned cards, and how many of them carry a recorded sold/listing value). Counts are read live from the catalog and the linking passes' saved state — nothing is estimated.",
+    request: z.object({}),
+    response: z.object({
+      games: z.array(
+        z.object({
+          game: z.string(),
+          total: z.number(),
+          linked: z.number(),
+          priced: z.number(),
+          sectionsProcessed: z.number(),
+          sectionsTotal: z.number(),
+          complete: z.boolean(),
+          reasons: z.array(
+            z.object({ reason: z.string(), count: z.number() }),
+          ),
+        }),
+      ),
+      topps: z.array(
+        z.object({
+          game: z.string(),
+          owned: z.number(),
+          pricedOwned: z.number(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const games: Array<{
+        game: string;
+        total: number;
+        linked: number;
+        priced: number;
+        sectionsProcessed: number;
+        sectionsTotal: number;
+        complete: boolean;
+        reasons: Array<{ reason: string; count: number }>;
+      }> = [];
+      for (const game of ["pokemon", "magic", "starwars"] as const) {
+        const totalRows = await db
+          .select({ c: sql<number>`count(*)` })
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.game, game));
+        const linkedRows = await db
+          .select({ c: sql<number>`count(*)` })
+          .from(schema.gameCards)
+          .where(
+            and(
+              eq(schema.gameCards.game, game),
+              isNotNull(schema.gameCards.tcgplayerId),
+            ),
+          );
+        const pricedRows = await db
+          .select({ c: sql<number>`count(*)` })
+          .from(schema.gameCards)
+          .where(
+            and(
+              eq(schema.gameCards.game, game),
+              isNotNull(schema.gameCards.price),
+            ),
+          );
+        const sectionRows = await db
+          .select({
+            key: schema.gameCards.sectionKey,
+          })
+          .from(schema.gameCards)
+          .where(eq(schema.gameCards.game, game))
+          .groupBy(schema.gameCards.sectionKey);
+        const state = await readTcgLinkState(ctx, game);
+        const reasonTotals = new Map<string, number>();
+        for (const sec of Object.values(state.sections)) {
+          for (const [reason, count] of Object.entries(sec.reasons)) {
+            reasonTotals.set(
+              reason,
+              (reasonTotals.get(reason) ?? 0) + count,
+            );
+          }
+        }
+        games.push({
+          game,
+          total: totalRows[0]?.c ?? 0,
+          linked: linkedRows[0]?.c ?? 0,
+          priced: pricedRows[0]?.c ?? 0,
+          sectionsProcessed: Object.keys(state.sections).length,
+          sectionsTotal: sectionRows.length,
+          complete:
+            Object.keys(state.sections).length >= sectionRows.length &&
+            sectionRows.length > 0,
+          reasons: [...reasonTotals.entries()]
+            .map(([reason, count]) => ({ reason, count }))
+            .sort((a, b) => b.count - a.count),
+        });
+      }
+      const topps: Array<{
+        game: string;
+        owned: number;
+        pricedOwned: number;
+      }> = [];
+      for (const game of TOPPS_FAMILY_GAMES) {
+        const ownedRows = await db
+          .select({ c: sql<number>`count(*)` })
+          .from(schema.gameCards)
+          .where(
+            and(
+              eq(schema.gameCards.game, game),
+              sql`${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty} > 0`,
+            ),
+          );
+        const pricedRows = await db
+          .select({ c: sql<number>`count(*)` })
+          .from(schema.gameCards)
+          .where(
+            and(
+              eq(schema.gameCards.game, game),
+              sql`${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty} > 0`,
+              isNotNull(schema.gameCards.price),
+            ),
+          );
+        topps.push({
+          game,
+          owned: ownedRows[0]?.c ?? 0,
+          pricedOwned: pricedRows[0]?.c ?? 0,
+        });
+      }
+      return { games, topps };
+    },
+  }),
+
+  repriceGameCards: defineAction({
+    description:
+      "The nightly re-pricing pass for one TCG Universe game (Anthony, Nov 10, 2026): refreshes the market price of TCGplayer-linked cards — owned cards first, then the stalest prices — from the game's exact-printing source (Pokémon: the Pokémon TCG API's TCGplayer prices for the card's own finish; Magic: Scryfall's published USD for the exact printing; Star Wars Unlimited: TCGplayer's own pricepoints for the linked product, Foil or Normal by the card's finish). Each refreshed price is stamped with its source and date and appends today's point to the card's value history. Cards whose source publishes no current market price keep their last tracked price. One call covers a bounded batch; the daily schedule's repeat calls keep the whole linked catalog cycling.",
+    request: z.object({
+      game: z.enum(["pokemon", "magic", "starwars"]),
+    }),
+    response: z.object({
+      game: z.string(),
+      targets: z.number(),
+      updated: z.number(),
+      noPrice: z.number(),
+      failed: z.number(),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const today = new Date().toISOString().slice(0, 10);
+      // Target order: owned first, then unpriced, then the
+      // stalest prices. The final key rotates by day —
+      // without it, chronically unpriced printings (digital-
+      // only promos Scryfall publishes no USD for) would sit
+      // at the front of the queue forever and starve the
+      // rest of the catalog; with it, every linked card
+      // cycles through within days.
+      const dayNumber = Math.floor(Date.now() / 86400000);
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          and(
+            eq(schema.gameCards.game, args.game),
+            isNotNull(schema.gameCards.tcgplayerId),
+          ),
+        )
+        .orderBy(
+          desc(schema.gameCards.ownedQty),
+          sql`${schema.gameCards.priceDate} is not null`,
+          asc(schema.gameCards.priceDate),
+          sql`(${schema.gameCards.id} + ${dayNumber}) % 100000`,
+        )
+        // The Pokémon API's intermittent 502s make its
+        // retries expensive; its pass takes a smaller batch
+        // so a bad-API night still finishes inside budget.
+        .limit(args.game === "pokemon" ? 120 : 250);
+      let updated = 0;
+      let noPrice = 0;
+      let failed = 0;
+      const applyPrice = async (
+        row: (typeof rows)[number],
+        price: number | null,
+        source: "tcgplayer" | "scryfall",
+      ): Promise<"updated" | "noPrice"> => {
+        if (price == null) {
+          // Checked today, nothing published: stamp the
+          // check date on rows that carry no price (the date
+          // is invisible while price is null — the Financial
+          // tab renders no price block) so this row leaves
+          // the front of the queue and the pass advances to
+          // the rest of the catalog instead of re-checking
+          // the same unpriced cohort every call. Priced rows
+          // keep their price's true date untouched.
+          if (row.price == null && row.priceDate !== today) {
+            await db
+              .update(schema.gameCards)
+              .set({ priceDate: today })
+              .where(eq(schema.gameCards.id, row.id));
+          }
+          return "noPrice";
+        }
+        await db
+          .update(schema.gameCards)
+          .set({ price, priceSource: source, priceDate: today })
+          .where(eq(schema.gameCards.id, row.id));
+        const existing = await db
+          .select()
+          .from(schema.gameCardPriceHistory)
+          .where(
+            and(
+              eq(schema.gameCardPriceHistory.gameCardId, row.id),
+              eq(schema.gameCardPriceHistory.date, today),
+              eq(schema.gameCardPriceHistory.source, source),
+            ),
+          );
+        if (existing.length === 0) {
+          await db.insert(schema.gameCardPriceHistory).values({
+            gameCardId: row.id,
+            date: today,
+            label: today,
+            unitValue: price,
+            source,
+          });
+        }
+        return "updated";
+      };
+      if (args.game === "magic") {
+        // Scryfall etiquette: small batches, spaced — never a
+        // free-for-all. Six in flight with a pause between
+        // batches stays well inside their ~10 req/s guidance
+        // and keeps a 250-card pass inside the action budget.
+        for (let i = 0; i < rows.length; i += 6) {
+          const batch = rows.slice(i, i + 6);
+          const results = await Promise.all(
+            batch.map(async (row) => {
+              try {
+                const data = asRec(
+                  await fetchJson(
+                    `https://api.scryfall.com/cards/${encodeURIComponent(row.uid.replace(/^magic:/, ""))}`,
+                  ),
+                );
+                const prices = asRec(data.prices);
+                const price =
+                  asNum(prices.usd) ?? asNum(prices.usd_foil);
+                if (price != null) {
+                  return await applyPrice(row, price, "scryfall");
+                }
+                // Scryfall publishes no USD for this printing
+                // (common for vintage cards with no recent
+                // TCGplayer market data) — but the card HAS a
+                // TCGplayer product, so ask TCGplayer itself:
+                // the standing hierarchy puts its market price
+                // first anyway.
+                if (row.tcgplayerId) {
+                  const points = await fetchJson(
+                    `https://mpapi.tcgplayer.com/v2/product/${encodeURIComponent(row.tcgplayerId)}/pricepoints`,
+                  );
+                  const arr = Array.isArray(points) ? points : [];
+                  const wantFoil =
+                    row.finish === "foil" || row.finish === "etched";
+                  let mp: number | null = null;
+                  for (const pRaw of arr) {
+                    const p = asRec(pRaw);
+                    if (
+                      (p.printingType === "Foil") === wantFoil &&
+                      p.printingType != null
+                    ) {
+                      mp = asNum(p.marketPrice);
+                      break;
+                    }
+                  }
+                  if (mp != null) {
+                    return await applyPrice(row, mp, "tcgplayer");
+                  }
+                }
+                return await applyPrice(row, null, "scryfall");
+              } catch {
+                return "failed" as const;
+              }
+            }),
+          );
+          for (const r of results) {
+            if (r === "updated") updated += 1;
+            else if (r === "noPrice") noPrice += 1;
+            else failed += 1;
+          }
+          await sleepMs(110);
+        }
+      } else {
+        for (let i = 0; i < rows.length; i += 16) {
+          const batch = rows.slice(i, i + 16);
+          const results = await Promise.all(
+            batch.map(async (row) => {
+              try {
+                if (args.game === "pokemon") {
+                  // The single-card endpoint returns the card
+                  // itself (the list endpoint is the one that
+                  // wraps results in `data`).
+                  const rawCard = asRec(
+                    await fetchJson(
+                      `https://api.pokemontcg.io/v2/cards/${encodeURIComponent(row.uid.replace(/^pokemon:/, ""))}?select=tcgplayer`,
+                    ),
+                  );
+                  const data = rawCard.tcgplayer
+                    ? rawCard
+                    : asRec(rawCard.data);
+                  const prices = asRec(asRec(data.tcgplayer).prices);
+                  return await applyPrice(
+                    row,
+                    pokemonFinishPrice(prices, row.finish),
+                    "tcgplayer",
+                  );
+                }
+                const points = await fetchJson(
+                  `https://mpapi.tcgplayer.com/v2/product/${encodeURIComponent(row.tcgplayerId!)}/pricepoints`,
+                );
+                const arr = Array.isArray(points) ? points : [];
+                const wantFoil = /foil/i.test(row.finish ?? "");
+                let price: number | null = null;
+                for (const pRaw of arr) {
+                  const p = asRec(pRaw);
+                  if (
+                    (p.printingType === "Foil") === wantFoil &&
+                    p.printingType != null
+                  ) {
+                    price = asNum(p.marketPrice);
+                    break;
+                  }
+                }
+                return await applyPrice(row, price, "tcgplayer");
+              } catch {
+                return "failed" as const;
+              }
+            }),
+          );
+          for (const r of results) {
+            if (r === "updated") updated += 1;
+            else if (r === "noPrice") noPrice += 1;
+            else failed += 1;
+          }
+        }
+      }
+      if (updated > 0) ctx.invalidateQueries();
+      return { game: args.game, targets: rows.length, updated, noPrice, failed };
+    },
+  }),
+
+  getToppsPricingTargets: defineAction({
+    description:
+      "The owned Topps-family cards awaiting a sold-price lookup (Anthony, Nov 10, 2026 — the Disney Topps pricing feed): owned cards across the seven Topps catalogs, Disney Topps first, stalest price first, each with the identity a sold listing must match exactly (set, name, collector number, parallel/finish) and its current recorded value, source, and date if any. Unowned cards are never targets — Topps pricing is per-owned-card by design.",
+    request: z.object({}),
+    response: z.object({
+      targets: z.array(
+        z.object({
+          id: z.number(),
+          game: z.string(),
+          name: z.string(),
+          printed: z.string(),
+          number: z.string().nullable(),
+          sectionName: z.string(),
+          finish: z.string().nullable(),
+          ownedQty: z.number(),
+          price: z.number().nullable(),
+          priceSource: z.string().nullable(),
+          priceDate: z.string().nullable(),
+        }),
+      ),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(
+          and(
+            inArray(schema.gameCards.game, [...TOPPS_FAMILY_GAMES]),
+            sql`${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty} > 0`,
+          ),
+        );
+      const familyOrder = new Map<string, number>(
+        TOPPS_FAMILY_GAMES.map((g, i) => [g, i]),
+      );
+      const sorted = rows.sort((a, b) => {
+        const fa = familyOrder.get(a.game) ?? 99;
+        const fb = familyOrder.get(b.game) ?? 99;
+        if (fa !== fb) return fa - fb;
+        const da = a.priceDate ?? "";
+        const dbb = b.priceDate ?? "";
+        if (da !== dbb) return da.localeCompare(dbb);
+        return a.id - b.id;
+      });
+      return {
+        targets: sorted.slice(0, 40).map((r) => ({
+          id: r.id,
+          game: r.game,
+          name: r.name,
+          printed: r.printed,
+          number: r.number,
+          sectionName: r.sectionName,
+          finish: r.finish,
+          ownedQty: r.ownedQty + r.ownedSealedQty,
+          price: r.price,
+          priceSource: r.priceSource ?? null,
+          priceDate: r.priceDate ?? null,
+        })),
+      };
+    },
+  }),
+
+  saveToppsSoldPrice: defineAction({
+    description:
+      "Records one Topps-family card's researched market value (Anthony, Nov 10, 2026): a real eBay SOLD price for that exact card (source 'ebay-sold', with the sale's date), a TCGplayer market price where the exact product genuinely exists there ('tcgplayer'), or a COMC live listing price ('comc', labeled a listing price, never a sale). Sets the card's price with its source and the date the value refers to, and appends today's point to its value history so the history accrues from successive lookups. Only Topps-family rows are accepted; asking prices must never be saved as 'ebay-sold'.",
+    request: z.object({
+      id: z.number().int().positive(),
+      price: z.number().positive().max(1000000),
+      source: z.enum(["ebay-sold", "tcgplayer", "comc"]),
+      soldDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable(),
+    }),
+    response: z.object({ ok: z.literal(true), id: z.number() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; id: number }> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.gameCards)
+        .where(eq(schema.gameCards.id, args.id));
+      const row = rows[0];
+      if (
+        !row ||
+        !(TOPPS_FAMILY_GAMES as readonly string[]).includes(row.game)
+      ) {
+        throw new Error(`No Topps-family catalog row with id ${args.id}`);
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const valueDate =
+        args.source === "ebay-sold" && args.soldDate
+          ? args.soldDate
+          : today;
+      await db
+        .update(schema.gameCards)
+        .set({
+          price: args.price,
+          priceSource: args.source,
+          priceDate: valueDate,
+        })
+        .where(eq(schema.gameCards.id, row.id));
+      const existing = await db
+        .select()
+        .from(schema.gameCardPriceHistory)
+        .where(
+          and(
+            eq(schema.gameCardPriceHistory.gameCardId, row.id),
+            eq(schema.gameCardPriceHistory.date, today),
+            eq(schema.gameCardPriceHistory.source, args.source),
+          ),
+        );
+      if (existing.length === 0) {
+        await db.insert(schema.gameCardPriceHistory).values({
+          gameCardId: row.id,
+          date: today,
+          label: today,
+          unitValue: args.price,
+          source: args.source,
+        });
+      } else {
+        await db
+          .update(schema.gameCardPriceHistory)
+          .set({ unitValue: args.price })
+          .where(eq(schema.gameCardPriceHistory.id, existing[0]!.id));
+      }
+      ctx.invalidateQueries();
+      return { ok: true as const, id: row.id };
+    },
+  }),
+
+  refreshToppsPricing: defineAction({
+    description:
+      "Starts the Topps sold-price lookup (Anthony, Nov 10, 2026): spawns an agent task that works the owned Topps-family cards from getToppsPricingTargets (Disney Topps first), finds each exact card's most recent eBay SOLD listing (set + name + number + parallel — never an asking price, never a different printing), falls back to a genuine TCGplayer product or a COMC listing only where the exact card exists there, and saves each verified value via saveToppsSoldPrice. Cards with no findable sale are left unpriced and reported. With no owned Topps cards outstanding, nothing starts.",
+    request: z.object({}),
+    response: z.object({
+      started: z.boolean(),
+      taskId: z.string().nullable(),
+      targets: z.number(),
+    }),
+    async handler(
+      ctx,
+    ): Promise<{
+      started: boolean;
+      taskId: string | null;
+      targets: number;
+    }> {
+      if (agentCapabilityBlocked(ctx)) {
+        return { started: false, taskId: null, targets: 0 };
+      }
+      const db = ctx.db<typeof schema>();
+      const owned = await db
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.gameCards)
+        .where(
+          and(
+            inArray(schema.gameCards.game, [...TOPPS_FAMILY_GAMES]),
+            sql`${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty} > 0`,
+          ),
+        );
+      const targets = owned[0]?.c ?? 0;
+      if (targets === 0) {
+        return { started: false, taskId: null, targets: 0 };
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const result = await ctx.agent.spawnTask(
+        [
+          "Price Anthony's owned Topps-family cards in the lorcana-binder web artifact (Vault X) from real sold data. Disney Topps is the collection this feed exists for; the other Topps families ride the same method.",
+          "1. Call the artifact's getToppsPricingTargets action: it lists the owned Topps cards (Disney Topps first, stalest price first) with each card's exact identity — set (sectionName), name, collector number, and parallel/finish where the catalog states one — plus its currently recorded value, source, and date.",
+          "2. For each target, find the MOST RECENT eBay SOLD listing for THAT EXACT CARD: search eBay's sold/completed listings (the Sold Items filter) for the set name + card name + card number, adding the parallel/finish words when the catalog states a parallel. A sale counts ONLY when the listing is that exact card — same set, same name, same number, same parallel. Never use an asking (active) price, a best-offer listing with no sale, a multi-card lot, a graded copy for a raw card, or a different parallel that merely shares the number. If several exact sales exist, take the most recent one and note its date.",
+          "3. Only when no exact eBay sale exists: check whether TCGplayer carries that exact product (search TCGplayer by set + name + number; most Topps entertainment cards are not there — if the exact product genuinely exists, its market price may be saved with source 'tcgplayer' and soldDate null). Otherwise check COMC for the exact card's live listing price (save source 'comc', soldDate null — the app labels it a listing price, never a sale). If none of the three sources prices the exact card, save NOTHING for it and name it in your summary as no findable sale.",
+          "4. Save each priced card ONCE via the saveToppsSoldPrice action: { id, price, source, soldDate } — soldDate is the eBay sale's date (yyyy-mm-dd) for 'ebay-sold', null otherwise. Do not change ownership, catalog data, or any other card, and do not invent or estimate a value for any card.",
+          "In your summary, report named numbers: how many targets there were, how many you priced from eBay sold, from TCGplayer, and from COMC, and which cards had no findable sale.",
+        ].join("\n"),
+        {
+          expectsAction: "saveToppsSoldPrice",
+          dedupeKey: `topps-sold-pricing-${today}`,
+        },
+      );
+      return {
+        started: result.ok,
+        taskId: result.ok ? result.taskId : null,
+        targets,
+      };
     },
   }),
 

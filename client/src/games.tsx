@@ -32,6 +32,7 @@ useQueryClient,
 type QueryClient,
 } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
+import tcgplayerLogo from "./assets/tcgplayer-logo.png";
 import { fmtMoneyUSD, useT } from "./i18n";
 import { hapticTick } from "./haptics";
 import { SearchScanRow } from "./searchScanRow";
@@ -123,29 +124,29 @@ export function gameIsDataOnly(game: GameKey): boolean {
 
 const GAME_SOURCE_LINES: Record<GameKey, string> = {
   pokemon:
-    "Catalog: Pokémon TCG data (PokemonTCG/pokemon-tcg-data). Prices from TCGplayer where the source publishes them.",
+    "Catalog: Pokémon TCG data (PokemonTCG/pokemon-tcg-data). Cards are being linked set by set to their exact TCGplayer product (by card id — set, number, and finish, never by name alone); a linked card is priced from TCGplayer's market price for its own finish, and linked prices are re-checked daily. A printing the linking pass hasn't reached yet, or one TCGplayer doesn't carry, shows no price rather than borrow another printing's.",
   magic:
-    "Catalog: Scryfall. Prices in USD where Scryfall publishes them.",
+    "Catalog: Scryfall. Printings are being linked set by set to their exact TCGplayer product where TCGplayer carries one (the link is Scryfall's own per-printing product id); prices are Scryfall's published USD for the exact printing, with TCGplayer's own market price where Scryfall publishes none, and linked prices are re-checked daily. A printing not yet linked, or with no exact match, shows no price.",
   starwars:
-    "Catalog: Fantasy Flight's official Star Wars: Unlimited card database. That source publishes no prices, so none are shown.",
+    "Catalog: Fantasy Flight's official Star Wars: Unlimited card database, linked printing-by-printing to TCGplayer through SWU-DB (swu-db.com), the collector database built on Fantasy Flight's own card data. Linked printings are priced from TCGplayer's market price for the exact printing and finish, re-checked daily. Printings TCGplayer doesn't carry — most organized-play promos — stay unlinked and show no price.",
   funko:
     "Catalog: the open-source funko-pop-data dataset, scraped from Pop Price Guide / HobbyDB — the collector-tracked Funko catalog. Known gaps: that dataset was last updated in January 2021, so figures released since are not in it yet, and it carries no figure numbers or prices, so none are shown.",
   lego:
     "Catalog: Rebrickable's official bulk Lego data (sets and themes) — every set with its number, theme, year, piece count, and set image. That source publishes no prices and no per-set minifigure counts; open a set for its researched facts, minifigures, and market data, each labeled with its source.",
   topps:
-    "Catalog: Topps' own official baseball checklists (topps.com) — every Topps-branded baseball product, 2018–2026, card by card: number, player, team, and subset. (Bowman baseball lives in its own tab.) The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official baseball checklists (topps.com) — every Topps-branded baseball product, 2018–2026, card by card: number, player, team, and subset. (Bowman baseball lives in its own tab.) The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   bowman:
-    "Catalog: Topps' own official baseball checklists (topps.com) — every Bowman-branded baseball product, card by card: number, player, team, and subset. Bowman is a Topps brand; it gets its own tab because collectors sort by the name on the card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official baseball checklists (topps.com) — every Bowman-branded baseball product, card by card: number, player, team, and subset. Bowman is a Topps brand; it gets its own tab because collectors sort by the name on the card. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "topps-basketball":
-    "Catalog: Topps' own official basketball checklists (topps.com) — every Topps and Bowman basketball product, card by card: number, player, team, and subset. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official basketball checklists (topps.com) — every Topps and Bowman basketball product, card by card: number, player, team, and subset. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "disney-topps":
-    "Catalog: Topps' own official Disney checklists (topps.com) — Topps Chrome Disney, Disney Sapphire, Disney Neon, Mint Disney, and the rest of Topps' Disney card releases, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official Disney checklists (topps.com) — Topps Chrome Disney, Disney Sapphire, Disney Neon, Mint Disney, and the rest of Topps' Disney card releases, card by card. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "starwars-topps":
-    "Catalog: Topps' own official Star Wars checklists (topps.com) — Masterwork, Chrome, Galaxy, and the rest of Topps' Star Wars card releases, card by card. These are Topps collectible cards, separate from Star Wars Unlimited. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official Star Wars checklists (topps.com) — Masterwork, Chrome, Galaxy, and the rest of Topps' Star Wars card releases, card by card. These are Topps collectible cards, separate from Star Wars Unlimited. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   gpk:
-    "Catalog: Topps' own official Garbage Pail Kids checklists (topps.com) — every Garbage Pail Kids release Topps publishes a checklist for, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official Garbage Pail Kids checklists (topps.com) — every Garbage Pail Kids release Topps publishes a checklist for, card by card. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
   "wwe-topps":
-    "Catalog: Topps' own official WWE checklists (topps.com) — Chrome WWE, Finest WWE, Royalty, and the rest of Topps' WWE card releases, card by card. The checklists publish no prices, so none are shown. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
+    "Catalog: Topps' own official WWE checklists (topps.com) — Chrome WWE, Finest WWE, Royalty, and the rest of Topps' WWE card releases, card by card. The checklists publish no prices; owned cards are priced from eBay sold listings instead — the value shown is the last recorded sale of that exact card, with its sale date. Card fronts are being filled in from collector sources — COMC's photographed fronts today, the Trading Card Database as the existence reference, and Collectr via its API once access is approved — wherever a photo of the exact card exists; cards not found anywhere keep a clean placeholder.",
 };
 
 /** The item noun for a catalog: cards are "printings";
@@ -183,9 +184,49 @@ type DetailCard = {
   finish: string | null;
   imageUrl: string | null;
   price: number | null;
+  /** Exact-printing TCGplayer product ID (Nov 10, 2026 —
+      the three-game linking), null when no exact match
+      exists for this printing. */
+  tcgplayerId: string | null;
+  /** Where the current price came from: "tcgplayer",
+      "scryfall", "ebay-sold", "comc", or null for
+      import-time prices that predate provenance. */
+  priceSource: string | null;
+  /** The date the current price refers to (yyyy-mm-dd):
+      the sale date for an eBay sold value, else the day
+      the price was fetched. */
+  priceDate: string | null;
   ownedQty: number;
   ownedSealedQty: number;
 };
+
+/** The Topps-family games: priced per owned card from eBay
+    sold listings (Nov 10, 2026), not from product links. */
+export function gameIsToppsFamily(game: GameKey): boolean {
+  return (
+    game === "disney-topps" ||
+    game === "starwars-topps" ||
+    game === "gpk" ||
+    game === "wwe-topps" ||
+    game === "topps" ||
+    game === "bowman" ||
+    game === "topps-basketball"
+  );
+}
+
+const PRICE_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+/** "2026-11-10" → "Nov 10, 2026" for price provenance
+    labels; anything unexpected passes through unchanged. */
+function fmtPriceDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const month = PRICE_MONTHS[Number(m[2]) - 1] ?? m[2];
+  return `${month} ${Number(m[3])}, ${m[1]}`;
+}
 
 function fmtPrice(n: number): string {
   return fmtMoneyUSD(n);
@@ -2552,12 +2593,19 @@ function GameCostRow({
        points, one point a day from the daily re-pricing),
        and the Best Offer position.
    Fields a game genuinely doesn't have stay honestly
-   unavailable: Star Wars Unlimited and the Topps catalogs
-   publish no prices, so their Financial tabs say exactly
-   that, and game cards carry no stored marketplace
-   listing, so Best Offer says so instead of inventing a
-   link. Nothing about the data changes — presentation and
-   information parity only. */
+   unavailable: a printing no source prices says exactly
+   that, and a card with no linked marketplace listing
+   says so instead of inventing a link.
+   Nov 10, 2026 — the pricing now flows: the three TCG
+   Universe games are linked to their exact TCGplayer
+   products (tcgplayerId on the card), so their Financial
+   tabs show the market value with its source and date,
+   the accruing value history, working price alerts, and
+   a real Best Offer link wherever a product is linked;
+   the Topps families are priced per owned card from eBay
+   sold listings, shown as "last sold at" with the sale
+   date. Unmatched printings keep the honest unavailable
+   wording — a wrong price is worse than none. */
 function GameCardTabs({
   game,
   card,
@@ -2690,6 +2738,20 @@ function GameCardTabs({
             />
             {card.price != null ? (
               <GameAlertBox gameCardId={card.id} currentPrice={card.price} />
+            ) : card.tcgplayerId ? (
+              <p className="mt-3 max-w-xs text-center text-xs leading-relaxed text-[var(--dim)]">
+                This card is linked to its TCGplayer product, but
+                no market price is tracked for it yet — pricing
+                starts with the next daily re-pricing, and then
+                it can be alerted. Watching still works.
+              </p>
+            ) : gameIsToppsFamily(game) ? (
+              <p className="mt-3 max-w-xs text-center text-xs leading-relaxed text-[var(--dim)]">
+                Topps cards are priced from eBay sold listings
+                for cards you own — no sale has been recorded
+                for this one yet, so it can&rsquo;t be alerted.
+                Watching still works.
+              </p>
             ) : (
               <p className="mt-3 max-w-xs text-center text-xs leading-relaxed text-[var(--dim)]">
                 Pricing isn&rsquo;t tracked for this item yet, so it
@@ -2705,10 +2767,34 @@ function GameCardTabs({
               <dl className="mt-2 space-y-1.5">
                 <div className={`${LEGO_BOX} px-3 py-3`}>
                   <dl className="space-y-1.5">
-                    <LegoFactRow
-                      label="Market value"
-                      value={fmtPrice(card.price)}
-                    />
+                    {card.priceSource === "ebay-sold" ? (
+                      <>
+                        <LegoFactRow
+                          label="Last sold on eBay"
+                          value={fmtPrice(card.price)}
+                        />
+                        <LegoFactRow
+                          label="Sale date"
+                          value={fmtPriceDate(card.priceDate)}
+                        />
+                      </>
+                    ) : card.priceSource === "comc" ? (
+                      <>
+                        <LegoFactRow
+                          label="COMC listing price"
+                          value={fmtPrice(card.price)}
+                        />
+                        <LegoFactRow
+                          label="Checked"
+                          value={fmtPriceDate(card.priceDate)}
+                        />
+                      </>
+                    ) : (
+                      <LegoFactRow
+                        label="Market value"
+                        value={fmtPrice(card.price)}
+                      />
+                    )}
                     {owned > 0 ? (
                       <LegoFactRow
                         label="Your copies are worth"
@@ -2719,14 +2805,24 @@ function GameCardTabs({
                 </div>
               </dl>
               <p className="mt-2 text-[11px] leading-relaxed text-[var(--dim)]">
-                {GAME_SOURCE_LINES[game]}
+                {card.priceSource === "tcgplayer"
+                  ? `TCGplayer market price for this exact printing${card.priceDate ? ` · as of ${fmtPriceDate(card.priceDate)}` : ""}.`
+                  : card.priceSource === "scryfall"
+                    ? `Price published by Scryfall for this exact printing${card.priceDate ? ` · as of ${fmtPriceDate(card.priceDate)}` : ""}.`
+                    : card.priceSource === "ebay-sold"
+                      ? "From a completed eBay sale of this exact card — set, name, number, and parallel all matched. An asking price is never shown as a sale."
+                      : card.priceSource === "comc"
+                        ? "A live COMC listing price for this exact card — an asking price, shown because no completed sale was found."
+                        : GAME_SOURCE_LINES[game]}
               </p>
             </>
           ) : (
             <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-              No market value is tracked for this card — its
-              catalog source publishes no price for this
-              printing, so none is shown.
+              {gameIsToppsFamily(game)
+                ? "No sold price is recorded for this card yet — Topps cards are priced from eBay sold listings for owned cards, and no sale of this exact card has been recorded. Nothing is guessed in its place."
+                : card.tcgplayerId
+                  ? "This card is linked to its TCGplayer product, but TCGplayer publishes no market price for it right now, so none is shown."
+                  : "No market value is tracked for this card — no exact TCGplayer match exists for this printing, so none is shown rather than borrow another printing's price."}
             </p>
           )}
 
@@ -2778,8 +2874,9 @@ function GameCardTabs({
                 ))}
               </ul>
               <p className="mt-1.5 text-[11px] text-[var(--dim)]">
-                Recorded daily from the same re-pricing that
-                keeps the market value current.
+                {card.priceSource === "ebay-sold"
+                  ? "Each point is a recorded eBay sold lookup for this exact card — the history builds as new sales are found."
+                  : "Recorded daily from the same re-pricing that keeps the market value current."}
               </p>
             </div>
           ) : (
@@ -2791,12 +2888,40 @@ function GameCardTabs({
           )}
 
           <LegoSectionTitle title="Best Offer" />
-          <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
-            No marketplace listing is linked to this card, so
-            there&rsquo;s no Best Offer button for it yet — the
-            Lorcana pages carry one because each of their cards
-            stores its TCGplayer listing.
-          </p>
+          {card.tcgplayerId ? (
+            <a
+              href={`https://www.tcgplayer.com/product/${card.tcgplayerId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
+            >
+              <img
+                src={tcgplayerLogo}
+                alt="TCGplayer"
+                className="h-10 w-auto shrink-0 rounded-md"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-[var(--text)]">
+                  Best Offer — TCGplayer
+                </span>
+                <span className="block text-xs text-[var(--dim)]">
+                  {card.price != null
+                    ? `Tracked market ${fmtPrice(card.price)} per copy — `
+                    : ""}
+                  see live offers to buy or sell this card
+                </span>
+              </span>
+              <span className="shrink-0 text-sm font-bold text-[var(--gold-soft)]">
+                View ↗
+              </span>
+            </a>
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              {gameIsToppsFamily(game)
+                ? "No TCGplayer product is linked to this card — most Topps cards aren't sold there. This card's market is eBay sold listings, which is where its value above comes from."
+                : "No marketplace listing is linked to this card, so there's no Best Offer button for it — this printing has no exact TCGplayer match, and a wrong product page would be worse than none."}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -4017,6 +4142,11 @@ function readGameDetailSnapshot(
       finish: typeof c.finish === "string" ? c.finish : null,
       imageUrl: typeof c.imageUrl === "string" ? c.imageUrl : null,
       price: typeof c.price === "number" ? c.price : null,
+      tcgplayerId:
+        typeof c.tcgplayerId === "string" ? c.tcgplayerId : null,
+      priceSource:
+        typeof c.priceSource === "string" ? c.priceSource : null,
+      priceDate: typeof c.priceDate === "string" ? c.priceDate : null,
       ownedQty: typeof c.ownedQty === "number" ? c.ownedQty : 0,
       ownedSealedQty:
         typeof c.ownedSealedQty === "number" ? c.ownedSealedQty : 0,
@@ -4504,6 +4634,9 @@ export function GamePanel({
       finish: card.finish,
       imageUrl: card.imageUrl,
       price: card.price,
+      tcgplayerId: card.tcgplayerId,
+      priceSource: card.priceSource,
+      priceDate: card.priceDate,
       ownedQty: card.ownedQty,
       ownedSealedQty: card.ownedSealedQty,
     });
@@ -4904,6 +5037,9 @@ export function GamePanel({
                         finish: r.finish,
                         imageUrl: r.imageUrl,
                         price: r.price,
+                        tcgplayerId: r.tcgplayerId,
+                        priceSource: r.priceSource,
+                        priceDate: r.priceDate,
                         ownedQty: r.ownedQty,
                         ownedSealedQty: r.ownedSealedQty,
                       })
@@ -5000,9 +5136,12 @@ export function GamePanel({
                       printed: i.printed,
                       sectionName: i.sectionName,
                       rarity: i.rarity,
-                      finish: null,
+                      finish: i.finish,
                       imageUrl: i.imageUrl,
-                      price: null,
+                      price: i.price,
+                      tcgplayerId: i.tcgplayerId,
+                      priceSource: i.priceSource,
+                      priceDate: i.priceDate,
                       ownedQty: i.ownedQty,
                       ownedSealedQty: i.ownedSealedQty,
                     })

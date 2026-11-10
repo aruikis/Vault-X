@@ -2,6 +2,11 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.125.0
+
+- Pokémon, Magic: The Gathering, and Star Wars Unlimited cards are now being linked to their exact TCGplayer product — matched by set, collector number, and finish, never by name alone — a set at a time, running daily until every set is done, so their pricing flows the way Lorcana's does. Linked cards show a market value on their Financial tab with its source and date, gain a value-history point at every daily re-pricing, can carry price alerts that actually trigger, and get the Best Offer button wherever a TCGplayer listing exists. Printings TCGplayer doesn't carry keep saying so plainly instead of borrowing another printing's price, and the linking continues on its own as the catalogs grow.
+- Disney Topps cards you own are now priced from eBay sold listings — the market those cards actually trade on. The Financial tab shows the value as 'Last sold on eBay' with the sale date, and the history builds one point at a time as new sales are recorded. A card with no findable sale says exactly that rather than guessing. The same sold-listing pricing covers owned cards in the other Topps families (Star Wars Topps, Garbage Pail Kids, WWE Topps, and the sports sets) wherever a sale can be matched to the exact card.
+
 ## v1.124.0
 
 - Star Wars Unlimited, Magic: The Gathering, and Pokémon now choose their sets the Lorcana way: picture tiles instead of the plain list — each set shows its artwork on the tile, its name, and a progress bar with how many of its cards you own and the percentage, just like the Lorcana chapters. Tapping a tile opens that set's cards exactly as before, and big catalogs load their tiles in chunks as you ask for more, so the pages stay quick. Search, Only mine, and everything else in those sections work exactly as they did.
