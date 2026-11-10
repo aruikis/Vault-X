@@ -2529,6 +2529,280 @@ function GameCostRow({
   );
 }
 
+/* ---- Card-game detail tabs (Anthony, Nov 10, 2026 — the
+   app-wide standardization on the Lorcana card detail
+   template, his words: "when you hone in on the card on
+   the card itself it needs to look just like Lorcana does.
+   This is app across app wide. Every card when you hone in
+   on it needs to have the same information, same financial
+   tab. The whole works."). Funko figures and Lego sets
+   already carry this family's two-tab shape (their blocks
+   above); the plain card games — Pokémon, Magic: The
+   Gathering, Star Wars Unlimited, and the Topps-family
+   catalogs — showed only a header stepper cluster: no
+   tabs, no facts block, no financial view at all. This
+   block gives them the same structure as the rest:
+     • Card details — the headline stat tiles and facts in
+       the inset-row style, then the "In your collection"
+       block (Where it lives with the copies stepper inside
+       it), and the per-copy paid row.
+     • Financial — watch + price alert in the card pages'
+       placement, the market value with its catalog source
+       named, the recorded value history (graph + recent
+       points, one point a day from the daily re-pricing),
+       and the Best Offer position.
+   Fields a game genuinely doesn't have stay honestly
+   unavailable: Star Wars Unlimited and the Topps catalogs
+   publish no prices, so their Financial tabs say exactly
+   that, and game cards carry no stored marketplace
+   listing, so Best Offer says so instead of inventing a
+   link. Nothing about the data changes — presentation and
+   information parity only. */
+function GameCardTabs({
+  game,
+  card,
+  owned,
+  onStep,
+  savePending,
+}: {
+  game: GameKey;
+  card: DetailCard;
+  owned: number;
+  onStep: (qty: number) => void;
+  savePending: boolean;
+}) {
+  const [tab, setTab] = useState<"details" | "financial">(
+    "details",
+  );
+  const market = useQuery({
+    queryKey: ["gameCardMarket", card.id],
+    queryFn: () => api.getGameCardMarket({ id: card.id }),
+  });
+  const history = market.data?.history ?? [];
+  const values = history.map((p) => p.unitValue);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const span = max - min;
+  return (
+    <div className="mt-5 w-full text-left">
+      <div
+        className="flex rounded-full border border-white/12 bg-black/35 p-1"
+        role="group"
+        aria-label="Card detail views"
+      >
+        {(
+          [
+            { key: "details", label: "Card details" },
+            { key: "financial", label: "Financial" },
+          ] as const
+        ).map((tb) => (
+          <button
+            key={tb.key}
+            type="button"
+            aria-pressed={tab === tb.key}
+            onClick={() => setTab(tb.key)}
+            className={`flex-1 rounded-full px-3.5 py-1.5 text-sm ${
+              tab === tb.key
+                ? "bg-[var(--gold)] font-bold text-black"
+                : "text-[var(--text)]"
+            }`}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "details" ? (
+        <div>
+          <dl className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
+            <LegoStatTile label="Number" value={card.printed || null} />
+            <LegoStatTile label="Rarity" value={card.rarity || null} />
+            <LegoStatTile label="Finish" value={card.finish || null} />
+          </dl>
+
+          <LegoSectionTitle title="Card facts" />
+          <div className={`mt-2 ${LEGO_BOX} px-3 py-3`}>
+            <dl className="space-y-1.5">
+              <LegoFactRow label="Set" value={card.sectionName || null} />
+              <LegoFactRow label="Number" value={card.printed || null} />
+              <LegoFactRow label="Rarity" value={card.rarity || null} />
+              <LegoFactRow label="Finish" value={card.finish || null} />
+            </dl>
+          </div>
+
+          {/* In your collection — the card pages' block:
+              the album heading with the owned count in gold
+              beside it, then the Where it lives bar carrying
+              the copies stepper inside it. */}
+          <div className="mt-5 border-t border-[var(--border)] pt-3">
+            <div className="flex items-baseline justify-between">
+              <h3 className="font-album text-base text-[var(--text)]">
+                In your collection
+              </h3>
+              <span
+                className={`text-sm font-semibold ${
+                  owned > 0 ? "text-[var(--gold-soft)]" : "text-red-400"
+                }`}
+              >
+                {owned > 0
+                  ? `${owned} cop${owned === 1 ? "y" : "ies"}`
+                  : "Don’t own"}
+              </span>
+            </div>
+            <div className="mt-3">
+              <OwnedLocationBar
+                targetKind="game"
+                cardId={null}
+                sealedName={null}
+                comicId={null}
+                gameCardId={card.id}
+                ownedQty={owned}
+                copiesQty={owned}
+                copiesItemName={card.name}
+                barClassName="border border-[var(--border)] bg-[var(--surface)]"
+              >
+                <div className="space-y-1.5">
+                  <LegoStepperRow
+                    label="Copies"
+                    qty={owned}
+                    onStep={onStep}
+                    savePending={savePending}
+                    itemName={card.name}
+                  />
+                </div>
+              </OwnedLocationBar>
+            </div>
+          </div>
+          {owned > 0 ? (
+            <GameCostRow cardId={card.id} price={card.price} />
+          ) : null}
+        </div>
+      ) : (
+        <div>
+          {/* Watch + price alert live on the Financial tab,
+              exactly as on the card, Funko, and Lego pages. */}
+          <div className="mt-4 flex w-full flex-col items-center">
+            <WatchToggleButton
+              targetKind="game"
+              cardId={null}
+              sealedName={null}
+              gameCardId={card.id}
+            />
+            {card.price != null ? (
+              <GameAlertBox gameCardId={card.id} currentPrice={card.price} />
+            ) : (
+              <p className="mt-3 max-w-xs text-center text-xs leading-relaxed text-[var(--dim)]">
+                Pricing isn&rsquo;t tracked for this item yet, so it
+                can&rsquo;t be alerted — no price source (TCGplayer
+                or eBay sold) covers it today. Watching still works.
+              </p>
+            )}
+          </div>
+
+          <LegoSectionTitle title="Market value" />
+          {card.price != null ? (
+            <>
+              <dl className="mt-2 space-y-1.5">
+                <div className={`${LEGO_BOX} px-3 py-3`}>
+                  <dl className="space-y-1.5">
+                    <LegoFactRow
+                      label="Market value"
+                      value={fmtPrice(card.price)}
+                    />
+                    {owned > 0 ? (
+                      <LegoFactRow
+                        label="Your copies are worth"
+                        value={fmtPrice(card.price * owned)}
+                      />
+                    ) : null}
+                  </dl>
+                </div>
+              </dl>
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--dim)]">
+                {GAME_SOURCE_LINES[game]}
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              No market value is tracked for this card — its
+              catalog source publishes no price for this
+              printing, so none is shown.
+            </p>
+          )}
+
+          <LegoSectionTitle title="Value history" />
+          {market.isPending ? (
+            <p className="mt-2 text-sm text-[var(--dim)]">
+              Loading price history…
+            </p>
+          ) : history.length > 0 ? (
+            <div className="mt-2">
+              {history.length > 1 ? (
+                <svg
+                  viewBox="0 0 100 28"
+                  className="h-8 w-full"
+                  role="img"
+                  aria-label={`Value history: ${history.length} recorded points from ${fmtPrice(values[0] ?? 0)} to ${fmtPrice(values[values.length - 1] ?? 0)}`}
+                >
+                  <polyline
+                    fill="none"
+                    stroke="var(--accent)"
+                    strokeWidth="1.6"
+                    points={history
+                      .map((p, i) => {
+                        const x =
+                          history.length > 1
+                            ? (i / (history.length - 1)) * 98 + 1
+                            : 50;
+                        const y =
+                          span > 0
+                            ? 25 - ((p.unitValue - min) / span) * 22
+                            : 14;
+                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                      })
+                      .join(" ")}
+                  />
+                </svg>
+              ) : null}
+              <ul className="mt-1 space-y-0.5">
+                {[...history].reverse().slice(0, 6).map((p) => (
+                  <li
+                    key={`${p.date}-${p.source}`}
+                    className="flex items-center justify-between text-xs text-[var(--dim)]"
+                  >
+                    <span>{p.date}</span>
+                    <span className="font-semibold text-[var(--text)]">
+                      {fmtPrice(p.unitValue)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] text-[var(--dim)]">
+                Recorded daily from the same re-pricing that
+                keeps the market value current.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+              {card.price != null
+                ? "No value points recorded yet — one is recorded each day from the daily re-pricing, so the history builds from here."
+                : "No value history — no price is tracked for this card."}
+            </p>
+          )}
+
+          <LegoSectionTitle title="Best Offer" />
+          <p className="mt-2 text-xs leading-relaxed text-[var(--dim)]">
+            No marketplace listing is linked to this card, so
+            there&rsquo;s no Best Offer button for it yet — the
+            Lorcana pages carry one because each of their cards
+            stores its TCGplayer listing.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CardDetailSheet({
   game,
   card,
@@ -2815,7 +3089,12 @@ function CardDetailSheet({
               the record editor), so no second cost field is
               added there; the Money Tracker reads that record
               for Lego instead. */}
-          {totalOwned > 0 && !isLego ? (
+          {/* Funko keeps its cost row here in the header;
+              the plain card games carry theirs inside the
+              Card details tab (Nov 10, 2026 — the Lorcana
+              template standardization), and Lego in its own
+              record block. */}
+          {totalOwned > 0 && isFunko ? (
             <GameCostRow cardId={card.id} price={card.price} />
           ) : null}
           {game === "funko" && pendingUpc && onLinkUpc ? (
@@ -2836,75 +3115,22 @@ function CardDetailSheet({
               </button>
             </div>
           ) : null}
-          {/* For Lego sets and Funko figures the steppers,
-              watch, and alert live inside their own detail
-              blocks (the Your copy block and the Financial
-              tab), matching the card pages' split — this
-              header cluster is for the other games. */}
+          {/* The plain card games carry the Lorcana card
+              pages' two-tab structure (Nov 10, 2026 — the
+              app-wide detail standardization): Card details
+              with the facts and the In your collection block,
+              Financial with watch/alert, market value, value
+              history, and the Best Offer position. Lego sets
+              and Funko figures carry the same family's shape
+              in their own blocks below. */}
           {!isLego && !isFunko ? (
-          <>
-          <div className="mt-5 flex items-center gap-3">
-            <span className="text-sm font-medium text-[var(--dim)]">
-              {t("game.copiesOwned")}
-            </span>
-            <button
-              type="button"
-              aria-label="Remove one copy"
-              disabled={owned <= 0 || save.isPending}
-              onClick={() => step(owned - 1)}
-              data-dir="minus"
-              className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40"
-            >
-              <span aria-hidden="true" data-dir="minus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold">−</span>
-            </button>
-            <span
-              className={`min-w-8 text-center text-lg font-bold tabular-nums text-[var(--text)] ${
-                owned === 0 ? "zero-owned" : ""
-              }`}
-            >
-              {owned}
-            </span>
-            <button
-              type="button"
-              aria-label="Add one copy"
-              disabled={save.isPending}
-              onClick={() => {
-                hapticTick();
-                step(owned + 1);
-              }}
-              data-dir="plus"
-              className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40"
-            >
-              <span aria-hidden="true" data-dir="plus" className="stepper-ring flex h-8 w-8 items-center justify-center rounded-full text-base font-bold">+</span>
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-[var(--dim)]">
-            {totalOwned === 0
-              ? t("game.missingGhosted")
-              : t("game.inCollection")}
-          </p>
-          {/* Watch + price alert (Anthony, Nov 4, 2026): any
-              cataloged item can be watched; alerts exist only
-              where a price is actually tracked, and the view
-              says so plainly when it isn't. */}
-          <div className="mt-4 flex w-full max-w-sm flex-col items-center">
-            <WatchToggleButton
-              targetKind="game"
-              cardId={null}
-              sealedName={null}
-              gameCardId={card.id}
+            <GameCardTabs
+              game={game}
+              card={card}
+              owned={owned}
+              onStep={step}
+              savePending={save.isPending}
             />
-            {card.price != null ? (
-              <GameAlertBox gameCardId={card.id} currentPrice={card.price} />
-            ) : (
-              <p className="mt-3 max-w-xs text-center text-xs leading-relaxed text-[var(--dim)]">
-                Pricing isn&rsquo;t tracked for this item yet, so it
-                can&rsquo;t be alerted — no price source (TCGplayer
-                or eBay sold) covers it today. Watching still works.
-              </p>
-            )}
-          </div>
-          </>
           ) : null}
           {isFunko ? (
             <FunkoFigureDetail
@@ -3554,6 +3780,209 @@ function SectionArtThumb({
   );
 }
 
+/** The three TCGs whose set chooser presents as Lorcana-style
+    tiles (Anthony, Nov 10, 2026 — "Can you make Star Wars
+    Unlimited when you go into it? Can you make the sets look
+    like Lorcana does instead of this list format?" then "Do
+    the same thing for Magic and also Pokemon"). Every other
+    GamePanel collection keeps its list exactly as it was. */
+const TILE_SET_GAMES = new Set<GameKey>([
+  "pokemon",
+  "magic",
+  "starwars",
+]);
+
+/** Per-game tile tint: the Lorcana chapter tiles tint with
+    each set's own accent color; the game catalogs carry no
+    per-set color, so each of these games tints its tiles
+    with one game color in the same radial-glow treatment. */
+const GAME_TILE_ACCENT: Partial<Record<GameKey, string>> = {
+  pokemon: "#e8b53a",
+  magic: "#c77b3f",
+  starwars: "#8ec9ff",
+};
+
+type GameCatalogSection = ApiResponse<
+  typeof api,
+  "getGameCatalog"
+>["sections"][number];
+
+/** A set tile's artwork, in the Lorcana Quest tiles'
+    full-bleed treatment: the set's official product art when
+    one is sourced (the owned copy getSectionArt serves),
+    else the set's own first printing's artwork (the catalog
+    image every card grid already renders, with the same
+    proxied-copy rescue), else the clean placeholder glyph —
+    never a broken image, never another set's picture.
+    Star Wars Unlimited is the exception (Anthony, Nov 10,
+    2026 — his on-device verdict that the tiles' artwork
+    "needs to be fixed on every one of them"): a cropped
+    card slice is not set artwork, so SWU tiles take ONLY
+    the set's official key art (seeded from Fantasy
+    Flight's own site — see server data/sectionArt.ts) or
+    the clean placeholder. The eight SWU promo/judge/weekly
+    sections have no official set art anywhere and stay on
+    the placeholder honestly. */
+function GameSetTileArt({
+  game,
+  section,
+}: {
+  game: GameKey;
+  section: GameCatalogSection;
+}) {
+  const art = useQuery({
+    queryKey: ["sectionArt", game, section.key],
+    queryFn: () => api.getSectionArt({ game, sectionKey: section.key }),
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+    enabled: section.hasArt,
+  });
+  const [broken, setBroken] = useState(false);
+  const [directFailed, setDirectFailed] = useState(false);
+  const official =
+    section.hasArt && art.data?.ok ? art.data.url : null;
+  if (official && !broken) {
+    return (
+      <img
+        src={official}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        onError={() => setBroken(true)}
+        className="absolute inset-0 h-full w-full object-cover [filter:saturate(1.08)]"
+      />
+    );
+  }
+  // Direct-load fallback for the official art (Nov 10,
+  // 2026): when the server's proxied copy is unavailable
+  // (the fetch failed, or the cached copy failed to load),
+  // the tile loads the publisher's own file directly in
+  // the browser before giving up — his phone loads the
+  // publisher CDNs directly without trouble (the card
+  // grids do it all day), so a proxy hiccup must not blank
+  // a tile whose art genuinely exists. Both failing lands
+  // on the placeholder below, never a broken image.
+  const proxySettled =
+    broken || art.isSuccess || art.isError;
+  if (
+    section.hasArt &&
+    proxySettled &&
+    section.artSourceUrl &&
+    !directFailed
+  ) {
+    return (
+      <img
+        src={section.artSourceUrl}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        onError={() => setDirectFailed(true)}
+        className="absolute inset-0 h-full w-full object-cover [filter:saturate(1.08)]"
+      />
+    );
+  }
+  if (section.artImageUrl && game !== "starwars") {
+    return (
+      <GridArtImg
+        src={section.artImageUrl}
+        proxyId={section.artCardId}
+        placeholderText=""
+        className="absolute inset-0 h-full w-full object-cover object-[50%_22%] [filter:saturate(1.08)]"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="flex items-center justify-center text-[var(--dim)]"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-7 w-7 opacity-50"
+      >
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <circle cx="8.5" cy="10" r="1.4" />
+        <path d="m5 17 4.5-4.5 3 3L17 11l2 2.5" />
+      </svg>
+    </span>
+  );
+}
+
+/** One set tile in the Lorcana chapter style (Anthony,
+    Nov 10, 2026): the same tile unit the SetPicker renders —
+    artwork face with the accent border and gloss, the set
+    name under it, then the progress bar with the owned/total
+    printing counts and the completion percentage. The counts
+    are owned PRINTINGS (ownedDistinct), the Lorcana tiles'
+    own measure — the panel's copy counts would overstate a
+    percentage. Tapping opens the set's card pages exactly
+    as the list row did. */
+function GameSetTile({
+  game,
+  section,
+  onOpen,
+}: {
+  game: GameKey;
+  section: GameCatalogSection;
+  onOpen: (key: string) => void;
+}) {
+  const accent = GAME_TILE_ACCENT[game] ?? "#a9c3ff";
+  const pct =
+    section.total > 0
+      ? Math.round((section.ownedDistinct / section.total) * 100)
+      : 0;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => onOpen(section.key)}
+        aria-label={`Open ${section.name}`}
+        className="relative flex aspect-[21/11] w-full items-center justify-center overflow-hidden rounded-xl border border-[var(--accent)] bg-[var(--surface)] shadow-[inset_0_1px_0_rgba(255,255,255,0.07),inset_0_-10px_18px_rgba(0,0,0,0.35),0_4px_14px_rgba(0,0,0,0.35)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+        style={{
+          backgroundImage: `radial-gradient(130% 150% at 50% -10%, ${accent}38 0%, transparent 58%), linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22))`,
+        }}
+      >
+        <GameSetTileArt game={game} section={section} />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.09] via-transparent to-transparent"
+        />
+      </button>
+      <p className="mt-1.5 truncate text-center text-xs font-medium text-[var(--text)]">
+        {section.name}
+      </p>
+      {section.total > 0 ? (
+        <div className="mt-1 flex items-center gap-1.5 px-0.5">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={section.total}
+            aria-valuenow={section.ownedDistinct}
+            aria-label={`${section.name}: ${section.ownedDistinct} of ${section.total} cards owned, ${pct} percent`}
+            className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--border)]"
+          >
+            <div
+              className="h-full rounded-full bg-[var(--accent)]"
+              style={{ width: `${Math.min(100, pct)}%` }}
+            />
+          </div>
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--dim)]">
+            {section.ownedDistinct}/{section.total}
+          </span>
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--dim)]">
+            {pct}%
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** The stored snapshot of the item page that was open when a
     refresh hit (see GamePanel's restore seed below): enough of
     the item to paint its page on the very first frame of the
@@ -4158,6 +4587,20 @@ export function GamePanel({
     ? allSections.filter((s) => s.owned > 0)
     : allSections;
 
+  // Set-tile progressive reveal (Nov 10, 2026): the tile
+  // choosers can hold hundreds of sets — Magic's catalog
+  // runs to several hundred tiles — so, like the card
+  // grids, tiles paint in chunks from the catalog already
+  // in hand: the first chunk at once, "Show more sets" for
+  // each next chunk, no extra fetch and no full-list paint.
+  // Resets whenever the game or the Only mine filter
+  // changes what the grid holds.
+  const TILE_REVEAL_START = 36;
+  const [tileReveal, setTileReveal] = useState(TILE_REVEAL_START);
+  useEffect(() => {
+    setTileReveal(TILE_REVEAL_START);
+  }, [game, onlyMine]);
+
   return (
     <div className="mt-5 pb-2">
       {embedded ? null : (
@@ -4654,6 +5097,33 @@ export function GamePanel({
               Nothing here is in your collection yet — turn off
               Only mine to browse the full list.
             </p>
+          ) : TILE_SET_GAMES.has(game) ? (
+            <>
+              <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-4 sm:gap-x-3">
+                {shownSections.slice(0, tileReveal).map((s) => (
+                  <GameSetTile
+                    key={s.key}
+                    game={game}
+                    section={s}
+                    onOpen={openSection}
+                  />
+                ))}
+              </div>
+              {tileReveal < shownSections.length ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTileReveal((n) => n + TILE_REVEAL_START)
+                  }
+                  aria-label={`Show more sets — showing ${Math.min(tileReveal, shownSections.length)} of ${shownSections.length}`}
+                  className="mt-4 w-full rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--text)]"
+                >
+                  Show more sets ·{" "}
+                  {Math.min(tileReveal, shownSections.length)} of{" "}
+                  {shownSections.length}
+                </button>
+              ) : null}
+            </>
           ) : (
           <ul className="mt-3 divide-y divide-[var(--border)] rounded-2xl border border-[var(--accent)] bg-[var(--surface)] px-4">
             {shownSections.map((s) => (

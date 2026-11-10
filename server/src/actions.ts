@@ -45,6 +45,7 @@ import {
   QUEST_BOSS_PRICES,
 } from "./data/puzzleCatalog";
 import { catalogExtras } from "./data/catalogExtras";
+import { BUNDLED_SECTION_ART } from "./data/sectionArt";
 import type { CatalogEntry } from "./data/catalogTypes";
 import { ownership } from "./data/ownership";
 import { cardHistory } from "./data/cardHistory";
@@ -2132,6 +2133,7 @@ async function ensureCollectorProfile(ctx: Ctx) {
     layout: null as string | null,
     language: null as string | null,
     gridCols: null as number | null,
+    scrollSide: null as string | null,
     onlyMine: null as number | null,
     tradeMode: null as string | null,
     tradeAvailability: null as string | null,
@@ -2203,6 +2205,10 @@ const collectorIdResponse = z.object({
   /** Set-page grid density (2 or 4 across), or null when never
       picked (the default of 2 applies). */
   gridCols: z.number().nullable(),
+  /** Which edge the floating scroll button rides ("left" |
+      "right"), or null when never picked (the default of
+      right applies — Anthony, Nov 10, 2026). */
+  scrollSide: z.string().nullable(),
   /** "Only mine" list filter (1 = on, 0/null = off, the
       default): long list pages hide entries he owns nothing
       from. One shared choice across every section. */
@@ -8496,6 +8502,48 @@ export const Actions = {
     },
   }),
 
+  syncBundledSectionArt: defineAction({
+    description:
+      "Seeds the bundled official section artwork (data/sectionArt.ts — today the Star Wars: Unlimited sets' official key art from Fantasy Flight's own site) into the section-art table for any section that has no artwork row yet. Existing rows are never overwritten, so art sourced or replaced by the daily section-art run always wins. Idempotent; the client calls it once per open alongside syncCatalogAdditions.",
+    request: z.object({}),
+    response: z.object({
+      inserted: z.number(),
+      keys: z.array(z.string()),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const existing = await db
+        .select({
+          game: schema.gameSectionArt.game,
+          sectionKey: schema.gameSectionArt.sectionKey,
+        })
+        .from(schema.gameSectionArt);
+      const have = new Set(
+        existing.map((r) => `${r.game}:${r.sectionKey}`),
+      );
+      const fresh = BUNDLED_SECTION_ART.filter(
+        (a) => !have.has(`${a.game}:${a.sectionKey}`),
+      );
+      for (const a of fresh) {
+        await db
+          .insert(schema.gameSectionArt)
+          .values({
+            game: a.game,
+            sectionKey: a.sectionKey,
+            imageUrl: a.imageUrl,
+            pageUrl: a.pageUrl,
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+      if (fresh.length > 0) ctx.invalidateQueries();
+      return {
+        inserted: fresh.length,
+        keys: fresh.map((a) => `${a.game}:${a.sectionKey}`),
+      };
+    },
+  }),
+
   getCatalogIndex: defineAction({
     description:
       "Lists every printing currently in the binder catalog (uid, group, family, printed number, name) so the daily catalog audit can diff the catalog against the complete Lorcana card universe and find what is missing.",
@@ -12909,6 +12957,7 @@ export const Actions = {
         shareCollection: (profile.shareCollection ?? 1) > 0,
         usernameChangeUsed: (profile.usernameChangeUsed ?? 0) > 0,
         gridCols: profile.gridCols ?? null,
+        scrollSide: profile.scrollSide ?? null,
         onlyMine: profile.onlyMine ?? null,
         inviteCode: inviteCodeForCollector(profile.collectorCode),
       };
@@ -13166,6 +13215,31 @@ export const Actions = {
         .where(eq(schema.collectorProfile.id, 1));
       ctx.invalidateQueries();
       return { ok: true, cols: args.cols };
+    },
+  }),
+
+  setScrollSidePreference: defineAction({
+    description:
+      "Saves which edge the floating scroll button rides (Anthony, Nov 10, 2026 — the One Smart Button): \"right\" is the default (most people are right-handed) and \"left\" moves the same single button to the left edge for a left-handed thumb. Saved on the collector profile like the theme and grid density; presentation only — no collection data changes.",
+    request: z.object({
+      side: z.enum(["left", "right"]),
+    }),
+    response: z.object({ ok: z.literal(true), side: z.string() }),
+    async handler(
+      ctx,
+      args,
+    ): Promise<{ ok: true; side: string }> {
+      await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      await db
+        .update(schema.collectorProfile)
+        .set({
+          scrollSide: args.side,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.collectorProfile.id, 1));
+      ctx.invalidateQueries();
+      return { ok: true, side: args.side };
     },
   }),
 
@@ -17348,6 +17422,27 @@ export const Actions = {
               2026: the all-Disney-Topps / all-GPK artwork
               completion ask). */
           withArt: z.number(),
+          /** Distinct printings owned in this set (a printing
+              with any copies counts once) — the completion
+              measure the Lorcana chapter tiles use, added for
+              the TCG tile grids (Nov 10, 2026): `owned` above
+              counts copies, which can exceed the set's
+              printing total and would lie as a percentage. */
+          ownedDistinct: z.number(),
+          /** Representative artwork for the set's tile: the
+              image of the set's first printing (collector
+              order) that carries one, plus that printing's
+              row id for the client image proxy. Null when no
+              printing in the set has artwork — the tile then
+              shows the clean placeholder. Read-time only;
+              nothing about the catalog rows changes. */
+          artImageUrl: z.string().nullable(),
+          artCardId: z.number().nullable(),
+          /** The section's sourced official art address
+              itself (game_section_art), when one exists —
+              the tile's direct-load fallback behind the
+              server-proxied copy. */
+          artSourceUrl: z.string().nullable(),
         }),
       ),
       cardsTotal: z.number(),
@@ -17367,16 +17462,51 @@ export const Actions = {
           total: sql<number>`count(*)`,
           withArt: sql<number>`sum(case when ${schema.gameCards.imageUrl} is not null and ${schema.gameCards.imageUrl} <> '' then 1 else 0 end)`,
           owned: sql<number>`coalesce(sum(${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty}), 0)`,
+          ownedDistinct: sql<number>`sum(case when ${schema.gameCards.ownedQty} + ${schema.gameCards.ownedSealedQty} > 0 then 1 else 0 end)`,
         })
         .from(schema.gameCards)
         .where(eq(schema.gameCards.game, args.game))
         .groupBy(schema.gameCards.sectionKey, schema.gameCards.sectionName)
         .orderBy(asc(sql`min(${schema.gameCards.sectionSort})`));
       const artRows = await db
-        .select({ sectionKey: schema.gameSectionArt.sectionKey })
+        .select({
+          sectionKey: schema.gameSectionArt.sectionKey,
+          imageUrl: schema.gameSectionArt.imageUrl,
+        })
         .from(schema.gameSectionArt)
         .where(eq(schema.gameSectionArt.game, args.game));
       const artKeys = new Set(artRows.map((r) => r.sectionKey));
+      // The sourced art's own address, so a set tile can
+      // fall back to loading the publisher's file directly
+      // in the browser when the server's proxied copy is
+      // unavailable (Nov 10, 2026 — the SWU key-art fix:
+      // his phone loads the publisher CDN directly without
+      // trouble, so the tile should not depend solely on
+      // the proxy path).
+      const artSource = new Map(
+        artRows.map((r) => [r.sectionKey, r.imageUrl]),
+      );
+      // Representative tile art per section (Nov 10, 2026):
+      // the first printing in collector order that carries an
+      // image. One correlated pick per section — the grouped
+      // scan above already walks the game's rows, and this
+      // returns at most one row per section.
+      const tileArtRows = await db
+        .select({
+          sectionKey: schema.gameCards.sectionKey,
+          imageUrl: schema.gameCards.imageUrl,
+          id: schema.gameCards.id,
+        })
+        .from(schema.gameCards)
+        .where(
+          sql`${schema.gameCards.game} = ${args.game} and ${schema.gameCards.imageUrl} is not null and ${schema.gameCards.imageUrl} <> '' and ${schema.gameCards.id} = (select x.id from game_cards x where x.game = ${args.game} and x.section_key = ${schema.gameCards.sectionKey} and x.image_url is not null and x.image_url <> '' order by x.slot_sort asc, x.id asc limit 1)`,
+        );
+      const tileArt = new Map(
+        tileArtRows.map((r) => [
+          r.sectionKey,
+          { imageUrl: r.imageUrl, id: r.id },
+        ]),
+      );
       const meta = await readImportMeta(ctx, args.game);
       const cardsTotal = rows.reduce((s, r) => s + r.total, 0);
       return {
@@ -17387,6 +17517,10 @@ export const Actions = {
           owned: r.owned,
           hasArt: artKeys.has(r.key),
           withArt: r.withArt ?? 0,
+          ownedDistinct: r.ownedDistinct ?? 0,
+          artImageUrl: tileArt.get(r.key)?.imageUrl ?? null,
+          artCardId: tileArt.get(r.key)?.id ?? null,
+          artSourceUrl: artSource.get(r.key) ?? null,
         })),
         cardsTotal,
         ownedTotal: rows.reduce((s, r) => s + r.owned, 0),

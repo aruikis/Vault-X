@@ -568,6 +568,13 @@
       "when": 1794277452738,
       "tag": "0081_add_layout_preference",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1794285685924,
+      "tag": "0082_add_scroll_side_preference",
+      "breakpoints": true
     }
   ]
 }

@@ -256,6 +256,13 @@ export const collectorProfile = sqliteTable("collector_profile", {
       never picked, so the default of 2 applies. Presentation
       only, like the theme. */
   gridCols: integer("grid_cols"),
+  /** Which edge the floating scroll button rides (Anthony,
+      Nov 10, 2026 — the One Smart Button pick): "right" (the
+      default — most people are right-handed) or "left", so
+      the button sits under the user's own thumb instead of
+      across the screen; null = never picked, so right
+      applies. Presentation only, like the theme. */
+  scrollSide: text("scroll_side"),
   /** "Only mine" list filter he picked (Anthony, Nov 5, 2026):
       1 = long list pages (>15 displayed entries) hide every
       entry he owns nothing from; 0 or null = never on / off,

@@ -2092,14 +2092,16 @@ span.stepper-ring {
   color: var(--gold-soft);
 }
 
-/* The floating up/down scroll arrows (Anthony, Nov 3, 2026,
-   ~10:16 AM): they showed in the right places but still read
-   as SOLID buttons — he directed them TRANSLUCENT. Faded
-   further at 1:50 PM the same day — "I want them to be there
-   but I want them to hardly be there": the fill is now a
-   barely-there see-through mix of the surface color at 8%
-   over a strong backdrop blur, so the arrows are a faint
-   ghost presence, still fully tappable at their full size. */
+/* The floating scroll button's frost (Anthony, Nov 3, 2026,
+   ~10:16 AM, for the original up/down arrows): they showed
+   in the right places but still read as SOLID buttons — he
+   directed them TRANSLUCENT. Faded further at 1:50 PM the
+   same day — "I want them to be there but I want them to
+   hardly be there": the fill is a barely-there see-through
+   mix of the surface color at 8% over a strong backdrop
+   blur. The Nov 10, 2026 One Smart Button (his mockup
+   Option 2 pick) keeps this exact frost for its small
+   visible circle; the class name is unchanged. */
 .scroll-arrow-btn {
   background: color-mix(in srgb, var(--surface) 8%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);

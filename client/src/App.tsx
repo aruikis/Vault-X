@@ -82,6 +82,12 @@ GridColsToggle,
 useGridCols,
 } from "./gridCols";
 import {
+adoptServerScrollSide,
+setScrollSide,
+useScrollSide,
+type ScrollSide,
+} from "./scrollButton";
+import {
 ONLY_MINE_THRESHOLD,
 OnlyMineToggle,
 useOnlyMine,
@@ -13647,6 +13653,19 @@ const SETTINGS_JUMPS: {
     ),
   },
   {
+    id: "settings-scroll",
+    label: "Scroll button",
+    // A chevron in a circle in the same 1.8-stroke line
+    // style — the One Smart Button's mark (Nov 10, 2026,
+    // with its Settings side picker).
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
+      </>
+    ),
+  },
+  {
     id: "settings-language",
     label: "Language",
     // Globe in the same 1.8-stroke line style as every other
@@ -15333,6 +15352,10 @@ function SettingsPanel({
 }) {
   const t = useT();
   const queryClient = useQueryClient();
+  // Scroll button edge (Nov 10, 2026): the One Smart
+  // Button's side, read from its shared store — the picker
+  // below writes the same store (and the profile).
+  const scrollSide = useScrollSide();
   const [check, setCheck] = useState<UpdateCheckState>({ status: "idle" });
   // The version the server is actually serving, as last
   // probed by the update check — the go-live stamp under
@@ -16011,6 +16034,45 @@ function SettingsPanel({
           <p className="mt-2 text-xs leading-snug text-[var(--dim)]">
             {LAYOUTS.find((l) => l.id === layout)?.blurb ?? ""}
           </p>
+        </div>
+      </section>
+
+      {/* Scroll button — which edge the One Smart Button
+          rides (Anthony, Nov 10, 2026 — his Option 2 pick,
+          with his original handedness requirement: a user
+          picks the side their thumb is on so they're not
+          reaching). Right is the default (his call: most
+          people are right-handed); left moves the same
+          single button to the left edge. The picker is the
+          SAME shared themed dropdown as the Theme and
+          Layout pickers above (his absolute rule), and the
+          choice saves to the profile like theirs. */}
+      <section
+        id="settings-scroll"
+        aria-label="Scroll button side"
+        className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+      >
+        <h2 className="flex items-center gap-2 font-album text-lg text-[var(--text)]">
+          <SettingsSectionIcon id="settings-scroll" />
+          Scroll button
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--dim)]">
+          On long pages, one small button floats at the edge
+          of the screen once you scroll — tap it to jump to
+          the bottom, and near the bottom it flips to take
+          you back to the top. Put it on the side your thumb
+          is on so you never reach across the screen for it.
+        </p>
+        <div className="mt-3">
+          <VxSelect
+            value={scrollSide}
+            onChange={(v) => setScrollSide(v as ScrollSide)}
+            options={[
+              { value: "right", label: "Right side (Default)" },
+              { value: "left", label: "Left side" },
+            ]}
+            ariaLabel="Choose which side the scroll button sits on"
+          />
         </div>
       </section>
 
@@ -34660,18 +34722,41 @@ function findPageScroller(): HTMLElement | null {
   return root ?? se ?? null;
 }
 
-/** Floating scroll arrows (Anthony, Nov 3, 2026): on any long
-    view — his example was the Hyperia City set view — a pair of
-    ghost (translucent, frosted) arrows floats at the right
-    edge above the bottom menu: the down arrow rides to the
-    very bottom of the page, the up arrow back to the top, so
-    nobody has to swipe the whole list. They only appear when
-    the page is actually long, each arrow only when it has
-    somewhere to go. Settings gets them too — it's one of the
-    longest pages in the app. Rebuilt the same night to measure
-    the real scrolling element (see findPageScroller) after
-    the window-measuring version never appeared on his phone. */
-function ScrollArrows() {
+/** The One Smart Button (Anthony's pick, Nov 10, 2026 —
+    mockup Option 2, "One Smart Button", chosen on the voice
+    call after he reviewed the live mockups: "Let's do option
+    number two. I like the fact it disappears."). It replaces
+    the Nov 3 floating scroll arrows ENTIRELY — the old
+    translucent up/down circle pairs that floated on BOTH
+    bottom edges are gone everywhere. What the one button
+    does:
+      • ONE small translucent button on ONE edge — the RIGHT
+        by default (Anthony: most people are right-handed),
+        positioned above the dock for the thumb. Settings
+        moves the same button to the left edge for a
+        left-handed user (the scrollButton store + profile
+        preference); nothing else about it changes.
+      • It DISAPPEARS at the top of a page — the disappearing
+        act is the feature he explicitly liked — and appears
+        only once the user has scrolled down a bit.
+      • It shows only the direction needed: a down chevron
+        while more of the page lies below (tap = jump to the
+        bottom, with the old follow mode for chunked grids),
+        flipping to an up chevron near the bottom (tap =
+        jump back to the top).
+      • The visible circle is small, but the touch target
+        stays comfortably large (48px) around it.
+      • Standing rules kept: the translucent "hardly there"
+        frost (.scroll-arrow-btn in theme.css); the button
+        hides completely while a cash/trade checkout bar is
+        visible (the Nov 9 fix) and returns when it clears;
+        it only appears on genuinely long pages at all.
+    The measurement machinery is the Nov 3 rebuild's: it
+    measures the real scrolling element (see
+    findPageScroller) after the first window-measuring
+    version never appeared on his phone. */
+function SmartScrollButton() {
+  const side = useScrollSide();
   const [pos, setPos] = useState({ y: 0, max: 0, view: 0 });
   /** Whether a checkout bar is on screen (Anthony, Nov 9,
       2026): the floating arrows used to sit ON TOP of the
@@ -34754,129 +34839,106 @@ function ScrollArrows() {
   }, []);
   if (barUp) return null;
   if (pos.max < Math.max(240, pos.view * 0.5)) return null;
-  const showUp = pos.y > 240;
-  const showDown = pos.y < pos.max - 240;
-  if (!showUp && !showDown) return null;
-  // Translucent and toned down (Anthony, Nov 3, 2026): the
-  // arrows are a quiet see-through frost, not solid buttons —
-  // and a set floats on BOTH edges so either thumb can reach
-  // them. Both stacks run the same handlers below. The fill
-  // itself is the .scroll-arrow-btn style in theme.css
-  // (surface color at 8% over a strong blur) — the earlier
-  // tints still read as solid buttons on his phone, so the
-  // mix is barely there now and the glyph sits at 30%
-  // (Anthony, Nov 3, 2026, 1:50 PM: "hardly be there").
-  const btn =
-    "scroll-arrow-btn flex h-11 w-11 items-center justify-center rounded-full border border-white/5 text-[var(--text)]/30 shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition active:scale-95";
+  // The disappearing act (Anthony's stated reason for the
+  // pick): at the top of the page there is no button at
+  // all — it appears only once the user has scrolled a
+  // bit, and it is gone again the moment they're back at
+  // the top.
+  if (pos.y <= 240) return null;
+  // One direction only — the one that's needed: down while
+  // more of the page lies below, flipped to up once the
+  // bottom is (nearly) reached.
+  const nearBottom = pos.y >= pos.max - 240;
   const goTop = () => {
     hapticTick();
     stopFollow();
     findPageScroller()?.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const stack = (side: "left" | "right") => (
-    <div
-      className={`fixed ${side}-3 z-40 flex flex-col gap-2`}
-      style={{ bottom: "calc(5.4rem + env(safe-area-inset-bottom, 0px))" }}
-    >
-      {showUp ? (
-        <button
-          type="button"
-          aria-label="Scroll to the top of the page"
-          onClick={goTop}
-          className={btn}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-5 w-5"
-            aria-hidden="true"
-          >
-            <path d="M12 20V4" />
-            <path d="m5 11 7-7 7 7" />
-          </svg>
-        </button>
-      ) : null}
-      {showDown ? (
-        <button
-          type="button"
-          aria-label="Scroll to the bottom of the page"
-          onClick={() => {
-            hapticTick();
-            const el = findPageScroller();
-            if (!el) return;
-            stopFollow();
-            el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-            // Chunked pages (the binder grid loads pockets
-            // in batches as you scroll) keep GROWING while
-            // the jump travels — a single scrollTo lands at
-            // the bottom of only the loaded part, mid-list.
-            // Follow mode re-aims at the bottom each time
-            // the page grows, until the height settles (all
-            // chunks in) or the user takes over scrolling.
-            let lastHeight = el.scrollHeight;
-            let stableTicks = 0;
-            const startedAt = Date.now();
-            const cancel = () => stopFollow();
-            el.addEventListener("wheel", cancel, {
-              once: true,
-              passive: true,
-            });
-            el.addEventListener("touchstart", cancel, {
-              once: true,
-              passive: true,
-            });
-            followRef.current = window.setInterval(() => {
-              const s = findPageScroller();
-              if (!s) {
-                stopFollow();
-                return;
-              }
-              if (s.scrollHeight !== lastHeight) {
-                lastHeight = s.scrollHeight;
-                stableTicks = 0;
-                s.scrollTo({
-                  top: s.scrollHeight,
-                  behavior: "smooth",
-                });
-              } else {
-                stableTicks += 1;
-              }
-              if (
-                stableTicks >= 6 ||
-                Date.now() - startedAt > 20000
-              ) {
-                stopFollow();
-              }
-            }, 250);
-          }}
-          className={btn}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-5 w-5"
-            aria-hidden="true"
-          >
-            <path d="M12 4v16" />
-            <path d="m19 13-7 7-7-7" />
-          </svg>
-        </button>
-      ) : null}
-    </div>
-  );
+  const goBottom = () => {
+    hapticTick();
+    const el = findPageScroller();
+    if (!el) return;
+    stopFollow();
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    // Chunked pages (the binder grid loads pockets in
+    // batches as you scroll) keep GROWING while the jump
+    // travels — a single scrollTo lands at the bottom of
+    // only the loaded part, mid-list. Follow mode re-aims
+    // at the bottom each time the page grows, until the
+    // height settles (all chunks in) or the user takes
+    // over scrolling. (Carried over from the old arrows
+    // unchanged.)
+    let lastHeight = el.scrollHeight;
+    let stableTicks = 0;
+    const startedAt = Date.now();
+    const cancel = () => stopFollow();
+    el.addEventListener("wheel", cancel, {
+      once: true,
+      passive: true,
+    });
+    el.addEventListener("touchstart", cancel, {
+      once: true,
+      passive: true,
+    });
+    followRef.current = window.setInterval(() => {
+      const s = findPageScroller();
+      if (!s) {
+        stopFollow();
+        return;
+      }
+      if (s.scrollHeight !== lastHeight) {
+        lastHeight = s.scrollHeight;
+        stableTicks = 0;
+        s.scrollTo({
+          top: s.scrollHeight,
+          behavior: "smooth",
+        });
+      } else {
+        stableTicks += 1;
+      }
+      if (stableTicks >= 6 || Date.now() - startedAt > 20000) {
+        stopFollow();
+      }
+    }, 250);
+  };
   return (
-    <>
-      {stack("left")}
-      {stack("right")}
-    </>
+    <button
+      type="button"
+      aria-label={
+        nearBottom
+          ? "Scroll to the top of the page"
+          : "Scroll to the bottom of the page"
+      }
+      onClick={nearBottom ? goTop : goBottom}
+      className={`fixed ${side === "left" ? "left-1" : "right-1"} z-40 flex h-12 w-12 items-center justify-center rounded-full transition active:scale-95`}
+      style={{
+        bottom: "calc(5.4rem + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      {/* The visible button is the small frosted circle;
+          the 48px button around it is the touch target —
+          small to look at, comfortable to hit. The frost
+          itself is the .scroll-arrow-btn style in theme.css
+          (surface color at 8% over a strong blur) — the
+          "hardly there" mix Anthony directed Nov 3, 2026. */}
+      <span
+        aria-hidden="true"
+        className="scroll-arrow-btn flex h-9 w-9 items-center justify-center rounded-full border border-white/5 text-[var(--text)]/40 shadow-[0_4px_14px_rgba(0,0,0,0.12)]"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`h-5 w-5 transition-transform duration-300 ${nearBottom ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </span>
+    </button>
   );
 }
 
@@ -35188,6 +35250,12 @@ export function App() {
   useEffect(() => {
     adoptServerGridCols(profileTheme.data?.gridCols);
   }, [profileTheme.data]);
+  // Scroll button edge (Nov 10, 2026): the profile's saved
+  // side, arriving on the same fetch, wins over the device
+  // mirror — the grid-density pattern.
+  useEffect(() => {
+    adoptServerScrollSide(profileTheme.data?.scrollSide);
+  }, [profileTheme.data]);
   // "Only mine" is per-section now (Anthony, Nov 5, 2026):
   // each section hydrates its own saved position from the
   // reorder-prefs store inside onlyMine.tsx — no root-level
@@ -35231,6 +35299,7 @@ export function App() {
     },
   });
   const seedStarted = useRef(false);
+  const catalogSyncStarted = useRef(false);
   // Bottom-nav views: Home (placeholder), Binder, Portfolio (the Card
   // Performance section), and Social (Forums + Friends areas).
   // Search is a nav action that opens the floating search overlay.
@@ -36120,6 +36189,52 @@ export function App() {
       })();
     }
   }, [binder.data, seed]);
+
+  // Bundled catalog additions land on open (Nov 10, 2026 fix):
+  // seedBinder's additions path only ever ran on a genuinely
+  // empty binder or inside the daily catalog audit's agent
+  // task, so hand-authored catalog entries added by an update —
+  // the oversized Quest boss cards are the case that bit — could
+  // sit in the shipped catalog for a day or more without ever
+  // reaching a populated binder, and the set pages simply had
+  // nothing to show. Once per open, ask the server to insert any
+  // bundled entry that has no row yet (it never touches existing
+  // rows, ownership, or prices) and refresh the binder when it
+  // added something. A failure here is silent: the daily audit
+  // remains the backstop.
+  useEffect(() => {
+    if (binder.data == null || catalogSyncStarted.current) return;
+    catalogSyncStarted.current = true;
+    void (async () => {
+      try {
+        const res = await api.syncCatalogAdditions({});
+        if (res.inserted > 0) {
+          void queryClient.invalidateQueries({ queryKey: ["binder"] });
+          void queryClient.invalidateQueries({ queryKey: ["section"] });
+          void queryClient.invalidateQueries({ queryKey: ["finance"] });
+        }
+      } catch {
+        // Backstop: the daily catalog audit runs the same sync.
+      }
+      try {
+        // Bundled official section art (Nov 10, 2026): the
+        // Star Wars: Unlimited sets' key art ships with the
+        // app and seeds the same way — on open, never
+        // overwriting art already sourced.
+        const art = await api.syncBundledSectionArt({});
+        if (art.inserted > 0) {
+          void queryClient.invalidateQueries({
+            queryKey: ["gameCatalog"],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["sectionArt"],
+          });
+        }
+      } catch {
+        // Sections simply keep the art they already have.
+      }
+    })();
+  }, [binder.data]);
 
   useEffect(() => {
     if (groups.length === 0) return;
@@ -38007,7 +38122,7 @@ export function App() {
         </div>
       ) : null}
 
-      <ScrollArrows />
+      <SmartScrollButton />
 
       {/* Fixed bottom navigation — Home / Search / Social /
           Portfolio / Settings, and ONLY those five, in that
