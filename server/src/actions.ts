@@ -684,6 +684,14 @@ function compositeForRow(
     art, shipped as a webp in the client's puzzle assets. */
 const BUNDLED_ART_BY_UID: ReadonlyMap<string, string> = new Map([
   ["puzzle:14:full", "hyperia-full"],
+  // Great Hunny Rescue Prize Pack Illustrations (Anthony,
+  // Nov 10, 2026): cleaned images from his own photos of the
+  // physical cards (see the matching keys in the client's
+  // BUNDLED_ART_IMAGES). The catalog entries keep image: null —
+  // this bundled art is their picture on every surface, and no
+  // ownership is touched: the rows' counts stay exactly as-is.
+  ["puzzle:Q3:piglet", "hunny-piglet"],
+  ["puzzle:Q3:vine", "hunny-vine"],
 ]);
 
 function bundledArtForRow(row: { uid: string }): string | null {

@@ -2,6 +2,11 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.119.0
+
+- New: both Great Hunny Rescue Prize Pack Illustration cards now show their real artwork in the pocket and on the card's page — The Search for Piglet (art by Alex Accorsi: Tigger watching Piglet float up on a balloon toward Pooh) and The Heart of the Vine (art by Sam Burley: the wizard facing the glowing Vine).
+- About the pictures: no scan of either card exists anywhere, so these are cleaned-up images made from photos of your own physical copies, attached exactly as they are — a little sleeve glare still shows on them (across the top of the Piglet card, one bright spot on the Vine card). They are your actual cards, not stock pictures. Your counts, the Encounter Cards, and the 37 Quest cards are all untouched.
+
 ## v1.118.0
 
 - Fixed: Quest 3 — The Great Hunny Rescue did not match the physical cards. The Quest's first six cards are double-sided: Entrance Tunnel is the FRONT of card 1/37, and Mickey Mouse - Rescued from the Entrance — the card the list showed at #1 — is printed on its back. The app only carried the backs, so the Quest looked wrong from the first card.

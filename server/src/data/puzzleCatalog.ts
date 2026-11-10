@@ -418,10 +418,13 @@ const WINTERSPELL_PUZZLE_ENTRIES: CatalogEntry[] = WINTERSPELL_PUZZLE_TCG.map(
 // section inside the Great Hunny Rescue Quest page): single
 // pockets with their own steppers, ghosted when missing, NOT
 // regular cards and NOT counted in any set's pocket totals or
-// master-set counts. No artwork is wired: no verified scan
-// source exists for either piece, so both render the clean
-// imageless pocket like the unscanned lore cards rather than
-// borrow a wrong picture. Anthony opened both packs and owns
+// master-set counts. ARTWORK (updated Nov 10, 2026): no scan
+// source exists for either piece, so the entries keep
+// image: null here — their picture is the bundled art wired by
+// uid in actions.ts (BUNDLED_ART_BY_UID): cleaned,
+// perspective-corrected images made from Anthony's own photos
+// of his physical cards, attached as-is (sleeve glare and all,
+// no retouching). Anthony opened both packs and owns
 // both cards, but ownership is NOT pre-set — the entries start
 // unowned and he adds his copies with the steppers himself.
 const HUNNY_PRIZE_ENTRIES: CatalogEntry[] = [

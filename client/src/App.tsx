@@ -145,6 +145,8 @@ type ThemeId,
 import tcgplayerLogo from "./assets/tcgplayer-logo.png";
 import vaultXRingArtwork from "./assets/vault-x-ring-artwork.webp";
 import hyperiaFullPuzzleArt from "./assets/puzzle/hyperia-full-puzzle-art.webp";
+import hunnyIllustrationPiglet from "./assets/puzzle/hunny-illustration-piglet.webp";
+import hunnyIllustrationVine from "./assets/puzzle/hunny-illustration-vine.webp";
 import setLogo1 from "./assets/set-logos/set-1.webp";
 import setLogo2 from "./assets/set-logos/set-2.webp";
 import setLogo3 from "./assets/set-logos/set-3.webp";
@@ -581,6 +583,15 @@ function hasFoil(finishes: Record<string, number>): boolean {
     black). The photo itself is untouched. */
 const BUNDLED_ART_IMAGES: Record<string, string> = {
   "hyperia-full": hyperiaFullPuzzleArt,
+  // Great Hunny Rescue Prize Pack Illustrations (Nov 10, 2026):
+  // cleaned, perspective-corrected images from Anthony's own
+  // photos of his physical cards — no scan source exists for
+  // either piece, so his own copies ARE the artwork. Attached
+  // as-is: the Piglet photo keeps its sleeve glare across the
+  // top and down the left, the Vine photo its one glare
+  // hotspot left-center — no retouching, per his direction.
+  "hunny-piglet": hunnyIllustrationPiglet,
+  "hunny-vine": hunnyIllustrationVine,
 };
 
 function bundledArtSrc(key: string | null | undefined): string | null {
