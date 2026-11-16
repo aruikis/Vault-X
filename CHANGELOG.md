@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.129.0
+
+- New: shared Vault X mail. The Inbox gains a "+ New message" composer: pick any collector on the registry, write a subject and a plain message, and it is delivered through the shared mailbox (Supabase `vx_documents`) into THEIR Vault X Inbox on their own device — free-form mail used to exist only inside a single install. Messages can be flagged as a NOTICE, which arrives under a red ⚠ warning banner in the Inbox list and at the top of the message so it cannot be missed. Deck-list sharing by mail works exactly as before. This release is the mail feature carried onto the scrubbed v1.127.0 base: a fresh install still starts completely empty, and shared mail is the only addition.
+
 ## v1.127.0
 
 - Privacy fix for shared copies: Vault X installed from the shared link now starts completely empty. Shared copies used to come pre-loaded with a snapshot of the original owner's collection (about 9,500 items from November 1) — that data has been removed from the shared source, along with the owner's finance history and personal deck list. A fresh install now contains nothing from anyone's collection: you register, and you build your own collection from scratch. The only way to see another collector's collection is to friend them inside the app, exactly as before. The original owner's own app and collection are unchanged.

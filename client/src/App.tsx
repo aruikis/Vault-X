@@ -7082,10 +7082,12 @@ function InboxList({
   onOpenOrder,
   onOpenTicket,
   onOpenMail,
+  onCompose,
 }: {
   onOpenOrder: (kind: "cash" | "trade", refId: number) => void;
   onOpenTicket: (refId: number) => void;
   onOpenMail: (refId: number) => void;
+  onCompose: () => void;
 }) {
   const queryClient = useQueryClient();
   const inbox = useQuery({
@@ -7110,7 +7112,11 @@ function InboxList({
   });
   const statusLabel = (item: InboxItemView) =>
     item.kind === "mail"
-      ? "Shared deck"
+      ? item.notice
+        ? "Notice"
+        : item.status === "shared"
+          ? "Shared deck"
+          : "Message"
       : item.kind === "ticket"
         ? item.status === "in_progress"
           ? "In Progress"
@@ -7126,14 +7132,31 @@ function InboxList({
               : "Withdrawn";
   return (
     <section aria-label="Your Inbox" className="mt-4">
+      {/* Compose (Anthony, Nov 16, 2026): free-form mail to any
+          collector on the registry, delivered through the
+          shared mailbox to their own install's Inbox. */}
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            hapticTick();
+            onCompose();
+          }}
+          aria-label="Write a new message"
+          className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold text-[var(--text)]"
+        >
+          + New message
+        </button>
+      </div>
       {inbox.isLoading ? (
         <p className="text-sm text-[var(--dim)]">Loading your Inbox…</p>
       ) : items.length === 0 ? (
         <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-relaxed text-[var(--dim)]">
           Nothing here yet. When a purchase order or trade offer
-          involves you, when a collector shares a deck list with
-          you — and, for the owner, when a change-request ticket
-          comes in — it lands in this Inbox.
+          involves you, when a collector shares a deck list or
+          sends you a message — and, for the owner, when a
+          change-request ticket comes in — it lands in this
+          Inbox.
         </p>
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4">
@@ -7163,11 +7186,22 @@ function InboxList({
                     }`}
                   />
                   <span className="min-w-0 flex-1">
+                    {/* NOTICE banner (Anthony, Nov 16, 2026):
+                        a flagged message leads with a red
+                        warning strip so it cannot be missed. */}
+                    {item.notice ? (
+                      <span className="mb-1.5 flex items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2 py-1 text-[11px] font-black tracking-[0.06em] text-red-300">
+                        <span aria-hidden="true">⚠</span> NOTICE —
+                        please read
+                      </span>
+                    ) : null}
                     <span className="flex flex-wrap items-baseline gap-x-2">
                       <span
-                        className={`text-sm text-[var(--text)] ${
-                          unread ? "font-bold" : "font-semibold"
-                        }`}
+                        className={`text-sm ${
+                          item.notice
+                            ? "text-red-200"
+                            : "text-[var(--text)]"
+                        } ${unread ? "font-bold" : "font-semibold"}`}
                       >
                         {item.subject}
                       </span>
@@ -7685,6 +7719,214 @@ function WelcomeFlow({
     exactly as it was mailed. Opening it stamps it read on
     the server (the Inbox NEW badge clears). A trash beside
     the close button removes it from the reader's Inbox. */
+/** The free-form mail composer (Anthony, Nov 16, 2026):
+    write a plain message to any collector on the registry;
+    it is delivered through the shared mailbox into that
+    collector's own Inbox. Opened from the Inbox's New
+    message button as its own page above the Inbox. The
+    NOTICE switch flags the message for the red warning
+    banner treatment in the recipient's Inbox and message
+    view. */
+function MailComposeView({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const registryQ = useQuery({
+    queryKey: ["registryMembers"],
+    queryFn: () => api.getRegistryMembers({}),
+  });
+  const members = (registryQ.data?.members ?? []).filter(
+    (m) => m.collectorId !== registryQ.data?.myCollectorCode,
+  );
+  const [toCode, setToCode] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [notice, setNotice] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(
+    null,
+  );
+  const sendMut = useMutation({
+    mutationFn: () =>
+      api.sendMailMessage({
+        toCode,
+        subject: subject.trim(),
+        body: body.trim(),
+        notice,
+      }),
+    onSuccess: (res) => {
+      if (res.ok) {
+        const who =
+          members.find((m) => m.collectorId === toCode)?.username ??
+          "them";
+        setNote({
+          ok: true,
+          text: `Sent ✓ — your message is on its way to @${who}'s Inbox.`,
+        });
+        void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      } else {
+        setNote({
+          ok: false,
+          text: res.error ?? "That didn't send — try again.",
+        });
+      }
+    },
+    onError: () =>
+      setNote({ ok: false, text: "That didn't send — try again." }),
+  });
+  const canSend =
+    toCode !== "" &&
+    subject.trim() !== "" &&
+    body.trim() !== "" &&
+    !sendMut.isPending &&
+    !(note?.ok ?? false);
+  return (
+    <div
+      className="app-shell fixed inset-0 z-[96] overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Write a new message"
+    >
+      <div className="mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-album text-xl text-[var(--text)]">
+            New message
+          </h2>
+          <button
+            type="button"
+            onClick={() => {
+              hapticTick();
+              onClose();
+            }}
+            aria-label="Close the composer"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-lg text-[var(--text)]"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="mt-4 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div>
+            <label
+              htmlFor="vx-compose-to"
+              className="text-xs font-bold tracking-[0.06em] text-[var(--dim)]"
+            >
+              TO
+            </label>
+            <select
+              id="vx-compose-to"
+              value={toCode}
+              onChange={(e) => setToCode(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-sm text-[var(--text)]"
+            >
+              <option value="">
+                {registryQ.isLoading
+                  ? "Loading collectors…"
+                  : "Pick a collector…"}
+              </option>
+              {members.map((m) => (
+                <option key={m.collectorId} value={m.collectorId}>
+                  @{m.username}
+                </option>
+              ))}
+            </select>
+            {registryQ.data && !registryQ.data.reachable ? (
+              <p className="mt-1 text-xs text-red-300">
+                The collector list couldn&rsquo;t be reached — sending
+                is unavailable until it loads.
+              </p>
+            ) : null}
+          </div>
+          <div>
+            <label
+              htmlFor="vx-compose-subject"
+              className="text-xs font-bold tracking-[0.06em] text-[var(--dim)]"
+            >
+              SUBJECT
+            </label>
+            <input
+              id="vx-compose-subject"
+              type="text"
+              value={subject}
+              maxLength={200}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="What is this about?"
+              className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-sm text-[var(--text)]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="vx-compose-body"
+              className="text-xs font-bold tracking-[0.06em] text-[var(--dim)]"
+            >
+              MESSAGE
+            </label>
+            <textarea
+              id="vx-compose-body"
+              value={body}
+              rows={9}
+              maxLength={8000}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Write your message…"
+              className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-sm leading-relaxed text-[var(--text)]"
+            />
+          </div>
+          <label className="flex items-start gap-2.5 text-sm text-[var(--text)]">
+            <input
+              type="checkbox"
+              checked={notice}
+              onChange={(e) => setNotice(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span>
+              Mark as a{" "}
+              <span className="font-black text-red-300">
+                ⚠ NOTICE
+              </span>{" "}
+              — it arrives with a red warning banner so it stands
+              out in their Inbox.
+            </span>
+          </label>
+          {note ? (
+            <p
+              role="status"
+              className={`rounded-xl border px-3 py-2.5 text-sm leading-relaxed ${
+                note.ok
+                  ? "border-[var(--border)] text-[var(--text)]"
+                  : "border-red-400/60 bg-red-500/10 text-red-200"
+              }`}
+            >
+              {note.text}
+            </p>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => {
+                hapticTick();
+                setNote(null);
+                sendMut.mutate();
+              }}
+              className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {sendMut.isPending ? "Sending…" : "Send message"}
+            </button>
+            {note?.ok ? (
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTick();
+                  onClose();
+                }}
+                className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-bold text-[var(--text)]"
+              >
+                Back to Inbox
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeckMailView({
   id,
   onClose,
@@ -7719,7 +7961,7 @@ function DeckMailView({
       className="app-shell fixed inset-0 z-[95] overflow-y-auto"
       role="dialog"
       aria-modal="true"
-      aria-label="Deck list mail"
+      aria-label="Mail message"
     >
       <div className="mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center justify-between gap-2">
@@ -7781,6 +8023,17 @@ function DeckMailView({
                 year: "numeric",
               })}
             </p>
+            {/* NOTICE banner (Anthony, Nov 16, 2026): flagged
+                mail opens under a red warning header so the
+                reader sees it before the message itself. */}
+            {data.notice ? (
+              <p className="mt-4 flex items-center gap-2 rounded-2xl border border-red-400/70 bg-red-500/15 px-4 py-3 text-sm font-black tracking-[0.06em] text-red-300">
+                <span aria-hidden="true" className="text-lg">
+                  ⚠
+                </span>
+                NOTICE — please read
+              </p>
+            ) : null}
             <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 font-sans text-sm leading-relaxed text-[var(--text)]">
               {data.body}
             </pre>
@@ -35627,6 +35880,21 @@ export function App() {
     setDeckMailId(refId);
     deckMailWin.open();
   };
+  // The mail composer (Anthony, Nov 16, 2026): opened from
+  // the Inbox's New message button as its own entry above
+  // the Inbox, the same layering as the mail view — Back
+  // from the composer returns to the Inbox.
+  const [composeOpen, setComposeOpen] = useState(false);
+  const composeWin = useOwnEntryWindow("lorcanaMailCompose", (v) => {
+    if (!v) setComposeOpen(false);
+  });
+  const openCompose = () => {
+    setComposeOpen(true);
+    composeWin.open();
+  };
+  const closeCompose = () => {
+    composeWin.close();
+  };
   const closeDeckMail = () => {
     deckMailWin.close();
   };
@@ -37920,6 +38188,7 @@ export function App() {
               onOpenOrder={openInboxOrder}
               onOpenTicket={openInboxTicket}
               onOpenMail={openInboxMail}
+              onCompose={openCompose}
             />
           </div>
         </div>
@@ -37935,6 +38204,9 @@ export function App() {
       ) : null}
       {deckMailId != null ? (
         <DeckMailView id={deckMailId} onClose={closeDeckMail} />
+      ) : null}
+      {composeOpen ? (
+        <MailComposeView onClose={closeCompose} />
       ) : null}
       {welcomeOwed || welcomeReviewOpen ? (
         <WelcomeFlow

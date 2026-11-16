@@ -2831,6 +2831,145 @@ async function publishOwnRegistryProfile(profile: {
   });
 }
 
+/** ----- Shared mailbox (Supabase `vx_documents`, doc_kind "mail") -----
+    Free-form mail delivery (Anthony, Nov 16, 2026): the local
+    mail_messages table only ever existed inside ONE install,
+    so a composed message could never reach a friend's phone.
+    The shared mailbox fixes that without any new tables: the
+    Supabase project's vx_documents table (created Nov 16,
+    2026, transition-open RLS, reachable with the app's
+    existing publishable key) carries one row per message —
+    collector_id = the RECIPIENT's code, doc_kind "mail",
+    doc_id = the message's unique id, payload = the full
+    message (id, from/to codes + usernames, subject, body,
+    createdAt, readAt, notice). The sender writes the shared
+    row plus a local copy; the recipient's app ingests shared
+    rows addressed to their code into their local
+    mail_messages on Inbox open (deduped by the message id),
+    after which the message behaves exactly like deck mail:
+    NEW badge, getMailMessage read-stamp (which also updates
+    the shared row's readAt, best-effort). Deck mail is
+    untouched: it stays local-only, exactly as before. */
+
+type SharedMailPayload = {
+  id: string;
+  fromCode: string;
+  fromUsername: string;
+  toCode: string;
+  toUsername: string;
+  subject: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+  notice: boolean;
+};
+
+/** Writes (or re-writes, on read-stamp) one shared-mail row,
+    upserted on the vx_documents primary key. Returns whether
+    the shared row landed. */
+async function writeSharedMail(
+  payload: SharedMailPayload,
+): Promise<boolean> {
+  const res = await supabaseRest(
+    "vx_documents?on_conflict=collector_id,doc_kind,doc_id",
+    {
+      method: "POST",
+      body: {
+        collector_id: payload.toCode,
+        doc_kind: "mail",
+        doc_id: payload.id,
+        payload,
+      },
+    },
+  );
+  return res.ok;
+}
+
+/** Validates one vx_documents payload as shared mail; returns
+    null for anything malformed (a bad row must never break
+    the Inbox — it is simply not ingested). */
+function asSharedMailPayload(json: unknown): SharedMailPayload | null {
+  if (typeof json !== "object" || json === null) return null;
+  const p = json as Record<string, unknown>;
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.length > 0 ? v : null;
+  const id = str(p.id);
+  const fromCode = str(p.fromCode);
+  const fromUsername = str(p.fromUsername);
+  const toCode = str(p.toCode);
+  const toUsername = str(p.toUsername);
+  const subject = str(p.subject);
+  const body = str(p.body);
+  const createdAt = str(p.createdAt);
+  if (
+    !id ||
+    !fromCode ||
+    !fromUsername ||
+    !toCode ||
+    !toUsername ||
+    !subject ||
+    !body ||
+    !createdAt
+  )
+    return null;
+  return {
+    id,
+    fromCode,
+    fromUsername,
+    toCode,
+    toUsername,
+    subject,
+    body,
+    createdAt,
+    readAt: typeof p.readAt === "string" ? p.readAt : null,
+    notice: p.notice === true,
+  };
+}
+
+/** Pulls every shared-mail row addressed to `me` that this
+    install has not ingested yet and inserts it into the
+    local mail_messages table (dedupe by the message id in
+    shared_id). Best-effort by design: an unreachable shared
+    mailbox leaves the Inbox exactly as it was, and the next
+    open retries. Returns how many messages were ingested. */
+async function ingestSharedMail(ctx: Ctx, me: string): Promise<number> {
+  const res = await supabaseRest(
+    `vx_documents?select=doc_id,payload&collector_id=eq.${encodeURIComponent(me)}&doc_kind=eq.mail&order=doc_id.asc&limit=200`,
+  );
+  if (!res.ok || !Array.isArray(res.json)) return 0;
+  const db = ctx.db<typeof schema>();
+  const local = await db
+    .select({ sharedId: schema.mailMessages.sharedId })
+    .from(schema.mailMessages)
+    .where(eq(schema.mailMessages.toCode, me));
+  const have = new Set(
+    local.map((r) => r.sharedId).filter((s): s is string => s != null),
+  );
+  let added = 0;
+  for (const row of res.json) {
+    if (typeof row !== "object" || row === null) continue;
+    const r = row as Record<string, unknown>;
+    const payload = asSharedMailPayload(r.payload);
+    if (!payload || payload.toCode !== me) continue;
+    if (have.has(payload.id)) continue;
+    have.add(payload.id);
+    await db.insert(schema.mailMessages).values({
+      fromCode: payload.fromCode,
+      fromUsername: payload.fromUsername,
+      toCode: payload.toCode,
+      toUsername: payload.toUsername,
+      subject: payload.subject,
+      body: payload.body,
+      createdAt: payload.createdAt,
+      readAt: payload.readAt,
+      sharedId: payload.id,
+      notice: payload.notice ? 1 : 0,
+    });
+    added += 1;
+  }
+  return added;
+}
+
 /** ----- Cloud collection backup (Supabase `collection_items`) -----
     Anthony approved making Supabase the cloud backup for users'
     collections (Nov 2, 2026): every owned item — cards in every
@@ -9954,7 +10093,7 @@ export const Actions = {
 
   getInbox: defineAction({
     description:
-      "The signed-in collector's personal Inbox (Anthony, Nov 3, 2026): every cash purchase order and trade offer involving them, plus — for the owner — every change-request ticket, as one mail-style list. Each item carries its Subject (Purchase Order / Trade Offer / the ticket's type), who it's From, the latest activity date, a short preview, its status, how many messages in it are unread, and an item-level unread flag for the NEW badge: an item is unread when incoming activity the viewer has not opened yet exists — the other party creating the order/offer, or a message from the other party — judged against the viewer's persisted read marker, so a new reply in an already-read thread makes it unread again. totalUnread counts the unread ITEMS (the NEW-badged rows), matching the Home mail badge. Opening an order item opens that order; opening a ticket item opens that ticket.",
+      "The signed-in collector's personal Inbox (Anthony, Nov 3, 2026): every cash purchase order and trade offer involving them, plus — for the owner — every change-request ticket, as one mail-style list. Opening the Inbox first ingests any shared-mailbox mail addressed to this collector (Anthony, Nov 16, 2026 — free-form mail delivery) into the local mail table, so cross-install messages appear here exactly like deck mail. Each item carries its Subject (Purchase Order / Trade Offer / the ticket's type), who it's From, the latest activity date, a short preview, its status, how many messages in it are unread, and an item-level unread flag for the NEW badge: an item is unread when incoming activity the viewer has not opened yet exists — the other party creating the order/offer, or a message from the other party — judged against the viewer's persisted read marker, so a new reply in an already-read thread makes it unread again. totalUnread counts the unread ITEMS (the NEW-badged rows), matching the Home mail badge. Opening an order item opens that order; opening a ticket item opens that ticket.",
     request: z.object({}),
     response: z.object({
       items: z.array(
@@ -9969,6 +10108,10 @@ export const Actions = {
           status: z.string(),
           unreadCount: z.number(),
           unread: z.boolean(),
+          /** True only on a NOTICE mail message (Anthony,
+              Nov 16, 2026): the Inbox row carries the red
+              warning treatment. False on everything else. */
+          notice: z.boolean(),
         }),
       ),
       totalUnread: z.number(),
@@ -9977,6 +10120,11 @@ export const Actions = {
       const profile = await ensureCollectorProfile(ctx);
       const me = profile.collectorCode;
       const db = ctx.db<typeof schema>();
+      // Shared-mail ingestion (Anthony, Nov 16, 2026):
+      // free-form mail addressed to me on the shared mailbox
+      // lands in my local mail table before the list below
+      // is built, so it shows up in this very response.
+      await ingestSharedMail(ctx, me);
       const [cashRows, tradeRows, readRows, messages] = await Promise.all([
         db.select().from(schema.cashPurchases),
         db.select().from(schema.tradeOffers),
@@ -10057,6 +10205,7 @@ export const Actions = {
         status: string;
         unreadCount: number;
         unread: boolean;
+        notice: boolean;
       };
       const items: InboxItem[] = [];
       for (const p of cashRows) {
@@ -10077,6 +10226,7 @@ export const Actions = {
           // The buyer created the order: for the seller it is
           // incoming activity; for the buyer it is their own.
           unread: itemUnread(p.sellerCode === me ? p.createdAt : null, info),
+          notice: false,
         });
       }
       for (const t of tradeRows) {
@@ -10108,6 +10258,7 @@ export const Actions = {
           // The proposer created the offer: for the partner it
           // is incoming activity; for the proposer their own.
           unread: itemUnread(t.partnerCode === me ? t.createdAt : null, info),
+          notice: false,
         });
       }
       if (me === OWNER_COLLECTOR_CODE) {
@@ -10126,6 +10277,7 @@ export const Actions = {
             status: t.status,
             unreadCount: t.readAt ? 0 : 1,
             unread: !t.readAt,
+            notice: false,
           });
         }
       }
@@ -10145,9 +10297,13 @@ export const Actions = {
           fromUsername: m.fromUsername,
           date: m.createdAt,
           preview: m.body.split("\n").slice(0, 3).join(" · ").slice(0, 140),
-          status: "shared",
+          // Deck lists keep their "shared" status; a
+          // free-form message (shared-mail id present, or
+          // simply not a deck list) reads as a message.
+          status: m.subject.startsWith("Deck list:") ? "shared" : "message",
           unreadCount: m.readAt ? 0 : 1,
           unread: !m.readAt,
+          notice: m.notice === 1,
         });
       }
       // Per-user Inbox deletions (Anthony, Nov 3, 2026): an
@@ -22634,7 +22790,7 @@ export const Actions = {
 
   getMailMessage: defineAction({
     description:
-      "One mail message for its recipient (or its sender): subject, from, date, and the full body text. Opening it as the recipient stamps it read, which clears its NEW badge in the Inbox. Anyone else gets found=false.",
+      "One mail message for its recipient (or its sender): subject, from, date, the full body text, and whether it is a NOTICE message. Opening it as the recipient stamps it read, which clears its NEW badge in the Inbox; for shared-mailbox messages the read stamp is also written back to the shared row (best-effort). Anyone else gets found=false.",
     request: z.object({ id: z.number().int().positive() }),
     response: z.object({
       found: z.boolean(),
@@ -22643,6 +22799,7 @@ export const Actions = {
       toUsername: z.string(),
       date: z.string(),
       body: z.string(),
+      notice: z.boolean(),
     }),
     async handler(ctx, args) {
       const empty = {
@@ -22652,10 +22809,14 @@ export const Actions = {
         toUsername: "",
         date: "",
         body: "",
+        notice: false,
       };
       const profile = await ensureCollectorProfile(ctx);
       const me = profile.collectorCode;
       const db = ctx.db<typeof schema>();
+      // A mail view can be the first surface a fresh shared
+      // message is met on — ingest before resolving the id.
+      await ingestSharedMail(ctx, me);
       const rows = await db
         .select()
         .from(schema.mailMessages)
@@ -22663,11 +22824,29 @@ export const Actions = {
       const msg = rows[0];
       if (!msg || (msg.toCode !== me && msg.fromCode !== me)) return empty;
       if (msg.toCode === me && !msg.readAt) {
+        const readAt = new Date().toISOString();
         await db
           .update(schema.mailMessages)
-          .set({ readAt: new Date().toISOString() })
+          .set({ readAt })
           .where(eq(schema.mailMessages.id, msg.id));
         ctx.invalidateQueries();
+        // Best-effort: mirror the read stamp onto the
+        // shared row so the sender's side (and any other
+        // install of mine) can see it was opened.
+        if (msg.sharedId) {
+          await writeSharedMail({
+            id: msg.sharedId,
+            fromCode: msg.fromCode,
+            fromUsername: msg.fromUsername,
+            toCode: msg.toCode,
+            toUsername: msg.toUsername,
+            subject: msg.subject,
+            body: msg.body,
+            createdAt: msg.createdAt,
+            readAt,
+            notice: msg.notice === 1,
+          });
+        }
       }
       return {
         found: true,
@@ -22676,7 +22855,95 @@ export const Actions = {
         toUsername: msg.toUsername,
         date: msg.createdAt,
         body: msg.body,
+        notice: msg.notice === 1,
       };
+    },
+  }),
+
+  sendMailMessage: defineAction({
+    description:
+      "Sends a free-form mail message from the signed-in collector to any collector on the registry (Anthony, Nov 16, 2026): the message is written to the shared Supabase mailbox (vx_documents, doc_kind 'mail', addressed to the recipient's collector code) so it reaches the recipient's own install, and a copy is kept in the sender's local mail table. An optional caller-supplied messageId makes a retry idempotent — the same id never delivers twice. notice=true flags the message as a NOTICE (red warning banner in the recipient's Inbox and message view). Fails honestly when the recipient isn't on the registry or the shared mailbox can't be reached — nothing is half-sent.",
+    request: z.object({
+      toCode: z.string().min(1).max(40),
+      subject: z.string().trim().min(1).max(200),
+      body: z.string().trim().min(1).max(8000),
+      notice: z.boolean().default(false),
+      messageId: z
+        .string()
+        .trim()
+        .min(1)
+        .max(120)
+        .regex(/^[A-Za-z0-9._-]+$/)
+        .optional(),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      error: z.string().nullable(),
+      messageId: z.string().nullable(),
+    }),
+    async handler(ctx, args) {
+      const fail = (error: string) => ({
+        ok: false,
+        error,
+        messageId: null,
+      });
+      const profile = await ensureCollectorProfile(ctx);
+      const me = profile.collectorCode;
+      if (args.toCode === me)
+        return fail("Pick someone other than yourself.");
+      const db = ctx.db<typeof schema>();
+      const list = await supabaseRest(
+        "profiles?select=collector_id,username&order=created_at.asc",
+      );
+      const registryRows = list.ok ? asRegistryRows(list.json) : [];
+      const recipient = registryRows.find(
+        (r) => r.collector_id === args.toCode,
+      );
+      if (!recipient)
+        return fail("That collector isn't on the network anymore.");
+      const messageId =
+        args.messageId ??
+        `mail-${me}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      const payload: SharedMailPayload = {
+        id: messageId,
+        fromCode: me,
+        fromUsername: profile.username,
+        toCode: recipient.collector_id,
+        toUsername: recipient.username,
+        subject: args.subject,
+        body: args.body,
+        createdAt: new Date().toISOString(),
+        readAt: null,
+        notice: args.notice,
+      };
+      const delivered = await writeSharedMail(payload);
+      if (!delivered)
+        return fail(
+          "Couldn't reach the mail server, so the message wasn't sent. Check your connection and try again.",
+        );
+      // The sender's local copy (their records; it is not an
+      // Inbox item for them — the Inbox lists mail addressed
+      // TO the viewer). Deduped by shared id so an idempotent
+      // retry never stacks copies.
+      const existing = await db
+        .select({ id: schema.mailMessages.id })
+        .from(schema.mailMessages)
+        .where(eq(schema.mailMessages.sharedId, messageId));
+      if (existing.length === 0) {
+        await db.insert(schema.mailMessages).values({
+          fromCode: payload.fromCode,
+          fromUsername: payload.fromUsername,
+          toCode: payload.toCode,
+          toUsername: payload.toUsername,
+          subject: payload.subject,
+          body: payload.body,
+          createdAt: payload.createdAt,
+          sharedId: messageId,
+          notice: payload.notice ? 1 : 0,
+        });
+      }
+      ctx.invalidateQueries();
+      return { ok: true, error: null, messageId };
     },
   }),
 

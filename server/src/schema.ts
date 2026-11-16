@@ -948,7 +948,19 @@ export const changeRequests = sqliteTable("change_requests", {
     deck sharing, simplified at his direction): sharing a
     deck renders it to a plain-text list and mails it here;
     the recipient reads it in their Inbox. One row per
-    message; readAt null = unread for the recipient. */
+    message; readAt null = unread for the recipient.
+    Free-form mail (Anthony, Nov 16, 2026) rides the same
+    table: a composed message is ALSO written to the shared
+    Supabase mailbox (vx_documents, doc_kind "mail",
+    addressed to the recipient's collector code) so it can
+    reach a DIFFERENT install; the recipient's app ingests
+    shared mail into this table on Inbox open. sharedId is
+    that shared message's unique id (the vx_documents
+    doc_id, also stored in its payload) and is the dedupe
+    key for ingestion; null on local-only mail (deck lists
+    and anything from before shared delivery). notice = 1
+    marks a NOTICE message, rendered with the red warning
+    banner in the Inbox and the message view. */
 export const mailMessages = sqliteTable("mail_messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fromCode: text("from_code").notNull(),
@@ -961,6 +973,11 @@ export const mailMessages = sqliteTable("mail_messages", {
   createdAt: text("created_at").notNull(),
   /** ISO instant the recipient opened it; null = unread. */
   readAt: text("read_at"),
+  /** Shared-mailbox message id (migration 0084); null for
+      local-only mail. */
+  sharedId: text("shared_id"),
+  /** 1 = NOTICE message (red warning treatment). */
+  notice: integer("notice").notNull().default(0),
 });
 
 /** Read markers for order message threads (Anthony, Nov 3,
