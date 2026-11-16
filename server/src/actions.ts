@@ -22560,6 +22560,306 @@ export const Actions = {
     },
   }),
 
+  getFriendCollection: defineAction({
+    description:
+      "One real registered collector's profile + collection for the Social friends rail (Nov 16, 2026 — the Social bridge fix): resolves the member from the central registry, counts their confirmed connections and confirmed trades from the server ledgers the same way getProfileSummary does for the owner, and builds their item list from their cloud-backup rows (Supabase collection_items under their collector code) resolved against the local catalog — Lorcana printings by uid + finish with the viewer's own quantity of each exact printing (yourQty, for Trade Match), sealed products, other-game items, and comics. Sharing is enforced here, never bypassed: when the viewer's per-friend switch for this collector is OFF in Settings > Sharing, the collection is withheld (sharingBlocked=true, no items) — the profile identity still resolves so the friend stays visible in Social. An empty cloud backup is an honest empty collection, never filled in. The built-in test friend's items come from his known stock, exactly as the client has always shown them.",
+    request: z.object({
+      collectorCode: z.string().trim().min(1).max(64),
+    }),
+    response: z.object({
+      reachable: z.boolean(),
+      found: z.boolean(),
+      isSelf: z.boolean(),
+      collectorCode: z.string(),
+      username: z.string().nullable(),
+      trustScore: z.number(),
+      joinedAt: z.string().nullable(),
+      connections: z.number(),
+      confirmedTrades: z.number(),
+      sharingBlocked: z.boolean(),
+      items: z.array(profileItem.extend({ yourQty: z.number() })),
+    }),
+    async handler(ctx, args) {
+      const profile = await ensureCollectorProfile(ctx);
+      const db = ctx.db<typeof schema>();
+      const code = args.collectorCode;
+      const isSelf = code === profile.collectorCode;
+      const isJarvis = code === JARVIS_REGISTRY_PROFILE.collector_id;
+      // The per-friend sharing switch (Settings > Sharing):
+      // OFF withholds the collection server-side.
+      const saved = await db.select().from(schema.friendSharing);
+      const sharingBlocked =
+        !isSelf &&
+        !isJarvis &&
+        saved.some((s) => s.friendCode === code && s.share <= 0);
+      // Registry identity (username, trust, join date).
+      const list = await supabaseRest(
+        "profiles?select=collector_id,username,trust_score,created_at&order=created_at.asc",
+      );
+      const rows = list.ok ? asRegistryRows(list.json) : [];
+      const member =
+        rows.find((r) => r.collector_id === code) ?? null;
+      if (!list.ok && !isJarvis && !isSelf) {
+        return {
+          reachable: false,
+          found: false,
+          isSelf,
+          collectorCode: code,
+          username: null,
+          trustScore: 0,
+          joinedAt: null,
+          connections: 0,
+          confirmedTrades: 0,
+          sharingBlocked,
+          items: [],
+        };
+      }
+      if (!member && !isJarvis && !isSelf) {
+        return {
+          reachable: true,
+          found: false,
+          isSelf,
+          collectorCode: code,
+          username: null,
+          trustScore: 0,
+          joinedAt: null,
+          connections: 0,
+          confirmedTrades: 0,
+          sharingBlocked,
+          items: [],
+        };
+      }
+      const username = isSelf
+        ? profile.username
+        : isJarvis
+          ? JARVIS_REGISTRY_PROFILE.username
+          : (member?.username ?? null);
+      const trustScore = isJarvis
+        ? JARVIS_REGISTRY_PROFILE.trust_score
+        : (member?.trust_score ?? 0);
+      const joinedAt = member?.created_at ? member.created_at : null;
+      // Confirmed connections + confirmed trades for THIS
+      // collector, counted from the same server ledgers
+      // getProfileSummary reads for the owner.
+      let connections = 0;
+      let confirmedTrades = 0;
+      const [connectionsRes, trustRes] = await Promise.all([
+        supabaseRest(
+          "connections?select=collector_a,collector_b,status&limit=5000",
+        ),
+        supabaseRest(
+          "trust_events?select=collector_id,event_type&limit=5000",
+        ),
+      ]);
+      if (connectionsRes.ok && Array.isArray(connectionsRes.json)) {
+        for (const raw of connectionsRes.json) {
+          if (typeof raw !== "object" || raw === null) continue;
+          const r = raw as Record<string, unknown>;
+          if (
+            r.status === "confirmed" &&
+            (r.collector_a === code || r.collector_b === code)
+          )
+            connections += 1;
+        }
+      }
+      if (trustRes.ok && Array.isArray(trustRes.json)) {
+        for (const raw of trustRes.json) {
+          if (typeof raw !== "object" || raw === null) continue;
+          const r = raw as Record<string, unknown>;
+          if (
+            r.collector_id === code &&
+            typeof r.event_type === "string" &&
+            r.event_type.toLowerCase().includes("trade")
+          )
+            confirmedTrades += 1;
+        }
+      }
+      if (isJarvis) connections = Math.max(connections, 1);
+      const base = {
+        reachable: true,
+        found: true,
+        isSelf,
+        collectorCode: code,
+        username,
+        trustScore,
+        joinedAt,
+        connections,
+        confirmedTrades,
+        sharingBlocked,
+      };
+      if (sharingBlocked) return { ...base, items: [] };
+      // The viewer's own quantities per exact printing +
+      // finish (yourQty — Trade Match compares printings,
+      // never names).
+      const myCardRows = await db.select().from(schema.cards);
+      const myById = new Map(myCardRows.map((c) => [c.id, c]));
+      const myByUid = new Map(myCardRows.map((c) => [c.uid, c]));
+      const yourQtyOf = (
+        card: (typeof myCardRows)[number],
+        finish: string,
+      ): number => {
+        const finishes = parseFinishes(card.finishes);
+        if (Object.keys(finishes).length > 0)
+          return finishes[finish] ?? 0;
+        return finish === "Regular" ? card.ownedQty : 0;
+      };
+      const itemOf = (
+        card: (typeof myCardRows)[number],
+        finish: string,
+        qty: number,
+      ) => {
+        const prices = parseFinance(card.financeJson);
+        return {
+          key: `card:${card.id}:${finish}`,
+          cardId: card.id,
+          sealedName: null,
+          name: card.fullName,
+          groupName: card.groupName,
+          printed: card.printed,
+          finish,
+          rarity: card.rarity,
+          qty,
+          unitValue: prices[finish]?.value ?? card.marketValue,
+          tradeableQty: null,
+          yourQty: yourQtyOf(card, finish),
+        };
+      };
+      if (isSelf) {
+        const mine = await buildProfileItems(ctx);
+        return {
+          ...base,
+          items: mine.map((i) => ({
+            ...i,
+            yourQty: i.cardId != null ? i.qty : 0,
+          })),
+        };
+      }
+      if (isJarvis) {
+        const items = JARVIS_TRADE_STOCK.flatMap((pick) => {
+          const card = myById.get(pick.cardId);
+          return card ? [itemOf(card, pick.finish, pick.qty)] : [];
+        });
+        return { ...base, items };
+      }
+      // Real member: their collection lives in their cloud
+      // backup (collection_items under their code) — the
+      // same rows their own install writes and restores
+      // from. Nothing local is ever substituted for it.
+      const cloud = await fetchCloudItems(code);
+      if (cloud == null) {
+        return { ...base, reachable: false, items: [] };
+      }
+      const effSealed = await effectiveSealed(ctx);
+      const sealedUnit = new Map(
+        effSealed.items.map((i) => [
+          i.name,
+          i.qty > 0 ? Math.round((i.value / i.qty) * 100) / 100 : null,
+        ]),
+      );
+      const items: (z.infer<typeof profileItem> & {
+        yourQty: number;
+      })[] = [];
+      for (const row of cloud) {
+        if (row.qty <= 0 || row.kind === "journal") continue;
+        if (row.kind === "card") {
+          // item_key: card:<uid>:<finish> — the uid itself
+          // contains a colon, so the finish is the segment
+          // after the LAST colon; scene rows carry the
+          // __scene__ marker inside that segment.
+          const rest = row.item_key.startsWith("card:")
+            ? row.item_key.slice("card:".length)
+            : "";
+          const cut = rest.lastIndexOf(":");
+          if (cut <= 0) continue;
+          const uid = rest.slice(0, cut);
+          let finish = rest.slice(cut + 1);
+          if (finish.startsWith(CLOUD_SCENE_PREFIX))
+            finish = finish.slice(CLOUD_SCENE_PREFIX.length);
+          if (!finish) continue;
+          const card = myByUid.get(uid);
+          if (!card) continue;
+          items.push({ ...itemOf(card, finish, row.qty), key: row.item_key });
+        } else if (row.kind === "sealed") {
+          const name = row.display_name ?? row.item_key.replace(/^sealed:/, "");
+          items.push({
+            key: row.item_key,
+            cardId: null,
+            sealedName: name,
+            name,
+            groupName:
+              typeof row.meta?.set === "string" ? row.meta.set : "Sealed",
+            printed: null,
+            finish: "Sealed",
+            rarity: "Sealed",
+            qty: row.qty,
+            unitValue: sealedUnit.get(name) ?? null,
+            tradeableQty: null,
+            yourQty: 0,
+          });
+        } else if (row.kind === "game") {
+          const gid =
+            typeof row.meta?.gameCardId === "number"
+              ? row.meta.gameCardId
+              : Number(row.item_key.replace(/^game:/, "").split(":")[0]);
+          let unitValue: number | null = null;
+          let groupName =
+            typeof row.meta?.section === "string"
+              ? row.meta.section
+              : "Collection";
+          if (Number.isFinite(gid)) {
+            const grows = await db
+              .select()
+              .from(schema.gameCards)
+              .where(eq(schema.gameCards.id, gid))
+              .limit(1);
+            if (grows[0]) {
+              unitValue = grows[0].price;
+              groupName = grows[0].sectionName;
+            }
+          }
+          items.push({
+            key: row.item_key,
+            cardId: null,
+            sealedName: null,
+            name: row.display_name ?? "Item",
+            groupName,
+            printed:
+              typeof row.meta?.printed === "string"
+                ? row.meta.printed
+                : null,
+            finish: row.meta?.sealed === true ? "Sealed" : "Regular",
+            rarity: null,
+            qty: row.qty,
+            unitValue,
+            tradeableQty: null,
+            yourQty: 0,
+          });
+        } else if (row.kind === "comic" || row.kind === "slab") {
+          items.push({
+            key: row.item_key,
+            cardId: null,
+            sealedName: null,
+            name: row.display_name ?? "Item",
+            groupName: row.kind === "comic" ? "Graded Comics" : "Graded Slabs",
+            printed: null,
+            finish: row.kind === "comic" ? "Graded" : "Slab",
+            rarity: null,
+            qty: row.qty,
+            unitValue: null,
+            tradeableQty: null,
+            yourQty: 0,
+          });
+        }
+      }
+      items.sort(
+        (a, b) =>
+          (b.unitValue ?? 0) * b.qty - (a.unitValue ?? 0) * a.qty ||
+          a.name.localeCompare(b.name),
+      );
+      return { ...base, items: items.slice(0, PROFILE_ITEMS_CAP) };
+    },
+  }),
+
   submitChangeRequest: defineAction({
     description:
       "Opens a change-request TICKET for the developer (Anthony, Nov 3, 2026 — the ticket system that replaced the email model): a type (change request, bug, or idea) plus a text message from the Settings form, with an optional screenshot (Anthony, Nov 4, 2026 — bug-form photo upload; JPEG bytes as base64, stored in blob storage so the photo travels with the ticket for the admin and the sender). Stamped server-side with the sender's username, Collector ID, and date; the ticket starts Open and unassigned, the sender can follow it under Your tickets in Settings, and Anthony works it from his ticket list. Returns the new ticket's number.",

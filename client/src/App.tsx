@@ -27348,6 +27348,327 @@ function JarvisFriendProfile({
   );
 }
 
+/** A real registered collector's profile in the shared Vault X
+    profile layout (Nov 16, 2026 — the Social bridge fix: the
+    pinned Friends rail used to hold only the built-in Jarvis
+    slot, so real members like cheesemonger — visible in
+    Settings > Sharing from the same registry — never appeared
+    in Social at all). Everything on this page comes from the
+    server's getFriendCollection: the member's registry
+    identity, their confirmed connections/trades, and their
+    collection as backed up to the cloud under their own
+    collector code, resolved against the catalog. When the
+    viewer's per-friend sharing switch for this collector is
+    OFF, the server withholds the collection and this page
+    says so plainly instead of showing it. An empty backup is
+    an honest empty collection. */
+function MemberFriendProfile({
+  collectorCode,
+  fallbackUsername,
+  onBack,
+  onOpenCard,
+  onWantItem,
+  onCashItem,
+  cartCounts,
+}: {
+  collectorCode: string;
+  fallbackUsername: string;
+  onBack: () => void;
+  onOpenCard: (cardId: number) => void;
+  onWantItem?: (item: ProfileItemView) => void;
+  onCashItem?: (item: ProfileItemView) => void;
+  cartCounts?: Map<string, { trade: number; cash: number }>;
+}) {
+  const [tab, setTab] = useState<"collection" | "trade">("collection");
+  const [badgesOpen, setBadgesOpen] = useState(false);
+  const [decksOpen, setDecksOpen] = useState(false);
+  const badgesSheet = useHistorySheet("lorcanaBadges", setBadgesOpen);
+  const decksSheet = useHistorySheet("lorcanaDecks", setDecksOpen);
+  const [libraryOpen, setLibraryOpen] = useState(
+    () => readHistoryState()?.lorcanaLibrary === true,
+  );
+  const librarySheet = useHistorySheet(
+    "lorcanaLibrary",
+    setLibraryOpen,
+    readHistoryState()?.lorcanaLibrary === true,
+  );
+  const binderCatalog = useQuery({
+    queryKey: ["binder"],
+    queryFn: () => api.getBinder({}),
+  });
+  const [query, setQuery] = useState("");
+  const [group, setGroup] = useState("all");
+  const [sort, setSort] = useState<ProfileSort>("value");
+  const [filter, setFilter] = useState<ProfileFilter>("all");
+  const friendQ = useQuery({
+    queryKey: ["friendCollection", collectorCode],
+    queryFn: () => api.getFriendCollection({ collectorCode }),
+  });
+  const memberDecks = useQuery({
+    queryKey: ["displayedDecks", collectorCode],
+    queryFn: () => api.getDisplayedDecks({ ownerCode: collectorCode }),
+  });
+  const registry = useQuery({
+    queryKey: ["registryMembers"],
+    queryFn: () => api.getRegistryMembers({}),
+  });
+  const data = friendQ.data;
+  const displayName =
+    data?.username ?? fallbackUsername.replace(/^@/, "");
+  const handle = displayName;
+  const initial =
+    displayName.replace(/^@/, "").charAt(0).toUpperCase() || "C";
+  const items: ProfileItemView[] = data?.items ?? [];
+  const shownItems = useMemo(
+    () => matchProfileItems(items, query, group, filter, sort),
+    [items, query, group, filter, sort],
+  );
+  const itemGroups = useMemo(
+    () => [...new Set(items.map((c) => c.groupName))].sort(),
+    [items],
+  );
+  const registryMember = registry.data?.members.find(
+    (m) => m.collectorId === collectorCode,
+  );
+  const founder = useMemo(() => {
+    const members = registry.data?.members ?? [];
+    const joined = data?.joinedAt ?? registryMember?.createdAt;
+    if (!joined || members.length === 0) return false;
+    const earliest = Math.min(
+      ...members.map((m) => new Date(m.createdAt).getTime()),
+    );
+    const mine = new Date(joined).getTime();
+    return (
+      Number.isFinite(earliest) &&
+      Number.isFinite(mine) &&
+      mine - earliest <= 45 * 24 * 60 * 60 * 1000
+    );
+  }, [registry.data, registryMember, data?.joinedAt]);
+  const copies = items.reduce((s, c) => s + c.qty, 0);
+  const value = items.reduce(
+    (s, c) => s + (c.unitValue ?? 0) * c.qty,
+    0,
+  );
+  const badgeStates = evaluateBadges({
+    founder,
+    totalItems: copies,
+    setsCompleted: 0,
+    ownsEnchanted: items.some((i) => i.rarity === "Enchanted"),
+    ownsIconic: items.some((i) => i.rarity === "Iconic"),
+    sealedCount: items
+      .filter((i) => i.sealedName != null)
+      .reduce((s, i) => s + i.qty, 0),
+    comicsCount: 0,
+    confirmedTrades: data?.confirmedTrades ?? 0,
+    trustScore: data?.trustScore ?? 0,
+    confirmedConnections: data?.connections ?? 0,
+  });
+  const payload = `Vault X\nCollector: @${handle}\nID: ${collectorCode}`;
+  const counts = new Map<string, number>();
+  for (const it of items) {
+    counts.set(it.groupName, (counts.get(it.groupName) ?? 0) + it.qty);
+  }
+  const shelfGroups = [...counts.keys()].map((name) => ({ key: name }));
+  const libraryEntries: LibraryEntry[] = (
+    binderCatalog.data?.groups ?? []
+  )
+    .filter((g) => g.kind !== "puzzle")
+    .filter(
+      (g) =>
+        (g.kind !== "set" &&
+          g.kind !== "promo" &&
+          g.kind !== "quest") ||
+        (counts.get(g.name) ?? 0) > 0,
+    )
+    .map((g) => ({
+      id: g.name,
+      spineLabel:
+        g.kind === "set"
+          ? String(setNumberOf(g) ?? "")
+          : g.label.replace(/^Quest /, ""),
+      title: g.name,
+      detail: `${g.label} binder`,
+      owned: counts.get(g.name) ?? 0,
+      total: null,
+      canOpen: (counts.get(g.name) ?? 0) > 0,
+      section:
+        g.kind === "promo"
+          ? ("promos" as const)
+          : g.kind === "quest"
+            ? ("quests" as const)
+            : ("chapters" as const),
+    }));
+  return (
+    <section
+      aria-label={`${displayName} profile`}
+      className="mt-2"
+    >
+      <ProfileHeader
+        onBack={onBack}
+        backLabel="Back to friends list"
+        avatar={
+          <LetterAvatar
+            initial={initial}
+            className="h-24 w-24 text-4xl ring-4 ring-[var(--bg)]"
+          />
+        }
+        displayName={displayName}
+        handle={handle}
+        bio={null}
+        joined={joinedLabel(data?.joinedAt ?? registryMember?.createdAt)}
+        statValue={data ? fmtUSD(value) : "—"}
+        statCollected={data ? String(copies) : "—"}
+        trustScore={data?.trustScore ?? 0}
+        connections={data?.connections ?? 0}
+        collectorCode={collectorCode}
+        qrPayload={payload}
+        badges={badgeStates}
+        onOpenBadges={badgesSheet.openSheet}
+        onOpenDecks={decksSheet.openSheet}
+        shelfGroups={shelfGroups}
+        profileDecks={memberDecks.data?.decks ?? []}
+        onOpenDeckBox={(deck) => {
+          try {
+            window.sessionStorage.setItem(
+              "vaultxOpenDeckId",
+              String(deck.id),
+            );
+          } catch {
+            /* private mode */
+          }
+          decksSheet.openSheet();
+        }}
+        onOpenLibrary={librarySheet.openSheet}
+      />
+      {friendQ.isPending ? (
+        <p className="mt-3 px-1 text-sm text-[var(--dim)]" role="status">
+          Loading {displayName}&rsquo;s profile from the server…
+        </p>
+      ) : data && !data.reachable ? (
+        <p
+          className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
+          role="status"
+        >
+          Couldn&rsquo;t reach the Vault X server just now, so{" "}
+          {displayName}&rsquo;s collection can&rsquo;t be loaded.
+          Their profile stays in your Friends list above — try
+          again in a bit.
+        </p>
+      ) : data && !data.found ? (
+        <p
+          className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
+          role="status"
+        >
+          This collector isn&rsquo;t on the server anymore.
+        </p>
+      ) : data?.sharingBlocked ? (
+        <p
+          className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--dim)]"
+          role="status"
+        >
+          Sharing is off for {displayName} — you turned their
+          switch off in Settings &gt; Sharing, so their
+          collection is hidden here too. Turn it back on there
+          to see each other&rsquo;s collections again.
+        </p>
+      ) : data ? (
+        <>
+          <div
+            role="tablist"
+            aria-label={`${displayName} profile sections`}
+            className="mt-2.5 grid grid-cols-2 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1"
+          >
+            {(
+              [
+                ["collection", "Collection"],
+                ["trade", "Trade Match"],
+              ] as const
+            ).map(([value2, label]) => (
+              <button
+                key={value2}
+                type="button"
+                role="tab"
+                aria-selected={tab === value2}
+                onClick={() => {
+                  if (tab === value2) return;
+                  hapticTick();
+                  setTab(value2);
+                }}
+                className={`rounded-full px-3 py-2 text-sm font-semibold ${
+                  tab === value2
+                    ? "bg-[var(--accent)] text-[var(--on-accent)]"
+                    : "text-[var(--dim)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === "collection" ? (
+            <ProfileCollectionSection
+              total={items.length}
+              groups={itemGroups}
+              query={query}
+              onQueryChange={setQuery}
+              group={group}
+              onGroupChange={setGroup}
+              sort={sort}
+              onSortChange={setSort}
+              filter={filter}
+              onFilterChange={setFilter}
+              items={shownItems}
+              loading={friendQ.isPending}
+              emptyText={`${displayName} hasn't added anything to their collection yet — when they do, it shows up here.`}
+              onOpenCard={onOpenCard}
+              onWantItem={onWantItem}
+              onCashItem={onCashItem}
+              cartCounts={cartCounts}
+            />
+          ) : (
+            <TradeMatchView
+              friendName={displayName}
+              friendItems={items}
+              friendLoading={friendQ.isPending}
+              onOpenCard={onOpenCard}
+              onWantItem={onWantItem}
+              onCashItem={onCashItem}
+              cartCounts={cartCounts}
+            />
+          )}
+        </>
+      ) : null}
+      {libraryOpen ? (
+        <LibraryPage
+          ownerName={displayName}
+          entries={libraryEntries}
+          onClose={librarySheet.closeSheet}
+          onOpenEntry={(entry) => {
+            librarySheet.closeSheet();
+            setGroup(entry.id);
+            setTab("collection");
+          }}
+        />
+      ) : null}
+      {badgesOpen ? (
+        <AchievementsSheet
+          states={badgeStates}
+          ownerLabel={`${displayName}’s`}
+          onClose={badgesSheet.closeSheet}
+        />
+      ) : null}
+      {decksOpen ? (
+        <DecksSheet
+          heading={`${displayName}’s Decks`}
+          ownerName={displayName}
+          ownerCode={collectorCode}
+          isOwn={false}
+          onClose={decksSheet.closeSheet}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 /** Jarvis as a friend inside the app (Anthony's request, Nov 2,
     2026: "build this app within yourself, create yourself as a
     friend... just give yourself a couple cards... we'll see how
@@ -34122,15 +34443,50 @@ function SocialPanel({
   useEffect(() => {
     if (!pendingArea) return;
     setArea(pendingArea);
-    setFriendOpen(false);
+    setSelectedFriend(null);
     setCheckoutPage(false);
     onConsumePendingArea?.();
   }, [pendingArea]);
-  // Jarvis's profile opens in the swap area below the selector
+  // A friend's profile opens in the swap area below the selector
   // (Anthony, Nov 4, 2026): main-flow navigation, so it replaces
   // the single app entry; the sync below restores it from the
   // entry's state, and the on-screen back control closes it.
-  const [friendOpen, setFriendOpen] = useState(false);
+  // Which friend is open is a COLLECTOR CODE, not a boolean
+  // (Nov 16, 2026 — the Social bridge fix): the rail used to be
+  // hard-wired to the Jarvis test profile, so real registered
+  // collectors never appeared in Social even though Settings >
+  // Sharing listed them from the same registry. The code is
+  // what history's socialFriend carries, so Back and refresh
+  // restore the exact friend who was open.
+  const [selectedFriend, setSelectedFriend] = useState<string | null>(
+    null,
+  );
+  const friendOpen = selectedFriend != null;
+  // The friends rail's source — the SAME list Settings >
+  // Sharing renders (getSharingSettings: every registry member
+  // minus the owner, the built-in test friend always present,
+  // per-friend share switches). One react-query cache entry
+  // feeds both places, so the two lists can never drift apart
+  // again.
+  const sharingFriends = useQuery({
+    queryKey: ["sharingSettings"],
+    queryFn: () => api.getSharingSettings({}),
+  });
+  const railFriends = useMemo(() => {
+    const all = sharingFriends.data?.friends ?? [];
+    const jarvis =
+      all.find((f) => f.code === JARVIS_FRIEND.collectorCode) ?? null;
+    const rest = all.filter(
+      (f) => f.code !== JARVIS_FRIEND.collectorCode,
+    );
+    return { jarvis, rest };
+  }, [sharingFriends.data]);
+  const selectedRailFriend =
+    selectedFriend != null
+      ? (sharingFriends.data?.friends ?? []).find(
+          (f) => f.code === selectedFriend,
+        ) ?? null
+      : null;
   // Trade and cash carts (Anthony's cart design, Nov 2, 2026,
   // late — supersedes per-card instant execution): the split
   // button's blue side adds a card to the trade cart, the green
@@ -34320,8 +34676,17 @@ function SocialPanel({
           ? st.socialArea
           : "trades",
       );
-      const open = st.socialFriend === "jarvis";
-      setFriendOpen(open);
+      // socialFriend carries the open friend's collector code
+      // (Nov 16, 2026); entries written before the bridge fix
+      // carry the literal "jarvis" for the test friend and are
+      // still honored as his code.
+      setSelectedFriend(
+        st.socialFriend === "jarvis"
+          ? JARVIS_FRIEND.collectorCode
+          : typeof st.socialFriend === "string" && st.socialFriend
+            ? st.socialFriend
+            : null,
+      );
     };
     syncFromHistory();
     window.addEventListener("popstate", syncFromHistory);
@@ -34338,8 +34703,8 @@ function SocialPanel({
   // entry Back lands on, so one Back lands back on the Social
   // area underneath, and the on-screen back control consumes
   // the same pushed entry through history.back().
-  const openFriend = () => {
-    setFriendOpen(true);
+  const openFriend = (code: string) => {
+    setSelectedFriend(code);
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       window.history.pushState(
@@ -34347,7 +34712,7 @@ function SocialPanel({
           ...(readNavState() ?? {}),
           mcView: "social",
           socialArea: area,
-          socialFriend: "jarvis",
+          socialFriend: code,
         },
         "",
       );
@@ -34356,22 +34721,30 @@ function SocialPanel({
       // on-screen back remains the way back.
     }
   };
+  const openJarvis = () => openFriend(JARVIS_FRIEND.collectorCode);
   const closeFriend = () => {
     try {
-      if (readNavState()?.socialFriend === "jarvis") {
+      const current = readNavState()?.socialFriend;
+      if (
+        typeof current === "string" &&
+        current &&
+        (current === selectedFriend ||
+          (current === "jarvis" &&
+            selectedFriend === JARVIS_FRIEND.collectorCode))
+      ) {
         window.history.back();
         return;
       }
     } catch {
       // Fall through to the in-place close.
     }
-    setFriendOpen(false);
+    setSelectedFriend(null);
   };
   // Area tabs are main-flow navigation (three-back rule,
   // Anthony, Nov 4, 2026): replace, never push.
   const pickArea = (key: "forums" | "trades" | "market") => {
     if (key === area && !friendOpen) return;
-    setFriendOpen(false);
+    setSelectedFriend(null);
     setArea(key);
     window.scrollTo({ top: 0, behavior: "smooth" });
     replaceNavState({ mcView: "social", socialArea: key });
@@ -34452,7 +34825,7 @@ function SocialPanel({
             <button
               type="button"
               onClick={() => {
-                openFriend();
+                openJarvis();
               }}
               className="mt-2 w-full rounded-full border border-[var(--accent)]/60 px-4 py-2.5 text-sm font-bold text-[var(--gold-soft)]"
             >
@@ -34510,12 +34883,15 @@ function SocialPanel({
         <ul className="mt-2.5 flex gap-3 overflow-x-auto pb-1">
           {/* Rail slot widened Nov 9, 2026 so the renamed
               "Jarvis (Test)" label fits in full instead of
-              truncating. */}
+              truncating. Jarvis stays the FIRST slot, exactly
+              as before (Nov 16, 2026 bridge fix) — every real
+              registered member from the same list Settings >
+              Sharing shows follows him in the rail. */}
           <li className="w-24 shrink-0">
             <button
               type="button"
               onClick={() => {
-                openFriend();
+                openJarvis();
               }}
               aria-label={`Open ${JARVIS_FRIEND.displayName}'s profile — your assistant, built into the app as a friend`}
               className="flex w-full flex-col items-center gap-1.5"
@@ -34543,7 +34919,47 @@ function SocialPanel({
               </span>
             </button>
           </li>
+          {railFriends.rest.map((f) => {
+            const label = f.username.replace(/^@/, "");
+            const initial = label.charAt(0).toUpperCase() || "C";
+            return (
+              <li key={f.code} className="w-28 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    openFriend(f.code);
+                  }}
+                  aria-label={`Open ${label}'s profile`}
+                  className="flex w-full flex-col items-center gap-1.5"
+                >
+                  <LetterAvatar
+                    initial={initial}
+                    className="h-9 w-9 text-sm"
+                  />
+                  <span className="flex w-full items-center justify-center gap-1 text-center text-xs font-semibold text-[var(--text)]">
+                    <span className="truncate">{label}</span>
+                    <VerifiedBadge
+                      collectorCode={f.code}
+                      username={label}
+                      className="h-3.5 w-3.5"
+                    />
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
+        {sharingFriends.isPending ? (
+          <p className="mt-1 text-xs text-[var(--dim)]" role="status">
+            Loading your friends from the server…
+          </p>
+        ) : sharingFriends.isError ? (
+          <p className="mt-1 text-xs text-[var(--dim)]" role="status">
+            Couldn&rsquo;t load the rest of your friends just
+            now — {JARVIS_FRIEND.displayName} is built in and
+            always here.
+          </p>
+        ) : null}
       </div>
 
       {/* Area tabs — Trades / Marketplace / Forums swap in
@@ -34617,14 +35033,25 @@ function SocialPanel({
       {/* A friend's profile, opened from the pinned Friends rail
           (Anthony, Nov 4, 2026): it renders in the swap area in
           place of the selected area, main-flow navigation with no
-          history stacking. The single entry is Jarvis himself,
-          built into the app as a friend at Anthony's request: a
-          full working example of how a friend looks, what their
-          profile shows, and how the two of you view each other's
-          collections. (Add a friend by code moved up under the
-          Social heading, Nov 3, 2026, late.) */}
-      {friendOpen ? (
+          history stacking. Jarvis's slot opens his built-in
+          profile exactly as before; a real member's slot opens
+          THAT member's profile (Nov 16, 2026 bridge fix), fed by
+          getFriendCollection from their registry row and their
+          cloud-backed collection. (Add a friend by code moved up
+          under the Social heading, Nov 3, 2026, late.) */}
+      {selectedFriend === JARVIS_FRIEND.collectorCode ? (
         <JarvisFriendProfile
+          onBack={closeFriend}
+          onOpenCard={onOpenCard}
+          onWantItem={startWant}
+          onCashItem={startCash}
+          cartCounts={cartCounts}
+        />
+      ) : selectedFriend != null ? (
+        <MemberFriendProfile
+          key={selectedFriend}
+          collectorCode={selectedFriend}
+          fallbackUsername={selectedRailFriend?.username ?? selectedFriend}
           onBack={closeFriend}
           onOpenCard={onOpenCard}
           onWantItem={startWant}
@@ -34642,7 +35069,7 @@ function SocialPanel({
           <div key="market" className="vx-flow-in">
             <MarketplacePanel
               onOpenJarvisProfile={() => {
-                openFriend();
+                openJarvis();
               }}
             />
           </div>

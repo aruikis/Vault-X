@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.130.0
+
+- Fixed: the Social tab's Friends rail now shows your real friends, not just the built-in Jarvis (Test) friend. The rail reads the same friend list as Settings > Sharing, so every registered collector you are connected with — cheesemonger included — appears next to Jarvis, and tapping them opens THEIR profile and collection (the cards backed up under their own Collector ID), with Trade Match against your collection. If you turn a friend's switch off in Settings > Sharing, their collection is hidden here too, exactly as the switch promises. Jarvis (Test) is unchanged and still first in the rail.
+
 ## v1.129.0
 
 - New: shared Vault X mail. The Inbox gains a "+ New message" composer: pick any collector on the registry, write a subject and a plain message, and it is delivered through the shared mailbox (Supabase `vx_documents`) into THEIR Vault X Inbox on their own device — free-form mail used to exist only inside a single install. Messages can be flagged as a NOTICE, which arrives under a red ⚠ warning banner in the Inbox list and at the top of the message so it cannot be missed. Deck-list sharing by mail works exactly as before. This release is the mail feature carried onto the scrubbed v1.127.0 base: a fresh install still starts completely empty, and shared mail is the only addition.
