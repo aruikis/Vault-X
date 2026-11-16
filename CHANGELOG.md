@@ -2,6 +2,10 @@
 
 All notable changes to Vault X, newest first. These notes match the in-app changelog shown by Check for Update.
 
+## v1.127.0
+
+- Privacy fix for shared copies: Vault X installed from the shared link now starts completely empty. Shared copies used to come pre-loaded with a snapshot of the original owner's collection (about 9,500 items from November 1) — that data has been removed from the shared source, along with the owner's finance history and personal deck list. A fresh install now contains nothing from anyone's collection: you register, and you build your own collection from scratch. The only way to see another collector's collection is to friend them inside the app, exactly as before. The original owner's own app and collection are unchanged.
+
 ## v1.126.0
 
 - A new theme joins the picker in Settings: Clubhouse Brass — the Clubhouse Poker Room look, brought over to Vault X just to see how it wears. Deep slate panels, warm brass lines and highlights (the bottom menu's selected tab glows brass too), letterspaced headings, and a soft warm glow rising from the bottom of cards. It pairs with either layout, Classic or New Vision, your choice saves to your profile like the other themes, and Vault Dark is still the default — every other theme works exactly as before.

@@ -2,12 +2,13 @@
 //
 // Data flow: seedBinder loads the bundled catalog snapshot
 // (server/src/data/catalog.ts — every printed Lorcana card: main sets 1-14,
-// all promo families, Illumineer's Quest sets) joined with Anthony's
-// ownership from his Nov 1 2026 Shiny export (server/src/data/ownership.ts,
-// regenerated with per-finish value/paid — Regular and Cold Foil share one
-// TCGplayer id in Shiny but carry different prices). On later loads the
-// seed only backfills price fields from that export and seeds the finance
-// history snapshots; it never overwrites ownership counts edited in the UI.
+// all promo families, Illumineer's Quest sets) joined with the bundled
+// ownership seed (server/src/data/ownership.ts). In this shared source
+// that seed is EMPTY (v1.127.0 privacy fix — see AGENTS.md, "Privacy:
+// personal data files"): a fresh install starts with no collection and
+// each collector builds their own. On later loads the seed only
+// backfills price fields and seeds the finance history snapshots; it
+// never overwrites ownership counts edited in the UI.
 //
 // Pockets: like Anthony's physical binders, a card number gets two adjacent
 // pockets — regular first, foil next to it — each owned/ghosted on its own
@@ -8982,7 +8983,7 @@ async function runPriceAuditImpl(
 export const Actions = {
   seedBinder: defineAction({
     description:
-      "Seeds the binder once with the full Lorcana card catalog and Anthony's ownership from his Nov 1 2026 Shiny export; on later loads it only backfills per-finish price data and the finance history snapshots, never overwriting ownership counts.",
+      "Seeds the binder once with the full Lorcana card catalog and the bundled ownership seed (empty in this shared source, so a fresh install starts with no collection); on later loads it only backfills per-finish price data and the finance history snapshots, never overwriting ownership counts.",
     request: z.object({}),
     response: seedResponse,
     async handler(ctx): Promise<z.infer<typeof seedResponse>> {
@@ -10257,7 +10258,7 @@ export const Actions = {
 
   getSealed: defineAction({
     description:
-      "Returns Anthony's sealed products from his latest Shiny export (booster boxes, prerelease box, booster packs) with quantity, market value, and amount paid per item, plus sealed totals.",
+      "Returns the collector's sealed products (booster boxes, prerelease box, booster packs) with quantity, market value, and amount paid per item, plus sealed totals.",
     request: z.object({}),
     response: z.object({
       items: z.array(
@@ -10352,8 +10353,8 @@ export const Actions = {
       ).filter((s) => s.source !== "sync");
       const asOfLabel =
         snaps.length > 0
-          ? (snaps[snaps.length - 1]?.label ?? "Nov 1 (latest)")
-          : "Nov 1 (latest)";
+          ? (snaps[snaps.length - 1]?.label ?? "Latest")
+          : "Latest";
       return {
         name: item.name,
         setName: item.setName,
@@ -10588,8 +10589,8 @@ export const Actions = {
         .orderBy(asc(schema.financeSnapshots.id))).filter((s) => s.source !== "sync");
       const asOfLabel =
         snaps.length > 0
-          ? (snaps[snaps.length - 1]?.label ?? "Nov 1 (latest)")
-          : "Nov 1 (latest)";
+          ? (snaps[snaps.length - 1]?.label ?? "Latest")
+          : "Latest";
       return {
         id: row.id,
         fullName: row.fullName,
@@ -12754,8 +12755,8 @@ export const Actions = {
       return {
         asOfLabel:
           history.length > 0
-            ? (history[history.length - 1]?.label ?? "Nov 1 (latest)")
-            : "Nov 1 (latest)",
+            ? (history[history.length - 1]?.label ?? "Latest")
+            : "Latest",
         cards,
         value: round2(value),
         paid: round2(paid),
@@ -21973,7 +21974,7 @@ export const Actions = {
 
   createVillageAggroDeck: defineAction({
     description:
-      "Creates Anthony's locked 60-card Village Aggro deck (Amber/Emerald) in his My Decks, on display, from the exact list he approved Nov 3, 2026: each named card is resolved to a printing he owns enough copies of (an Amber/Emerald printing preferred, then the printing he owns most of), and each used quantity is assigned in 'Where it lives' to the 'Village Aggro' deck location, leaving other copies' locations untouched. Idempotent: if the deck already exists, it is reported and nothing is changed or duplicated.",
+      "Creates the bundled Village Aggro deck in the caller's My Decks from the bundled list (server/src/data/villageAggroDeck.ts), resolving each named card to a printing the caller owns enough copies of. In this shared source the bundled list is EMPTY (v1.127.0 privacy fix), so the action reports that there is no bundled deck to create and changes nothing.",
     request: z.object({}),
     response: z.object({
       ok: z.boolean(),
@@ -21994,6 +21995,13 @@ export const Actions = {
         inventoryValue: 0,
         error,
       });
+      // Shared-source guard (v1.127.0): the bundled list is empty in
+      // shared installs — never create an empty personal deck there.
+      if (VILLAGE_AGGRO_LIST.length === 0) {
+        return fail(
+          "This copy of Vault X has no bundled deck list — the Village Aggro list is a personal deck and is not included in shared installs. Nothing was created.",
+        );
+      }
       const existing = await db
         .select()
         .from(schema.decks)
